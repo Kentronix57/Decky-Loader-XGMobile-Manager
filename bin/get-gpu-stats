@@ -1,0 +1,22 @@
+#!/bin/bash
+# Returns JSON formatted stats for the frontend
+
+if lsmod | grep -q "nvidia"; then
+    # Query NVIDIA via nvidia-smi (if installed) or sysfs
+    TEMP=$(/usr/bin/nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo "0")
+    UTIL=$(/usr/bin/nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo "0")
+    VRAM=$(/usr/bin/nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null || echo "0")
+    POWER=$(/usr/bin/nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null || echo "0")
+    
+    echo "{\"vendor\": \"nvidia\", \"temp\": \"$TEMP°C\", \"util\": \"$UTIL%\", \"vram\": \"${VRAM}MB\", \"power\": \"${POWER}W\"}"
+
+elif lsmod | grep -q "amdgpu"; then
+    # Query AMD via sysfs (Standard Linux paths)
+    # Note: card1 is the eGPU
+    TEMP_INPUT=$(cat /sys/class/drm/card1/device/hwmon/hwmon*/temp1_input 2>/dev/null || echo "0")
+    TEMP=$((TEMP_INPUT / 1000))
+    # TODO: Add logic for AMD power/util if card1 exists
+    echo "{\"vendor\": \"amd\", \"temp\": \"$TEMP°C\", \"util\": \"TBD\", \"vram\": \"TBD\", \"power\": \"TBD\"}"
+else
+    echo "{\"vendor\": \"none\"}"
+fi

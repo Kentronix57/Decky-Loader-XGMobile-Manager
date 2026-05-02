@@ -1,0 +1,75 @@
+#!/bin/bash
+VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
+exec > "/tmp/egpu_eject_${VENDOR}.log" 2>&1
+
+echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"
+
+# Stop UI
+# We must kill the session before we pull the rug out from the hardware
+echo "Stopping SDDM..."
+systemctl stop sddm
+
+echo "Sanitizing /etc/environment..."
+sed -i '/MESA_VK_DEVICE_SELECT/d' /etc/environment
+sed -i '/VK_ICD_FILENAMES/d' /etc/environment
+sed -i '/WLR_DRM_DEVICES/d' /etc/environment
+sed -i '/VK_LOADER_LAYERS_DISABLE/d' /etc/environment
+sed -i '/GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT/d' /etc/environment
+
+if [ "$VENDOR" == "nvidia" ]; then
+  # De-Fanging Configs
+  echo "De-fanging NVIDIA configs to protect AMD Handheld Mode..."
+  steamos-readonly disable
+  mkdir -p /home/deck/xgmobile_configs_backup
+  mv /usr/share/glvnd/egl_vendor.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
+  mv /usr/share/vulkan/implicit_layer.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
+  mv /usr/share/vulkan/explicit_layer.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
+  mv /usr/share/vulkan/icd.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
+  mv /usr/share/X11/xorg.conf.d/10-nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
+  steamos-readonly enable
+  
+  # Environment Cleanup (System-Wide)
+  # We unset the exact variables we set in the enable script
+  echo "Removing environment variables from volitile memory..."
+  systemctl unset-environment MESA_VK_DEVICE_SELECT
+  systemctl unset-environment VK_ICD_FILENAMES
+  systemctl unset-environment WLR_DRM_DEVICES
+  systemctl unset-environment VK_LOADER_LAYERS_DISABLE
+  systemctl unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT
+
+  # Environment Cleanup (User-Session)
+  # Mirroring the Enable script's use of the deck user's session bus
+  export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
+  sudo -u deck $DECK_BUS systemctl --user unset-environment MESA_VK_DEVICE_SELECT
+  sudo -u deck $DECK_BUS systemctl --user unset-environment VK_ICD_FILENAMES
+  sudo -u deck $DECK_BUS systemctl --user unset-environment WLR_DRM_DEVICES
+
+  # DISK CLEANUP
+  echo "Removing environment variables from disk..."
+  rm -f /etc/modprobe.d/nvidia-egpu.conf
+ 
+  # Driver Purge
+  # We kill any processes still holding the GPU and unload the modules
+  echo "Force killing any lingering GPU processes and stopping NVIDIA services..."
+  fuser -kv /dev/nvidia* >/dev/null 2>&1
+  modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia
+
+elif [ "$VENDOR" == "amd" ]; then
+  echo "AMD Cleanup: Ensuring card1 is free..."
+  fuser -kv /dev/dri/card1 >/dev/null 2>&1
+fi
+
+# Hardware Deactivation
+# Tell the ASUS hardware to disconnect and rescan the bus
+ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
+echo 0 > "$ENABLE_PATH"
+echo 1 > /sys/bus/pci/rescan
+
+# Final Reload & Restore Handheld UI
+systemctl daemon-reload
+export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
+sudo -u deck $DECK_BUS systemctl --user daemon-reload
+systemctl start sddm
+
+echo "--- Eject Finished: Back to Handheld Mode ---"
+ln -sf "/tmp/egpu_eject_${VENDOR}.log" /tmp/egpu_eject_latest.log

@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "stevencl.adddoccomments",
+    "ms-vscode.vscode-typescript-next",
+    "EdwinHuiSH.better-comments-next",
+    "editorconfig.editorconfig",
+    "ms-vscode-remote.vscode-remote-extensionpack",
+    "ms-python.python"
+  ]
+}
