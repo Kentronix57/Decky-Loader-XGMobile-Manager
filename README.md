@@ -53,7 +53,7 @@ If a SteamOS update wipes out the background services, the plugin will automatic
 Run this single command in your device's terminal (Desktop Mode or via SSH) to download and install the latest release automatically:
 
 ```bash
-curl -L https://raw.githubusercontent.com/Kentronix57/Decky-Loader-XGMobile-Manager/main/install.sh | bash
+curl -L https://raw.githubusercontent.com/Kentronix57/Decky-Loader-XGMobile-Manager/refs/heads/main/bin/install.sh | bash
 ```
 *(Note: Restart your Device after installation to ensure the UI loads).*
 
