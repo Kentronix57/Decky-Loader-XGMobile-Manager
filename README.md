@@ -15,18 +15,20 @@ A Decky Loader plugin that brings seamless, UI-driven support for the ASUS ROG X
 This plugin manages the complex hardware handshakes, dynamically compiles and intercepts NVIDIA drivers using safe bind-mount architecture, and injects the necessary Wayland/Vulkan environment variables to make eGPUs work natively inside Steam's Gaming Mode.
 
 ---
-
+NVIDIA GameMode optimizations
 ## Table of Contents
 - [Important Disclaimers & Risks](#️-important-disclaimers--risks)
 - [Compatibility Matrix](#-compatibility-matrix)
 - [How It Works (Under the Hood)](#️-how-it-works-under-the-hood)
 - [Installation](#-installation)
 - [How To Use](#-how-to-use)
+- [NVIDIA GameMode optimizations](#️-nvidia-gamemode-optimizations)
 - [Building From Source](#️-building-from-source)
 - [Known Issues](#-known-issues)
 - [Support & Troubleshooting](#-support--troubleshooting)
 - [Buy Me a Coffee](#-buy-me-a-coffee)
 - [Credits](#-credits)
+- [Pictures](#-pictures)
 
 ---
 
@@ -36,7 +38,6 @@ This plugin manages the complex hardware handshakes, dynamically compiles and in
 * **Beta Software:** This is a community-driven project and is currently in Beta. You are using this at your own risk.
 * **Data Corruption Risk:** This plugin modifies the read-only root filesystem, compiles kernel modules via DKMS, and manipulates `/etc/environment`. While it uses a highly protective "Bind Mount" architecture to prevent permanent system bricking, unexpected power loss during installation *could* result in a boot loop requiring a SteamOS reinstall.
 * **External Display Limitations:** Due to current upstream limitations in `gamescope` and `mutter` regarding multi-GPU presentation, **4K and 8K resolutions may not function correctly in Gaming Mode**. 1080p and 1440p are generally stable. X11 Desktop Mode provides wider resolution support. Toggle this in the Developer Settings in Steam
-* **AMD XG Mobile Untested:** The core development and testing of this plugin was performed using the NVIDIA RTX 4090 XG Mobile. While there is a dedicated code path for the AMD Radeon RX 6850M XT XG Mobile, **it is currently untested by the developer.**
 
 ---
 
@@ -47,7 +48,7 @@ This plugin manages the complex hardware handshakes, dynamically compiles and in
 | **ASUS ROG Ally** | 🟢 Tested & Working | Requires SteamOS, Bazzite, or HoloISO. |
 | **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | Full DKMS driver compilation supported. |
 | **NVIDIA XG Mobile (3080)** | 🟡 Experimental  | Untested. Uses the same nvidia drivers, but the deviceID is used to insert environment variables for GameMode. |
-| **AMD XG Mobile (6850M XT)** | 🟡 Experimental | Untested. Uses native `amdgpu` kernel drivers. |
+| **AMD XG Mobile (6850M XT)** | 🟢 Tested & Working | Uses native `amdgpu` kernel drivers. Might not consistently swap to external monitor in GameMode |
 | **Steam Deck (LCD/OLED)** | 🔴 Incompatible | Lacks the proprietary ASUS XG Mobile port. |
 | **Legion Go** | 🔴 Incompatible | Uses standard Thunderbolt/USB4, not XG Mobile. |
 
@@ -108,6 +109,14 @@ When there is a SteamOS update available, follow this exact sequence for safety:
 
 ---
 
+## NVIDIA GameMode optimizations
+* **HDR STILL IN TESTING** 
+1. Disable HDR under Display in Steam Settings
+2. If the screen is constantly dimming on you, Enable Use Native Color Tempeture in Steam Display Settings.
+3. Enable VRR and Allow Screen Tearing (dont worry, the screen wont tear, this is needed for the way that NVIDIA communicates its layers to gamescope) in the QAM.
+
+---
+
 ## 🛠️ Building From Source
 If you wish to contribute or build the plugin from your own development environment:
 
@@ -135,6 +144,7 @@ If you wish to contribute or build the plugin from your own development environm
 ## 🐛 Known Issues
 * **Boot Loop after Update:** If you update SteamOS *without* running the Reset script first, the system may try to load orphaned kernel modules. Run the Reset script from recovery or tty to fix.
 * **Live Logs "Initializing":** Occasionally the React UI polls faster than the Python backend can open the log file. Close the log viewer and reopen it.
+* **Internal Display still on":** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesnt effect performance or functionality, just annoying. This is being investigated.
 
 ---
 
@@ -169,3 +179,12 @@ If this tool saved you hours of troubleshooting or finally made your portable eG
 * [Decky Loader](https://decky.xyz/) — the plugin platform
 * Stensmir for the idea to use symlinks for nvidia driver installation to avoid needing to re-size partitions. [stesmir/xg-mobile-linux](https://github.com/stensmir/xg-mobile-linux/tree/master).
 * Built using the [@decky/ui](https://github.com/SteamDeckHomebrew/decky-ui) framework.
+
+---
+
+## Pictures
+![SteamOS version and NVIDIA driver version displayed in GameMode](assets/images/595-71-05-linux-6.18.25.png)
+![NVIDIA Settings and Readings in X11 Desktop](assets/images/x11-nvidia1.png)
+![NVIDIA Settings and Readings in X11 Desktop](assets/images/x11-nvidia2.png)
+![NVIDIA Settings and Readings in X11 Desktop](assets/images/x11-nvidia3.png)
+![Example of the Activity Log](assets/images/activitylog.png)
