@@ -15,7 +15,7 @@ set -e
 echo "Drivers missing or mismatched. Starting repair..."
 
 # --- CONFIGURATION ---
-NV_VERSION="595.58.03-1"
+NV_VERSION="595.71.05-1"
 REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
 BASE_URL="https://archive.archlinux.org/packages"
 

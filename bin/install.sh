@@ -3,7 +3,7 @@
 # Define variables
 PLUGIN_NAME="xgmobile-manager"
 RELEASE_URL="https://github.com/Kentronix57/Decky-Loader-XGMobile-Manager/releases/latest/download/xgmobile-manager.zip"
-PLUGIN_DIR="~/homebrew/plugins"
+PLUGIN_DIR="$HOME/homebrew/plugins"
 
 echo "Installing XG Mobile Manager..."
 
@@ -23,7 +23,7 @@ unzip -q "$PLUGIN_NAME.zip"
 rm "$PLUGIN_NAME.zip"
 
 # 4. Restart Decky to load the UI
-echo "Restarting Decky Plugin Loader..."
-sudo systemctl restart plugin_loader
+echo "Restarting Decky Plugin Loader...(You may be prompted for your sudo password)"
+sudo systemctl restart plugin_loader < /dev/tty
 
 echo "Installation complete! Open the Quick Access Menu to get started."

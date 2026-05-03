@@ -86,7 +86,7 @@ class Plugin:
     return await self._execute_script("install-nvidia.sh", INSTALL_LOG)
 
   async def mega_nuke(self):
-    return await self._execute_script("mega-nuke.sh", NUKE_LOG)
+    return await self._execute_script("uninstall.sh", NUKE_LOG)
     
   async def get_live_logs(self, log_type="install"):
     """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'nuke'."""
