@@ -1,5 +1,7 @@
 # XG Mobile Manager for SteamOS
+
 > RTX 4090 on a ROG Ally running SteamOS — one-click install/uninstall via Decky Loader.
+
 [![SteamOS Compatible](https://img.shields.io/badge/SteamOS-Compatible-1A9FFF)](https://store.steampowered.com/steamos)
 [![Kernel 6.18](https://img.shields.io/badge/kernel-6.18.25--valve1-orange)](https://gitlab.steamos.cloud/jupiter/linux-integration)
 [![NVIDIA 595](https://img.shields.io/badge/nvidia--dkms-595.71.05-76B900)](https://www.nvidia.com/Download/index.aspx)
