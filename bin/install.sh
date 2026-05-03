@@ -1,3 +1,10 @@
+#!/bin/bash
+
+# Define variables
+PLUGIN_NAME="xgmobile-manager"
+RELEASE_URL="https://github.com/Kentronix57/Decky-Loader-XGMobile-Manager/releases/latest/download/xgmobile-manager.zip"
+PLUGIN_DIR="~/homebrew/plugins"
+
 echo "Installing XG Mobile Manager..."
 
 # 1. Stop Decky to release file locks (Request password safely)
