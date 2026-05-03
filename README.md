@@ -1,8 +1,30 @@
 # XG Mobile Manager for SteamOS
+> RTX 4090 on a ROG Ally running SteamOS — one-click install/uninstall via Decky Loader.
+[![SteamOS Compatible](https://img.shields.io/badge/SteamOS-Compatible-1A9FFF)](https://store.steampowered.com/steamos)
+[![Kernel 6.18](https://img.shields.io/badge/kernel-6.18.25--valve1-orange)](https://gitlab.steamos.cloud/jupiter/linux-integration)
+[![NVIDIA 595](https://img.shields.io/badge/nvidia--dkms-595.71.05-76B900)](https://www.nvidia.com/Download/index.aspx)
+[![CUDA 12.8](https://img.shields.io/badge/CUDA-12.8-76B900)](https://developer.nvidia.com/cuda-downloads)
+[![License GPLv3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
+
+![XG Mobile Manager UI](https://raw.githubusercontent.com/Kentronix57/Decky-Loader-XGMobile-Manager/main/assets/mainUI.png)
 
 A Decky Loader plugin that brings seamless, UI-driven support for the ASUS ROG XG Mobile eGPU ecosystem to Arch-based handhelds (like the ROG Ally running SteamOS / Bazzite).
 
 This plugin manages the complex hardware handshakes, dynamically compiles and intercepts NVIDIA drivers using safe bind-mount architecture, and injects the necessary Wayland/Vulkan environment variables to make eGPUs work natively inside Steam's Gaming Mode.
+
+---
+
+## Table of Contents
+- [Important Disclaimers & Risks](#️-important-disclaimers--risks)
+- [Compatibility Matrix](#-compatibility-matrix)
+- [How It Works (Under the Hood)](#️-how-it-works-under-the-hood)
+- [Installation](#-installation)
+- [How To Use](#-how-to-use)
+- [Building From Source](#️-building-from-source)
+- [Known Issues](#-known-issues)
+- [Support & Troubleshooting](#-support--troubleshooting)
+- [Buy Me a Coffee](#-buy-me-a-coffee)
+- [Credits](#-credits)
 
 ---
 
@@ -89,8 +111,8 @@ If you wish to contribute or build the plugin from your own development environm
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Kentronix57/xgmobile-manager.git
-   cd xgmobile-manager
+   git clone https://github.com/Kentronix57/Decky-Loader-XGMobile-Manager.git
+   cd Decky-Loader-XGMobile-Manager
    ```
 2. Install dependencies (requires Node.js and pnpm):
    ```bash
@@ -99,6 +121,10 @@ If you wish to contribute or build the plugin from your own development environm
 3. Build the plugin using the included wrapper script:
    ```bash
    ./build.sh
+   ```
+   Or by using pnpm:
+   ```bash
+   pnpm build release
    ```
 4. Transfer the resulting folder to `/home/deck/homebrew/plugins/` on your device and restart the Decky Plugin Loader service.
 
@@ -110,6 +136,34 @@ If you wish to contribute or build the plugin from your own development environm
 
 ---
 
+## 🆘 Support & Troubleshooting
+**If you encounter a black screen, failed installation, or other bugs:**
+
+Do not panic. Your system can always be recovered using the Reset Driver Environment button, or by running the /home/deck/homebrew/plugins/xgmobile-manager/bin/uninstall.sh script via SSH or TTY.
+
+Check the Issues Tab: See if someone else has already reported your problem on GitHub.
+
+Open a New Issue: If you need help, please open an Issue on GitHub and include:
+
+Your OS and version (e.g., Bazzite, SteamOS 3.5.19)
+
+The exact model of your XG Mobile (4090, 3080, 6850M)
+
+The output of your installation logs. (found at /tmp/xgmobile_manager_install.log. These logs are deleted on a reboot)
+
+Please use GitHub Issues rather than Reddit DMs for technical support so the community can benefit from the solutions!
+
+## ☕ Buy Me a Coffee
+This plugin required countless hours of kernel-level debugging, file system reverse-engineering, and risk to my personal hardware to build. I offer it completely free and open-source.
+
+If this tool saved you hours of troubleshooting or finally made your portable eGPU setup viable, consider buying me a coffee or an energy drink to keep the updates coming!
+**(Donation Link TBD)**
+
 ## 🏆 Credits
 * **Development & Architecture:** Kentronix
+* Protocol reverse engineering: [osy/XG_Mobile_Station](https://github.com/osy/XG_Mobile_Station)
+* asus-linux kernel patches: [asus-linux.org](https://asus-linux.org)
+* Valve for shipping the SteamOS kernel with `asus-wmi` + `egpu_enable`
+* [Decky Loader](https://decky.xyz/) — the plugin platform
+* Stensmir for the idea to use symlinks for nvidia driver installation to avoid needing to re-size partitions. [stesmir/xg-mobile-linux](https://github.com/stensmir/xg-mobile-linux/tree/master).
 * Built using the [@decky/ui](https://github.com/SteamDeckHomebrew/decky-ui) framework.
