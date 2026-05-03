@@ -144,7 +144,8 @@ If you wish to contribute or build the plugin from your own development environm
 ## 🐛 Known Issues
 * **Boot Loop after Update:** If you update SteamOS *without* running the Reset script first, the system may try to load orphaned kernel modules. Run the Reset script from recovery or tty to fix.
 * **Live Logs "Initializing":** Occasionally the React UI polls faster than the Python backend can open the log file. Close the log viewer and reopen it.
-* **Internal Display still on":** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesnt effect performance or functionality, just annoying. This is being investigated.
+* **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesnt effect performance or functionality, just annoying. This is being investigated.
+* **Resume from X11 DesktopMode NVIDIA:** When resuming from sleep mode in Desktop X11 with NVIDIA eGPU, the resume script picks up and restarts tge device in a broken GameMode environment. FOR NOW, disable sleep mode when on AC.
 
 ---
 
