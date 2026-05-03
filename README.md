@@ -8,7 +8,7 @@
 [![CUDA 12.8](https://img.shields.io/badge/CUDA-12.8-76B900)](https://developer.nvidia.com/cuda-downloads)
 [![License GPLv3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 
-![XG Mobile Manager UI](assests/images/mainUI.png)
+![XG Mobile Manager UI](assets/images/mainUI.png)
 
 A Decky Loader plugin that brings seamless, UI-driven support for the ASUS ROG XG Mobile eGPU ecosystem to Arch-based handhelds (like the ROG Ally running SteamOS / Bazzite).
 
