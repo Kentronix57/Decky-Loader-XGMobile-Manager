@@ -12,12 +12,12 @@ echo "Stopping Decky Plugin Loader... (You may be prompted for your sudo passwor
 sudo systemctl stop plugin_loader < /dev/tty
 
 # 2. Navigate to plugins folder
-mkdir -p "$PLUGIN_DIR"
+sudo mkdir -p "$PLUGIN_DIR"
 cd "$PLUGIN_DIR" || exit
 
 # 3. Use sudo to obliterate old root-owned installations
 sudo rm -rf "$PLUGIN_NAME"
-mkdir -p "$PLUGIN_NAME"
+sudo mkdir -p "$PLUGIN_NAME"
 cd "$PLUGIN_NAME" || exit
 
 # 4. Download directly
