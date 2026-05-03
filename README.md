@@ -53,7 +53,7 @@ If a SteamOS update wipes out the background services, the plugin will automatic
 Run this single command in your device's terminal (Desktop Mode or via SSH) to download and install the latest release automatically:
 
 ```bash
-curl -L https://raw.githubusercontent.com/YourUsername/xgmobile-manager/main/install.sh | bash
+curl -L https://raw.githubusercontent.com/Kentronix57/xgmobile-manager/main/install.sh | bash
 ```
 *(Note: Restart your Device after installation to ensure the UI loads).*
 
@@ -89,7 +89,7 @@ If you wish to contribute or build the plugin from your own development environm
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/YourUsername/xgmobile-manager.git
+   git clone https://github.com/Kentronix57/xgmobile-manager.git
    cd xgmobile-manager
    ```
 2. Install dependencies (requires Node.js and pnpm):
