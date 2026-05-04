@@ -43,14 +43,11 @@ NVIDIA GameMode optimizations
 
 ## 📊 Compatibility Matrix
 
-| Hardware / OS | Status | Notes |
-| :--- | :--- | :--- |
-| **ASUS ROG Ally** | 🟢 Tested & Working | Requires SteamOS, Bazzite, or HoloISO. |
-| **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | Full DKMS driver compilation supported. |
-| **NVIDIA XG Mobile (3080)** | 🟡 Experimental  | Untested. Uses the same nvidia drivers, but the deviceID is used to insert environment variables for GameMode. |
-| **AMD XG Mobile (6850M XT)** | 🟢 Tested & Working | Uses native `amdgpu` kernel drivers. Might not consistently swap to external monitor in GameMode |
-| **Steam Deck (LCD/OLED)** | 🔴 Incompatible | Lacks the proprietary ASUS XG Mobile port. |
-| **Legion Go** | 🔴 Incompatible | Uses standard Thunderbolt/USB4, not XG Mobile. |
+| Hardware | SteamOS | Bazzite | Notes |
+| :--- | :--- | :--- | :--- |
+| **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🛑 Not Working/Under Development | Full DKMS driver compilation supported. BazziteOS currently reporting issues and under development. |
+| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🛑 Not Working/Under Development | Untested in SteamOS. Uses the same nvidia drivers, but the deviceID is used to insert environment variables for GameMode. BazziteOS currently reporting issues and under development. |
+| **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | Uses native `amdgpu` kernel drivers. Might not consistently swap to external monitor in GameMode |
 
 ---
 
@@ -89,8 +86,8 @@ curl -sL "https://raw.githubusercontent.com/Kentronix57/Decky-Loader-XGMobile-Ma
 ### The First-Time Setup
 1. Plug in the XG Mobile and lock the connector (ensure the LED is white).
 2. Open the Quick Access Menu -> XG Mobile Manager.
-3. Select your Vendor Mode (NVIDIA or AMD).
-4. Click **Install NVIDIA Drivers** (If using NVIDIA).
+3. Select your Vendor Mode (NVIDIA or AMD). If AMD, skip to Daily Use. NVIDIA users on SteamOS, please continue.
+4. Click **Install NVIDIA Drivers** (If using NVIDIA on SteamOS).
 5. A live terminal will appear. **Do not turn off your device.** This process downloads ~1.8GB of data and compiles the Linux kernel modules. It will take a few minutes.
 6. When prompted, **Reboot**.
 
