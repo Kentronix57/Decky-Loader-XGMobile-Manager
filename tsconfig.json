@@ -15,8 +15,7 @@
     "strict": true,
     "allowSyntheticDefaultImports": true,
     "skipLibCheck": true,
-    "lib": ["DOM", "DOM.Iterable", "ESNext"],
-    "resolveJsonModule": true
+    "lib": ["DOM", "DOM.Iterable", "ESNext"]
   },
   "include": ["src"],
   "exclude": ["node_modules"]

@@ -12,7 +12,6 @@ import {
 import { call, toaster } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
-import packageJson from "../../package.json";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -25,11 +24,11 @@ const statsStyle: React.CSSProperties = {
   marginBottom: "10px"
 };
 
-const [needsReboot, setNeedsReboot] = useState(false);
-
 export const QuickAccessContent = () => {
+  const [needsReboot, setNeedsReboot] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
+  const [pluginVersion, setPluginVersion] = useState("Loading...");
   
   // Dynamic State from Backend
   const [gpuStatus, setGpuStatus] = useState({ connected: false, active: false, vendor: "none" });
@@ -42,6 +41,8 @@ export const QuickAccessContent = () => {
       try {
         const val = await call("get_setting", "gpu_vendor", "nvidia") as string;
         setSelectedVendor(val);
+        const ver = await call("get_version") as string;
+        if (ver) setPluginVersion(ver);
       } catch (e) { console.error("Init Error:", e); }
     };
     init();
@@ -303,7 +304,7 @@ export const QuickAccessContent = () => {
         <PanelSectionRow>
           <div style={{ display: "flex", justifyContent: "space-between", opacity: 0.6, fontSize: "0.8em" }}>
             <span>Version</span>
-            <span>{packageJson.version}</span>
+            <span>{pluginVersion}</span>
           </div>
         </PanelSectionRow>
         <PanelSectionRow>

@@ -35,6 +35,18 @@ class Plugin:
   def get_plugin_dir(self):
     return os.path.dirname(os.path.realpath(__file__))
 
+  async def get_version(self):
+    """Reads the version directly from plugin.json."""
+    try:
+      json_path = os.path.join(self.get_plugin_dir(), "plugin.json")
+      
+      with open(json_path, 'r') as f:
+        data = json.load(f)
+        return data.get('version', '0.2.0')
+    except Exception as e:
+      error(f"Error reading version: {e}")
+      return "0.2.0"
+
   def is_bazzite(self):
         """Checks if the OS is Bazzite by reading os-release."""
         try:
