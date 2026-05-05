@@ -9,6 +9,13 @@ if modinfo nvidia >/dev/null 2>&1; then
   exit 0
 fi
 
+# Check if the OS is Bazzite
+if grep -qi "bazzite" /etc/os-release; then
+    echo "ERROR: BazziteOS detected. This plugin's driver installation is built for SteamOS (Arch)."
+    echo "Bazzite natively handles the XG Mobile via supergfxctl. Please use Bazzite's native NVIDIA drivers."
+    exit 1
+fi
+
 # Exit immediately on error
 set -e
 
@@ -25,6 +32,10 @@ UTILS_URL="$BASE_URL/n/nvidia-utils/nvidia-utils-$NV_VERSION-x86_64.pkg.tar.zst"
 LIB32_URL="$BASE_URL/l/lib32-nvidia-utils/lib32-nvidia-utils-$NV_VERSION-x86_64.pkg.tar.zst"
 WAYLAND2_URL="$BASE_URL/e/egl-wayland2/egl-wayland2-1.0.1-1-x86_64.pkg.tar.zst"
 SETTINGS_URL="$BASE_URL/n/nvidia-settings/nvidia-settings-$NV_VERSION-x86_64.pkg.tar.zst"
+
+DATA_DIR="$HOME/homebrew/data/xgmobile-manager"
+LOG_DIR="$HOME/homebrew/logs"
+mkdir -p "$DATA_DIR/configs"
 
 # Detect Kernel Info
 KVER_FULL=$(uname -r)
@@ -75,13 +86,13 @@ cleanup_on_exit() {
     echo "INSTALL FAILED (Code: $EXIT_CODE). Rolling back to prevent boot hang..."
         
     yes | pacman -Scc 2>/dev/null || true
-    rm -rf /home/deck/xgmobile_manager/system/var/cache/pacman/pkg/* 2>/dev/null
+    rm -rf $DATA_DIR/system/var/cache/pacman/pkg/* 2>/dev/null
 
     # PRESERVE LOGS FIRST
-    if [ -d "/home/deck/xgmobile_manager/system/var/lib/dkms" ]; then
-      echo "Saving failed compiler logs to /home/deck/xgmobile_manager/logs/..."
-      mkdir -p /home/deck/xgmobile_manager/logs/
-      mv /home/deck/xgmobile_manager/system/var/lib/dkms/nvidia* /home/deck/xgmobile_manager/logs/ 2>/dev/null || true
+    if [ -d "$DATA_DIR/system/var/lib/dkms" ]; then
+      echo "Saving failed compiler logs to $LOG_DIR/..."
+      mkdir -p $LOG_DIR/
+      mv $DATA_DIR/system/var/lib/dkms/nvidia* $LOG_DIR/ 2>/dev/null || true
     fi
 
     # DYNAMIC SMART RESTORE
@@ -94,10 +105,10 @@ cleanup_on_exit() {
         mkdir -p "$T"       # Recreate the empty native directory
         
         # If we have backup data, copy it back to root
-        if [ -d "/home/deck/xgmobile_manager/system$T" ]; then
+        if [ -d "$DATA_DIR/system$T" ]; then
           # Sweep out half-installed NVIDIA junk so we only restore pure SteamOS files
-          rm -rf "/home/deck/xgmobile_manager/system$T/nvidia*" 2>/dev/null || true
-          cp -a "/home/deck/xgmobile_manager/system$T/." "$T/" 2>/dev/null
+          rm -rf "$DATA_DIR/system$T/nvidia*" 2>/dev/null || true
+          cp -a "$DATA_DIR/system$T/." "$T/" 2>/dev/null
         fi
         
       elif [ -d "$T" ]; then
@@ -108,8 +119,8 @@ cleanup_on_exit() {
         # EDGE CASE: The target is completely missing. Restore it from backup.
         echo "Target $T is missing! Attempting emergency restore..."
         mkdir -p "$T"
-        if [ -d "/home/deck/xgmobile_manager/system$T" ]; then
-          cp -a "/home/deck/xgmobile_manager/system$T/." "$T/" 2>/dev/null
+        if [ -d "$DATA_DIR/system$T" ]; then
+          cp -a "$DATA_DIR/system$T/." "$T/" 2>/dev/null
         fi
       fi
       
@@ -117,8 +128,8 @@ cleanup_on_exit() {
   fi
 
   echo "Restoring Steam recovery image..."
-  if [ -f /home/deck/xgmobile_manager/recovery/bootstraplinux_ubuntu12_32.tar.xz ]; then
-    mv /home/deck/xgmobile_manager/recovery/bootstraplinux_ubuntu12_32.tar.xz /usr/lib/steam/ 2>/dev/null || true
+  if [ -f $DATA_DIR/recovery/bootstraplinux_ubuntu12_32.tar.xz ]; then
+    mv $DATA_DIR/recovery/bootstraplinux_ubuntu12_32.tar.xz /usr/lib/steam/ 2>/dev/null || true
   fi
 
   echo "Purging temporary build tools to recover 390 MiB of Rootfs space..."
@@ -133,16 +144,16 @@ echo "[2/9] Verifying system health..."
 
 echo "Deploying Universal Bind Mounts and preserving existing system files..."
 for T in "${ALL_TARGETS[@]}" "${BIND_TARGETS[@]}"; do
-  mkdir -p "/home/deck/xgmobile_manager/system$T"
+  mkdir -p "$DATA_DIR/system$T"
     
   if [ -d "$T" ] && [ ! -L "$T" ]; then
-    cp -a "$T/." "/home/deck/xgmobile_manager/system$T/" 2>/dev/null || true
+    cp -a "$T/." "$DATA_DIR/system$T/" 2>/dev/null || true
   fi
     
   mkdir -p "$T" 2>/dev/null || true
   [ -L "$T" ] && rm -f "$T"
     
-  mount --bind "/home/deck/xgmobile_manager/system$T" "$T"
+  mount --bind "$DATA_DIR/system$T" "$T"
 done
 
 echo "Purging SteamOS update cache to free root space..."
@@ -150,8 +161,8 @@ rm -rf /var/lib/steamos-atomupd/*
 rm -rf /var/cache/pacman/pkg/*
 
 echo "Relocating Steam recovery boot image..."
-mkdir -p /home/deck/xgmobile_manager/recovery
-[ -f /usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz ] && mv /usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz /home/deck/xgmobile_manager/recovery/
+mkdir -p $DATA_DIR/recovery
+[ -f /usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz ] && mv /usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz $DATA_DIR/recovery/
 
 # Get available space on root in Kilobytes
 ROOT_FREE_KIB=$(df / --output=avail | tail -1 | tr -dc '0-9')
@@ -268,12 +279,13 @@ systemctl daemon-reload
 echo "[10/10] Securing the installation..."
 
 echo "De-fanging NVIDIA configs to protect AMD Handheld Mode..."
-mkdir -p /home/deck/xgmobile_configs_backup
-mv /usr/share/glvnd/egl_vendor.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
-mv /usr/share/vulkan/implicit_layer.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
-mv /usr/share/vulkan/explicit_layer.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
-mv /usr/share/vulkan/icd.d/*nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
-mv /usr/share/X11/xorg.conf.d/10-nvidia* /home/deck/xgmobile_configs_backup/ 2>/dev/null || true
+mkdir -p $DATA_DIR/configs_backup
+mv /usr/share/glvnd/egl_vendor.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+mv /usr/share/vulkan/implicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+mv /usr/share/vulkan/explicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+mv /usr/share/vulkan/icd.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+mv /usr/share/X11/xorg.conf.d/10-nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+mv /etc/X11/xorg.conf.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
 
 echo "Purging temporary build tools..."
 yes | pacman -Rdd base-devel gcc make autoconf automake bison flex m4 patch pkgconf 2>/dev/null || true
@@ -288,7 +300,7 @@ done
 # Lock ONLY the permanent targets to /home
 for T in "${ALL_TARGETS[@]}"; do
   rm -rf "$T" 2>/dev/null # Delete the empty mount point
-  ln -sf "/home/deck/xgmobile_manager/system$T" "$T"
+  ln -sf "$DATA_DIR/system$T" "$T"
 done
 
 echo "Re-locking SteamOS file system..."

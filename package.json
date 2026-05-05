@@ -1,6 +1,6 @@
 {
   "name": "xgmobile-manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Manage XG Mobile Ejection, Activation, and NVIDIA Driver Repairs.",
   "scripts": {

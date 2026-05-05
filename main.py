@@ -10,13 +10,13 @@ from datetime import datetime
 
 Initialized = False
 T = TypeVar("T")
-
-ENABLE_LOG = "/tmp/xgmobile_manager_enable_latest.log"
-EJECT_LOG = "/tmp/xgmobile_manager_eject_latest.log"
-REPAIR_LOG = "/tmp/xgmobile_manager_repair.log"
-DEBUG_LOG = "/tmp/xgmobile_manager_debug.log"
-INSTALL_LOG = "/tmp/xgmobile_manager_install.log"
-NUKE_LOG = "/tmp/xgmobile_manager_nuke.log"
+LOG_DIR = "/home/deck/homebrew/logs"
+ENABLE_LOG = LOG_DIR+"/xgmobile_manager_enable_latest.log"
+EJECT_LOG = LOG_DIR+"/xgmobile_manager_eject_latest.log"
+REPAIR_LOG = LOG_DIR+"/xgmobile_manager_repair.log"
+DEBUG_LOG = LOG_DIR+"/xgmobile_manager_debug.log"
+INSTALL_LOG = LOG_DIR+"/xgmobile_manager_install.log"
+NUKE_LOG = LOG_DIR+"/xgmobile_manager_nuke.log"
 
 def log(txt):
   decky.logger.info(txt)
@@ -34,6 +34,14 @@ class Plugin:
   # Get the path where the plugin is installed
   def get_plugin_dir(self):
     return os.path.dirname(os.path.realpath(__file__))
+
+  def is_bazzite(self):
+        """Checks if the OS is Bazzite by reading os-release."""
+        try:
+            with open("/etc/os-release", "r") as f:
+                return "bazzite" in f.read().lower()
+        except Exception:
+            return False
 
   async def _execute_script(self, script_name, log_path, *args):
     """
@@ -72,21 +80,47 @@ class Plugin:
 
   async def enable_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
-    return await self._execute_script("egpu-enable", ENABLE_LOG, vendor)
+    if self.is_bazzite():
+      log("Bazzite detected: Routing to supergfxctl (AsusEgpu)")
+      try:
+        subprocess.run(["supergfxctl", "-m", "AsusEgpu"], check=True)
+        return "Success"
+      except Exception as e:
+        return f"Error enabling Bazzite eGPU: {e}"
+    else:
+      return await self._execute_script("egpu-enable", ENABLE_LOG, vendor)
 
   async def eject_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
-    return await self._execute_script("egpu-eject", EJECT_LOG, vendor)
+    if self.is_bazzite():
+      log("Bazzite detected: Routing to supergfxctl (Integrated)")
+      try:
+        subprocess.run(["supergfxctl", "-m", "Integrated"], check=True)
+        return "Success"
+      except Exception as e:
+        return f"Error disabling Bazzite eGPU: {e}"
+    else:
+      log("SteamOS detected: Running custom reset scripts")
+      return await self._execute_script("egpu-eject", EJECT_LOG, vendor)
 
   async def repair_services(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     return await self._execute_script("repair-services", REPAIR_LOG, vendor)
 
   async def install_nvidia(self):
+    if self.is_bazzite():
+      log("Bazzite detected: Blocking DKMS driver installation.")
+      return "Error: BazziteOS detected. Drivers are natively included in the Bazzite-Nvidia image."
+        
+    log("SteamOS detected: Starting DKMS driver compilation.")
     return await self._execute_script("install-nvidia.sh", INSTALL_LOG)
 
   async def mega_nuke(self):
     return await self._execute_script("uninstall.sh", NUKE_LOG)
+  
+  async def reboot_system(self):
+    subprocess.run(["sudo", "reboot"])
+    return True
     
   async def get_live_logs(self, log_type="install"):
     """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'nuke'."""
@@ -142,8 +176,10 @@ class Plugin:
             status["vendor"] = "amd"
 
     except Exception as e:
+      error(f"CRITICAL PYTHON ERROR in get_gpu_status: {e}")
       with open(DEBUG_LOG, "a") as dbg:
-          return "CRITICAL PYTHON ERROR: {e}"
+        dbg.write(f"CRITICAL ERROR: {e}\n")
+      return status
 
     return status
 

@@ -1,6 +1,16 @@
 #!/bin/bash
 VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
-exec > "/tmp/xgmobile_manager_enable_${VENDOR}.log" 2>&1
+DATA_DIR="$HOME/homebrew/data/xgmobile-manager"
+LOG_DIR="$HOME/homebrew/logs"
+mkdir -p "$DATA_DIR/configs"
+exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
+
+# Check if the OS is Bazzite
+if grep -qi "bazzite" /etc/os-release; then
+  OS_TYPE="bazzite"
+else
+  OS_TYPE="steamos"
+fi
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
 
@@ -61,107 +71,111 @@ if [ "$NEEDS_REPAIR" -eq 1 ]; then
   echo "Self-repair complete."
 fi
 
-# Hardware Activation
-ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
-if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
-  echo 1 > "$ENABLE_PATH"
-fi
-echo 1 > /sys/bus/pci/rescan
+if [ "$OS_TYPE" == "steamos" ]; then
+  # Hardware Activation
+  ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
+    echo 1 > "$ENABLE_PATH"
+  fi
+  echo 1 > /sys/bus/pci/rescan
 
-# Wait for Hardware
-COUNT=0
-while [ ! -e "/dev/dri/card1" ] && [ $COUNT -lt 10 ]; do
-  echo "Waiting for /dev/dri/card1... ($COUNT)"
-  sleep 1
-  ((COUNT++))
-done
+  # Wait for Hardware
+  COUNT=0
+  while [ ! -e "/dev/dri/card1" ] && [ $COUNT -lt 10 ]; do
+    echo "Waiting for /dev/dri/card1... ($COUNT)"
+    sleep 1
+    ((COUNT++))
+  done
 
-if [ ! -e "/dev/dri/card1" ]; then
-  echo "ERROR: Hardware failed to appear in /dev/dri/"
-  exit 1
-fi
-
-# Permissions (The ACL Hero)
-echo "Setting user permissions for eGPU..."
-setfacl -m u:deck:rw /dev/dri/card1
-setfacl -m u:deck:rw /dev/dri/renderD129
-
-# STOP UI
-# We must stop sddm so we can unload the driver modules
-echo "Stopping SDDM..."
-systemctl stop sddm
-
-# DRIVER RELOAD 
-if [ "$VENDOR" == "nvidia" ]; then
-  echo "Detecting NVIDIA Hardware ID..."
-  NVIDIA_ID=$(lspci -n -d 10de: | head -n 1 | awk '{print $3}')
-  
-  if [ -z "$NVIDIA_ID" ]; then
-    echo "ERROR: Could not detect an NVIDIA GPU ID on the PCIe bus. Aborting."
+  if [ ! -e "/dev/dri/card1" ]; then
+    echo "ERROR: Hardware failed to appear in /dev/dri/"
     exit 1
   fi
-  echo "Dynamic Hardware Lock: $NVIDIA_ID"
 
-  echo "Re-fanging NVIDIA configs for active session..."
-  steamos-readonly disable
-  mv /home/deck/xgmobile_configs_backup/10_nvidia* /usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
-  mv /home/deck/xgmobile_configs_backup/*icd* /usr/share/vulkan/icd.d/ 2>/dev/null || true
-  mv /home/deck/xgmobile_configs_backup/*layer* /usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
-  mv /home/deck/xgmobile_configs_backup/*layer* /usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
-  mv /home/deck/xgmobile_configs_backup/10-nvidia* /usr/share/X11/xorg.conf.d/ 2>/dev/null || true
-  steamos-readonly enable
+  # Permissions (The ACL Hero)
+  echo "Setting user permissions for eGPU..."
+  setfacl -m u:deck:rw /dev/dri/card1
+  setfacl -m u:deck:rw /dev/dri/renderD129
 
-  # This is what forces the NVIDIA card into Wayland mode
-  echo "Loading NVIDIA modules..."
-  modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia
-  modprobe nvidia_drm modeset=1 fbdev=1
-  modprobe nvidia_modeset nvidia_uvm nvidia
+  # STOP UI
+  # We must stop sddm so we can unload the driver modules
+  echo "Stopping SDDM..."
+  systemctl stop sddm
 
-  # PERSISTENT DRIVER SETTINGS
-  # We write the modeset to a config file so the kernel loads it at boot
-  echo "Setting NVIDIA config file for persistence on reboot..."
-  echo "options nvidia_drm modeset=1 fbdev=1" > /etc/modprobe.d/nvidia-egpu.conf
+  # DRIVER RELOAD 
+  if [ "$VENDOR" == "nvidia" ]; then
+    echo "Detecting NVIDIA Hardware ID..."
+    NVIDIA_ID=$(lspci -n -d 10de: | head -n 1 | awk '{print $3}')
+  
+    if [ -z "$NVIDIA_ID" ]; then
+      echo "ERROR: Could not detect an NVIDIA GPU ID on the PCIe bus. Aborting."
+      exit 1
+    fi
+    echo "Dynamic Hardware Lock: $NVIDIA_ID"
 
-  # PERSISTENT ENVIRONMENT (The Global File)
-  # We use a function to safely add lines to /etc/environment
-  echo "Writing environment variables to disk......"
-  safe_add() {
-    grep -qF "$1" /etc/environment || echo "$1" >> /etc/environment
-  }
+    echo "Re-fanging NVIDIA configs for active session..."
+    steamos-readonly disable
+    mv $DATA_DIR/configs_backup/10_nvidia* /usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/*icd* /usr/share/vulkan/icd.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/*layer* /usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/*layer* /usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/10-nvidia* /usr/share/X11/xorg.conf.d/ 2>/dev/null || true
+    steamos-readonly enable
 
-  safe_add "MESA_VK_DEVICE_SELECT=$NVIDIA_ID"
-  safe_add "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
-  safe_add "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
-  safe_add "VK_LOADER_LAYERS_DISABLE=*"
-  safe_add "GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1"
+    # This is what forces the NVIDIA card into Wayland mode
+    echo "Loading NVIDIA modules..."
+    modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia
+    modprobe nvidia_drm modeset=1 fbdev=1
+    modprobe nvidia_modeset nvidia_uvm nvidia
 
-  # Environment Injection (System-Wide)
-  echo "Injecting variables into systemd session..."
-  systemctl set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
-  systemctl set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-  systemctl set-environment WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0
-  systemctl set-environment VK_LOADER_LAYERS_DISABLE="*"
-  systemctl set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
+    # PERSISTENT DRIVER SETTINGS
+    # We write the modeset to a config file so the kernel loads it at boot
+    echo "Setting NVIDIA config file for persistence on reboot..."
+    echo "options nvidia_drm modeset=1 fbdev=1" > /etc/modprobe.d/nvidia-egpu.conf
 
-  # Environment Injection (User-Session Fix)
-  # We explicitly define the XDG_RUNTIME_DIR so root can talk to the deck session
-  export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
-  sudo -u deck $DECK_BUS systemctl --user set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
-  sudo -u deck $DECK_BUS systemctl --user set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-  sudo -u deck $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0
+    # PERSISTENT ENVIRONMENT (The Global File)
+    # We use a function to safely add lines to /etc/environment
+    echo "Writing environment variables to disk......"
+    safe_add() {
+      grep -qF "$1" /etc/environment || echo "$1" >> /etc/environment
+    }
 
-  # Final Reload & Start
-  echo "Daemon-reload and start SDDM..."
-  systemctl daemon-reload
-  sudo -u deck $DECK_BUS systemctl --user daemon-reload
+    safe_add "MESA_VK_DEVICE_SELECT=$NVIDIA_ID"
+    safe_add "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
+    safe_add "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+    safe_add "VK_LOADER_LAYERS_DISABLE=*"
+    safe_add "GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1"
 
-elif [ "$VENDOR" == "amd" ]; then
-  # AMD Lean Path (Assumes amdgpu driver handles it)
-  echo "AMD Vendor detected. Refreshing DRM session..."
-  # No extra variables usually needed for AMD eGPUs on SteamOS
+    # Environment Injection (System-Wide)
+    echo "Injecting variables into systemd session..."
+    systemctl set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
+    systemctl set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+    systemctl set-environment WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0
+    systemctl set-environment VK_LOADER_LAYERS_DISABLE="*"
+    systemctl set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
+
+    # Environment Injection (User-Session Fix)
+    # We explicitly define the XDG_RUNTIME_DIR so root can talk to the deck session
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
+    sudo -u deck $DECK_BUS systemctl --user set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
+    sudo -u deck $DECK_BUS systemctl --user set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+    sudo -u deck $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0
+
+    # Final Reload & Start
+    echo "Daemon-reload and start SDDM..."
+    systemctl daemon-reload
+    sudo -u deck $DECK_BUS systemctl --user daemon-reload
+
+  elif [ "$VENDOR" == "amd" ]; then
+    # AMD Lean Path (Assumes amdgpu driver handles it)
+    echo "AMD Vendor detected. Refreshing DRM session..."
+    # No extra variables usually needed for AMD eGPUs on SteamOS
+  fi
+
+  systemctl start sddm
+
+elif [ "$OS_TYPE" == "bazzite" ]; then
+  supergfxctl -m AsusEgpu
 fi
-
-systemctl start sddm
-
 echo "--- Enable Finished: Time for God Mode ---"
-ln -sf "/tmp/xgmobile_manager_enable_${VENDOR}.log" /tmp/xgmobile_manager_enable_latest.log
+ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" $LOG_DIR/xgmobile_manager_enable_latest.log

@@ -12,6 +12,7 @@ import {
 import { call, toaster } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
+import packageJson from "../../package.json";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -23,6 +24,8 @@ const statsStyle: React.CSSProperties = {
   borderRadius: "4px",
   marginBottom: "10px"
 };
+
+const [needsReboot, setNeedsReboot] = useState(false);
 
 export const QuickAccessContent = () => {
   const [isLoading, setIsLoading] = useState(false);
@@ -107,6 +110,7 @@ export const QuickAccessContent = () => {
           title: "NVIDIA Setup", 
           body: "Success! Please reboot your device." 
         });
+        setNeedsReboot(true);
       }
     } catch (e) {
       toaster.toast({ title: "Error", body: "Plugin communication failed." });
@@ -129,26 +133,57 @@ export const QuickAccessContent = () => {
         strOKButtonText="Purge & Reset"
         onOK={() => { 
           setTimeout(async () => {
-             // 1. Open the viewer (logType="nuke" must match main.py)
-             showModal(<LiveLogViewerModal logType="nuke" />);
+            // 1. Open the viewer (logType="nuke" must match main.py)
+            showModal(<LiveLogViewerModal logType="nuke" />);
              
-             setIsLoading(true);
-             try {
-               const result = await call("mega_nuke") as string;
-               if (result !== "Success") {
-                 toaster.toast({ title: "Reset Error", body: result });
-               }
-             } catch (e) {
-               toaster.toast({ title: "Error", body: "Backend unreachable." });
-             } finally {
-               setIsLoading(false);
-             }
+            setIsLoading(true);
+            try {
+              const result = await call("mega_nuke") as string;
+              if (result !== "Success") {
+                toaster.toast({ title: "Reset Error", body: result });
+              } else {
+                toaster.toast({ title: "Success!", body: result });
+                setNeedsReboot(true);
+              }
+            } catch (e) {
+              toaster.toast({ title: "Error", body: "Backend unreachable." });
+            } finally {
+              setIsLoading(false);
+            }
           }, 200);
         }}
       />
     );
   };
 
+  // If the installation was successful, trap the user in this pure @decky/ui state
+  if (needsReboot) {
+    return (
+      <PanelSection title="Reboot Required">
+        <PanelSectionRow>
+          <div style={{ marginBottom: "10px", fontSize: "14px" }}>
+            The system must reboot to apply changes.
+          </div>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem 
+            onClick={async () => {
+              await call("reboot_system");
+            }}
+          >
+            Restart Now
+          </ButtonItem>
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem 
+            onClick={() => setNeedsReboot(false)}
+          >
+            Reboot Later
+          </ButtonItem>
+        </PanelSectionRow>
+      </PanelSection>
+    );
+  }
   return (
     <Focusable>
       {/* SECTION 1: Telemetry Dashboard (Only show if connected/active) */}
@@ -228,7 +263,7 @@ export const QuickAccessContent = () => {
             disabled={gpuStatus.active || isLoading}
             onClick={handleInstall} 
           >
-            Install NVIDIA drivers
+            Install NVIDIA drivers (SteamOS Only)
           </ButtonItem>
         </PanelSectionRow>
 
@@ -259,7 +294,7 @@ export const QuickAccessContent = () => {
             disabled={gpuStatus.active || isLoading}
             onClick={onResetClick}
           >
-            <span style={{ color: "#ff5555" }}>Reset Driver Environment</span>
+            <span style={{ color: "#ff5555" }}>Reset Driver Environment (SteamOS Only)</span>
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
@@ -268,7 +303,7 @@ export const QuickAccessContent = () => {
         <PanelSectionRow>
           <div style={{ display: "flex", justifyContent: "space-between", opacity: 0.6, fontSize: "0.8em" }}>
             <span>Version</span>
-            <span>0.1.0</span>
+            <span>{packageJson.version}</span>
           </div>
         </PanelSectionRow>
         <PanelSectionRow>

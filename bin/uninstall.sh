@@ -1,6 +1,22 @@
 #!/bin/bash
-echo "--- SURGICAL eGPU UNINSTALLER ---"
+echo "--- SURGICAL XG MOBILE UNINSTALLER ---"
 steamos-readonly disable
+
+# Check if the OS is Bazzite
+if grep -qi "bazzite" /etc/os-release; then
+    echo "ERROR: BazziteOS detected. This plugin's driver installation is built for SteamOS (Arch)."
+    echo "Bazzite natively handles the XG Mobile via supergfxctl. No need to reset driver environment."
+    exit 1
+fi
+
+DATA_DIR="$HOME/homebrew/data/xgmobile-manager"
+LOG_DIR="$HOME/homebrew/logs"
+mkdir -p "$DATA_DIR/configs"
+
+# Detect Kernel Info dynamically
+KVER_FULL=$(uname -r)
+KVER_SHORT=$(echo $KVER_FULL | cut -d'.' -f1,2 | tr -d '.')
+HEADER_PKG="linux-neptune-${KVER_SHORT}-headers"
 
 # Target Arrays
 ROOT_TARGETS=("/usr/lib/nvidia" "/usr/lib32/nvidia" "/usr/src" "/usr/lib/firmware/nvidia" "/usr/share/nvidia")
@@ -16,7 +32,7 @@ done
 echo "Removing drivers and build dependencies safely..."
 yes | pacman -Rn \
   nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings \
-  dkms linux-neptune-618-headers \
+  dkms "$HEADER_PKG" \
   2>/dev/null || true
 
 echo "Purging orphaned kernel modules..."
@@ -53,7 +69,7 @@ rm -f /usr/share/vulkan/icd.d/*nvidia*
 
 echo "Cleaning up temporary compiler bloat from /home..."
 for B in "${BIND_TARGETS[@]}"; do
-    rm -rf "/home/deck/xgmobile_manager/system$B" 2>/dev/null || true
+    rm -rf "$DATA_DIR/system$B" 2>/dev/null || true
 done
 
 echo "Sanitizing global environment variables..."
