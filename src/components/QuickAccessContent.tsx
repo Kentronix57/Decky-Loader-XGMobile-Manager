@@ -7,7 +7,8 @@ import {
   ToggleField, 
   PanelSection, 
   PanelSectionRow,
-  Focusable
+  Focusable,
+  Dropdown
 } from "@decky/ui";
 import { call, toaster } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
@@ -34,6 +35,8 @@ export const QuickAccessContent = () => {
   const [gpuStatus, setGpuStatus] = useState({ connected: false, active: false, vendor: "none" });
   const [telemetry, setTelemetry] = useState({ temp: "--", power: "--", vram: "--", util: "--" });
   const [selectedVendor, setSelectedVendor] = useState("nvidia");
+  const [osType, setOsType] = useState("steamos");
+  const [powerProfile, setPowerProfile] = useState("Unknown");
 
   // 1. Initial Load: Fetch Vendor Setting once
   useEffect(() => {
@@ -43,6 +46,12 @@ export const QuickAccessContent = () => {
         setSelectedVendor(val);
         const ver = await call("get_version") as string;
         if (ver) setPluginVersion(ver);
+        const os = await call("get_os_status") as string;
+        setOsType(os);
+        if (os === "bazzite-nvidia" ||os === "bazzite" || os === "cachyos") {
+          const prof = await call("get_power_profile") as string;
+          setPowerProfile(prof);
+        }
       } catch (e) { console.error("Init Error:", e); }
     };
     init();
@@ -208,6 +217,42 @@ export const QuickAccessContent = () => {
               <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.util}</div>
             </div>
           </div>
+        </PanelSection>
+      )}
+
+      {/* OS WARNING: WRONG BAZZITE IMAGE */}
+      {(osType === "bazzite") && (selectedVendor === "nvidia") && (
+        <PanelSection title="System Warning">
+          <PanelSectionRow>
+            <div style={{ color: "#ff5555", fontSize: "14px", marginBottom: "10px" }}>
+              <strong>Wrong OS Image Detected!</strong><br/>
+              You are running standard Bazzite. To use an NVIDIA eGPU, you MUST install the 'bazzite-deck-nvidia' image. 
+              The NVIDIA XG Mobile will not function correctly on this installation. Please install the correct version or select AMD.
+            </div>
+          </PanelSectionRow>
+        </PanelSection>
+      )}
+
+      {/* ASUS CONTROLS (Only visible on supported OS) */}
+      {(osType === "bazzite" || osType === "bazzite-nvidia" || osType === "cachyos") && (
+        <PanelSection title="ASUS Hardware Controls">
+          <PanelSectionRow>
+            <Dropdown
+              strDefaultLabel="Power Profile"
+              selectedOption={powerProfile}
+              rgOptions={[
+                { data: "Quiet", label: "Quiet" },
+                { data: "Balanced", label: "Balanced" },
+                { data: "Performance", label: "Performance" }
+              ]}
+              onChange={async (option: any) => {
+                const newProfile = option.data;
+                setPowerProfile(newProfile);
+                await call("set_power_profile", { profile: newProfile });
+                toaster.toast({ title: "ASUS Profile", body: `Set to ${newProfile}` });
+              }}
+            />
+          </PanelSectionRow>
         </PanelSection>
       )}
 
