@@ -9,10 +9,9 @@ if modinfo nvidia >/dev/null 2>&1; then
   exit 0
 fi
 
-# Check if the OS is Bazzite
-if grep -qi "bazzite" /etc/os-release; then
-    echo "ERROR: BazziteOS detected. This plugin's driver installation is built for SteamOS (Arch)."
-    echo "Bazzite natively handles the XG Mobile via supergfxctl. Please use Bazzite's native NVIDIA drivers."
+if ! grep -qi "steamos" /etc/os-release; then
+    echo "ERROR: Unsupported OS detected. This driver installation script is built exclusively for SteamOS (Arch)."
+    echo "If you are using Bazzite, please switch to the 'bazzite-nvidia-deck' image, which has the drivers natively built-in."
     exit 1
 fi
 

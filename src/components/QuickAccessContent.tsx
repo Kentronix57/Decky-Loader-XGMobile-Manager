@@ -30,6 +30,8 @@ export const QuickAccessContent = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [pluginVersion, setPluginVersion] = useState("Loading...");
+  //const [hasSupergfxctl, setHasSupergfxctl] = useState<boolean>(false);
+  //const [daemonActive, setDaemonActive] = useState<boolean>(true);
   
   // Dynamic State from Backend
   const [gpuStatus, setGpuStatus] = useState({ connected: false, active: false, vendor: "none" });
@@ -48,11 +50,12 @@ export const QuickAccessContent = () => {
         if (ver) setPluginVersion(ver);
         const os = await call("get_os_status") as string;
         setOsType(os);
-        if (os === "bazzite-nvidia" ||os === "bazzite" || os === "cachyos") {
-          const prof = await call("get_power_profile") as string;
-          setPowerProfile(prof);
-        }
-      } catch (e) { console.error("Init Error:", e); }
+        // call() returns the boolean directly from Python
+        //const hasSgfx = await call("has_supergfxctl") as boolean;
+        //setHasSupergfxctl(hasSgfx);
+      } catch (e) { 
+        console.error("Init Error:", e); 
+      }
     };
     init();
   }, []);
@@ -62,13 +65,13 @@ export const QuickAccessContent = () => {
     const poll = async () => {
       try {
         const currentStatus = await call("get_gpu_status") as any;
-
         if (currentStatus) setGpuStatus(currentStatus);
-
         if (currentStatus?.active) {
           const stats = await call("get_telemetry") as any;
           if (stats) setTelemetry(stats);
         }
+        const prof = await call("get_power_profile") as string;
+        setPowerProfile(prof);
       } catch (e) {
         console.error("Poll Error:", e);
       }
@@ -100,15 +103,12 @@ export const QuickAccessContent = () => {
 
   const handleInstall = async () => {
     if (isLoading) return;
-
     showModal(<LiveLogViewerModal logType="install" />);
-
     setIsLoading(true);
     setStatusText("Installing");
 
     try {
       const result = (await call("install_nvidia")) as string;
-      
       if (result.includes("Failed") || result.includes("Error")) {
         toaster.toast({ 
           title: "NVIDIA Setup", 
@@ -139,13 +139,11 @@ export const QuickAccessContent = () => {
     showModal(
       <ConfirmModal
         strTitle="Reset Driver Environment?"
-        strDescription="This will purge the NVIDIA driver stack and all filesystem redirects. Continue?"
+        strDescription="This will purge the NVIDIA driver stack and all filesystem redirects from SteamOS. Continue?"
         strOKButtonText="Purge & Reset"
         onOK={() => { 
           setTimeout(async () => {
-            // 1. Open the viewer (logType="nuke" must match main.py)
             showModal(<LiveLogViewerModal logType="nuke" />);
-             
             setIsLoading(true);
             try {
               const result = await call("mega_nuke") as string;
@@ -188,7 +186,7 @@ export const QuickAccessContent = () => {
           <ButtonItem 
             onClick={() => setNeedsReboot(false)}
           >
-            Reboot Later
+            Restart Later
           </ButtonItem>
         </PanelSectionRow>
       </PanelSection>
@@ -233,12 +231,18 @@ export const QuickAccessContent = () => {
         </PanelSection>
       )}
 
-      {/* ASUS CONTROLS (Only visible on supported OS) */}
-      {(osType === "bazzite" || osType === "bazzite-nvidia" || osType === "cachyos") && (
-        <PanelSection title="ASUS Hardware Controls">
-          <PanelSectionRow>
+      {/* UNIVERSAL ASUS WMI CONTROLS */}
+      <PanelSection title="ASUS Hardware Controls">
+        <PanelSectionRow>
+          <div style={{ marginBottom: "6px", fontSize: "14px", opacity: 0.8 }}>
+            Active Power Profile
+          </div>
+          {powerProfile === "Error" || powerProfile === "Unknown" ? (
+            <div style={{ color: "#ffab40", fontSize: "12px", fontStyle: "italic", padding: "4px 0" }}>
+              Unable to read motherboard WMI policy.
+            </div>
+          ) : (
             <Dropdown
-              strDefaultLabel="Power Profile"
               selectedOption={powerProfile}
               rgOptions={[
                 { data: "Quiet", label: "Quiet" },
@@ -252,9 +256,9 @@ export const QuickAccessContent = () => {
                 toaster.toast({ title: "ASUS Profile", body: `Set to ${newProfile}` });
               }}
             />
-          </PanelSectionRow>
-        </PanelSection>
-      )}
+          )}
+        </PanelSectionRow>
+      </PanelSection>
 
       {/* SECTION 2: Controls */}
       <PanelSection title="Controls">
@@ -267,17 +271,6 @@ export const QuickAccessContent = () => {
           </PanelSectionRow>
         ) : (
           <>
-            <PanelSectionRow>
-              <ToggleField
-                label="NVIDIA Mode"
-                description="Turn off for AMD XG Mobile units"
-                // Disable if the hardware is active
-                disabled={gpuStatus.active || isLoading}
-                checked={selectedVendor === "nvidia"}
-                onChange={toggleVendor}
-              />
-            </PanelSectionRow>
-
             <PanelSectionRow>
               <ButtonItem
                 layout="inline"
@@ -297,22 +290,37 @@ export const QuickAccessContent = () => {
                 {gpuStatus.active ? "Eject XG Mobile (Handheld)" : "XG Mobile is not Active"}
               </ButtonItem>
             </PanelSectionRow>
+
+            <PanelSectionRow>
+              <ToggleField
+                label="NVIDIA Mode"
+                description="Turn off for AMD XG Mobile units"
+                // Disable if the hardware is active
+                disabled={gpuStatus.active || isLoading}
+                checked={selectedVendor === "nvidia"}
+                onChange={toggleVendor}
+              />
+            </PanelSectionRow>
           </>
         )}
       </PanelSection>
 
       {/* SECTION 3: Maintenance */}
       <PanelSection title="Advanced">
-        <PanelSectionRow>
-          <ButtonItem
-            layout="inline"
-            disabled={gpuStatus.active || isLoading}
-            onClick={handleInstall} 
-          >
-            Install NVIDIA drivers (SteamOS Only)
-          </ButtonItem>
-        </PanelSectionRow>
+        {/* Render Install button ONLY on SteamOS */}
+        {osType === "steamos" && (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="inline"
+              disabled={gpuStatus.active || isLoading}
+              onClick={handleInstall} 
+            >
+              Install NVIDIA Drivers
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
 
+        {/* Universal Debug Tools */}
         <PanelSectionRow>
           <ButtonItem
             layout="inline"
@@ -334,15 +342,18 @@ export const QuickAccessContent = () => {
           </ButtonItem>
         </PanelSectionRow>
 
-        <PanelSectionRow>
-          <ButtonItem
-            layout="inline"
-            disabled={gpuStatus.active || isLoading}
-            onClick={onResetClick}
-          >
-            <span style={{ color: "#ff5555" }}>Reset Driver Environment (SteamOS Only)</span>
-          </ButtonItem>
-        </PanelSectionRow>
+        {/* Render Reset button ONLY on SteamOS */}
+        {osType === "steamos" && (
+          <PanelSectionRow>
+            <ButtonItem
+              layout="inline"
+              disabled={gpuStatus.active || isLoading}
+              onClick={onResetClick}
+            >
+              <span style={{ color: "#ff5555" }}>Reset Driver Environment</span>
+            </ButtonItem>
+          </PanelSectionRow>
+        )}
       </PanelSection>
 
       <PanelSection title="About">

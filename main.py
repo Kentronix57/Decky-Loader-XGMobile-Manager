@@ -28,7 +28,6 @@ def warn(txt):
 def error(txt):
   decky.logger.error(txt)
 
-
 class Plugin:
   settings: SettingsManager
 
@@ -72,7 +71,7 @@ class Plugin:
     """Helper to pass the OS type to React on load."""
     return self.get_os_type()
 
-  def has_supergfxctl(self):
+  async def has_supergfxctl(self):
     """Returns True if supergfxctl is installed and in the system PATH."""
     return shutil.which("supergfxctl") is not None
 
@@ -115,40 +114,15 @@ class Plugin:
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     os_type = self.get_os_type()
 
-    if os_type in ["bazzite-nvidia", "bazzite", "cachyos"]:
-      log("Bazzite/Cachy detected: Routing to supergfxctl (AsusEgpu)")
-      if self.has_supergfxctl():
-        if vendor == "nvidia" and os_type == "bazzite-nvidia":
-          try:
-            subprocess.run(["supergfxctl", "-m", "AsusEgpu"], check=True)
-            return "Success"
-          except Exception as e:
-            return f"Error enabling Bazzite XG Mobile: {e}"
-        elif vendor == "nvidia" and os_type == "bazzite":
-          return f"Bazzite Detected. NVIDIA selected but not detected in OS. Please use the bazzite-nvidia-deck image."
-        else:
-          try:
-            subprocess.run(["supergfxctl", "-m", "AsusEgpu"], check=True)
-            return "Success"
-          except Exception as e:
-            return f"Error enabling XG Mobile: {e}"
-      else: 
-        return f"Error: supergfxctl not detected in Bazzite/Cachy."
-    else:
-      return await self._execute_script("egpu-enable", ENABLE_LOG, vendor)
+    if vendor == "nvidia" and os_type == "bazzite":
+      return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
+    return await self._execute_script("egpu-enable", ENABLE_LOG, vendor, os_type)
 
   async def eject_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
-    if self.get_os_type() in ["bazzite-nvidia", "bazzite", "cachyos"]:
-      log("Bazzite/Cachy detected: Routing to supergfxctl (Integrated)")
-      try:
-        subprocess.run(["supergfxctl", "-m", "Integrated"], check=True)
-        return "Success"
-      except Exception as e:
-        return f"Error disabling Bazzite eGPU: {e}"
-    else:
-      log("SteamOS detected: Running custom reset scripts")
-      return await self._execute_script("egpu-eject", EJECT_LOG, vendor)
+    os_type = self.get_os_type()
+    
+    return await self._execute_script("egpu-eject", EJECT_LOG, vendor, os_type)
 
   async def repair_services(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
@@ -166,28 +140,53 @@ class Plugin:
     return await self._execute_script("uninstall.sh", NUKE_LOG)
   
   async def reboot_system(self):
-    subprocess.run(["sudo", "reboot"])
+    clean_env = os.environ.copy()
+    clean_env.pop("LD_LIBRARY_PATH", None)
+    subprocess.run(["sudo", "reboot"], env=clean_env)
     return True
 
   async def get_power_profile(self):
-    """Reads the active asusctl profile."""
     try:
-      result = subprocess.run(["asusctl", "profile", "-p"], capture_output=True, text=True)
-      # Output usually looks like: "Active profile is Performance"
-      for line in result.stdout.split('\n'):
-        if "Active profile is" in line:
-          return line.split()[-1]
-      return "Unknown"
-    except Exception:
+      policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
+      if not os.path.exists(policy_path):
+        return "Unknown"
+        
+      with open(policy_path, "r") as f:
+        val = f.read().strip()
+        
+      # WMI Mapping: 0 = Balanced, 1 = Performance/Turbo, 2 = Quiet
+      if val == "0":
+        return "Balanced"
+      elif val == "1":
+        return "Performance"
+      elif val == "2":
+        return "Quiet"
+      else:
+        return "Unknown"
+    except Exception as e:
+      error(f"Error reading power profile: {e}")
       return "Error"
 
   async def set_power_profile(self, profile: str):
-    """Sets the active asusctl profile."""
     try:
-      # profile must be exactly "Quiet", "Balanced", or "Performance"
-      subprocess.run(["asusctl", "profile", "-s", profile], check=True)
+      policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
+      
+      # WMI Mapping: 0 = Balanced, 1 = Performance/Turbo, 2 = Quiet
+      val_to_write = "0"
+      if profile == "Balanced":
+        val_to_write = "0"
+      elif profile == "Performance":
+        val_to_write = "1"
+      elif profile == "Quiet":
+        val_to_write = "2"
+        
+      # Decky runs Python as root, so we can just write directly to the sysfs file!
+      with open(policy_path, "w") as f:
+        f.write(val_to_write)
+        
       return "Success"
     except Exception as e:
+      error(f"Error setting power profile: {e}")
       return f"Error setting profile: {e}"
 
   async def get_live_logs(self, log_type="install"):

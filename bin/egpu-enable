@@ -1,108 +1,171 @@
 #!/bin/bash
 VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
-DATA_DIR="$HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$HOME/homebrew/logs"
+OS_TYPE=$2
+SUPERGFX_TRIG=0
+DECK_HOME=$(eval echo ~deck)
+DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
+LOG_DIR="$DECK_HOME/homebrew/logs"
 mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
-
-# Check if the OS is Bazzite
-if grep -qi "bazzite" /etc/os-release; then
-  OS_TYPE="bazzite"
-else
-  OS_TYPE="steamos"
-fi
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
 
 # Hardware Lock Check
-CONNECTED=$(cat /sys/devices/platform/asus-nb-wmi/egpu_connected)
+CONNECTED=$(cat /sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
 if [ "$CONNECTED" -eq 0 ]; then
   echo "ERROR: XG Mobile not locked."
   exit 2
 fi
 
-# check if its NVIDIA and if so, check for drivers before continuing
-if [ "$VENDOR" == "nvidia" ]; then
-  # Check if the kernel module is actually loadable
-  if ! modinfo nvidia >/dev/null 2>&1; then
-    echo "ERROR: NVIDIA Driver is not installed. Please run the Install NVIDIA drivers button, or select AMD."
-    exit 1
-  fi
-fi
-
-# SELF-HEALING BLOCK (Replaces repair-services)
-echo "Verifying system services..."
-REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
-NEEDS_REPAIR=0
-
-# Check if global commands are missing
-[ ! -L /usr/local/bin/egpu-enable ] && NEEDS_REPAIR=1
-
-# Check if NVIDIA services/sleep scripts are missing
-if [ "$VENDOR" == "nvidia" ]; then
-  [ ! -f /usr/lib/systemd/system-sleep/egpu-resume-fix ] && NEEDS_REPAIR=1
-  [ ! -f /etc/systemd/system/nvidia-suspend.service ] && NEEDS_REPAIR=1
-fi
-
-if [ "$NEEDS_REPAIR" -eq 1 ]; then
-  echo "System files missing (likely due to SteamOS update). Initiating self-repair..."
-  steamos-readonly disable
+# --- supergfxctl NATIVE PATH --- not currently working reliably
+#if systemctl is-active --quiet supergfxd.service; then # && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+#  echo "Bazzite and supergfxctl Detected. Queuing AsusEgpu mode in supergfxctl..."
   
-  # Restore global terminal commands
-  ln -sf "$REPO_ROOT/bin/egpu-enable" /usr/local/bin/egpu-enable
-  ln -sf "$REPO_ROOT/bin/egpu-eject" /usr/local/bin/egpu-eject
-  chmod +x "$REPO_ROOT/bin/egpu-enable" "$REPO_ROOT/bin/egpu-eject"
+#  if supergfxctl -m AsusEgpu; then
+#    echo "supergfxctl hardware switch successful"
+#    echo "Executing SDDM restart to apply hardware switch..."
+#    #systemctl restart sddm --no-block
+#    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
+#    disown
   
-  # Copy background services
-  cp "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
-  
-  if [ "$VENDOR" == "nvidia" ]; then
-    echo "Restoring NVIDIA sleep/resume fixes..."
-    ln -sf "$REPO_ROOT/bin/egpu-resume-fix" /usr/lib/systemd/system-sleep/egpu-resume-fix
-    chmod +x "$REPO_ROOT/bin/egpu-resume-fix"
-    systemctl daemon-reload
-    systemctl enable nvidia-persistenced nvidia-powerd nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service 2>/dev/null
-    systemctl start nvidia-persistenced 2>/dev/null
-  else
-    systemctl daemon-reload
-  fi
-  
-  steamos-readonly enable
-  echo "Self-repair complete."
-fi
+#    echo "--- Enable Finished: Handing off to OS ---"
+#    ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_enable_latest.log"
+#    exit 0
+#  else 
+#    echo "WARNING: supergfxctl crashed or failed to respond."
+#    echo "Falling back to universal WMI hardware activation..."
+#  fi
+#fi
 
 if [ "$OS_TYPE" == "steamos" ]; then
-  # Hardware Activation
-  ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
-  if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
-    echo 1 > "$ENABLE_PATH"
+  # check if its NVIDIA and if so, check for drivers before continuing
+  if [ "$VENDOR" == "nvidia" ]; then
+    # Check if the kernel module is actually loadable
+    if ! modinfo nvidia >/dev/null 2>&1; then
+      echo "ERROR: NVIDIA Driver is not installed. Please run the Install NVIDIA drivers button, or select AMD."
+      exit 1
+    fi
   fi
-  echo 1 > /sys/bus/pci/rescan
+  # SELF-HEALING BLOCK (Replaces repair-services)
+  echo "Verifying system services..."
+  REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
+  NEEDS_REPAIR=0
 
-  # Wait for Hardware
-  COUNT=0
-  while [ ! -e "/dev/dri/card1" ] && [ $COUNT -lt 10 ]; do
-    echo "Waiting for /dev/dri/card1... ($COUNT)"
-    sleep 1
-    ((COUNT++))
+  # Check if global commands are missing
+  [ ! -L /usr/local/bin/egpu-enable ] && NEEDS_REPAIR=1
+
+  # Check if NVIDIA services/sleep scripts are missing
+  if [ "$VENDOR" == "nvidia" ]; then
+    [ ! -f /usr/lib/systemd/system-sleep/egpu-resume-fix ] && NEEDS_REPAIR=1
+    [ ! -f /etc/systemd/system/nvidia-suspend.service ] && NEEDS_REPAIR=1
+  fi
+
+  if [ "$NEEDS_REPAIR" -eq 1 ]; then
+    echo "System files missing. Initiating self-repair..."
+    steamos-readonly disable
+  
+    # Restore global terminal commands
+    ln -sf "$REPO_ROOT/bin/egpu-enable" /usr/local/bin/egpu-enable
+    ln -sf "$REPO_ROOT/bin/egpu-eject" /usr/local/bin/egpu-eject
+    chmod +x "$REPO_ROOT/bin/egpu-enable" "$REPO_ROOT/bin/egpu-eject"
+  
+    # Copy background services
+    cp "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
+  
+    if [ "$VENDOR" == "nvidia" ]; then
+      echo "Restoring NVIDIA sleep/resume fixes..."
+      ln -sf "$REPO_ROOT/bin/egpu-resume-fix" /usr/lib/systemd/system-sleep/egpu-resume-fix
+      chmod +x "$REPO_ROOT/bin/egpu-resume-fix"
+      systemctl daemon-reload
+      systemctl enable nvidia-persistenced nvidia-powerd nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service 2>/dev/null
+      systemctl start nvidia-persistenced 2>/dev/null
+    else
+      systemctl daemon-reload
+    fi
+    steamos-readonly enable
+    echo "Self-repair complete."
+  fi
+fi
+
+if systemctl is-active --quiet supergfxd.service; then 
+  echo "Supergfxd Detected. Stopping supergfxd to avoid panic during switch..."
+  systemctl stop supergfxd.service 2>/dev/null || true
+fi
+
+# Used for all OSes for consistency
+# Hardware Activation
+EXISTING_CARDS=$(ls /dev/dri/card* 2>/dev/null)
+IGPU_CARD=$(echo "$EXISTING_CARDS" | head -n 1)
+ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
+if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
+  echo 1 > "$ENABLE_PATH" || true
+fi
+echo 1 > /sys/bus/pci/rescan
+
+sleep 2
+
+if [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+  if [ "$VENDOR" == "nvidia" ]; then
+    echo "Generating Bazzite/Cachy Wake Hook..."
+    
+    cat << 'EOF' > /etc/systemd/system/egpu-resume.service
+[Unit]
+Description=eGPU Bazzite Resume Fix (Restart SDDM)
+After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+
+[Service]
+Type=oneshot
+# Wait for motherboard to power up the PCIe slot, rescan it, and restart the UI
+ExecStart=/usr/bin/bash -c 'sleep 2 && echo 1 > /sys/bus/pci/rescan && systemctl restart sddm'
+
+[Install]
+WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
+EOF
+    systemctl daemon-reload
+    systemctl enable egpu-resume.service 2>/dev/null
+    
+    echo "Loading NVIDIA drivers into kernel to generate DRM nodes..."
+    modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia 2>/dev/null || true
+    modprobe nvidia_drm modeset=1 fbdev=1
+    modprobe nvidia_modeset nvidia_uvm nvidia
+  fi
+fi
+
+# Wait for Hardware
+COUNT=0
+EGPU_CARD=""
+while [ -z "$EGPU_CARD" ] && [ $COUNT -lt 15 ]; do
+  echo "Waiting for eGPU card... ($COUNT)"
+  CURRENT_CARDS=$(ls /dev/dri/card* 2>/dev/null)
+  for card in $CURRENT_CARDS; do
+    if ! echo "$EXISTING_CARDS" | grep -q "$card"; then
+      EGPU_CARD=$card
+      break
+    fi
   done
+  [ -n "$EGPU_CARD" ] && break
+  sleep 1
+  ((COUNT++))
+done
 
-  if [ ! -e "/dev/dri/card1" ]; then
-    echo "ERROR: Hardware failed to appear in /dev/dri/"
-    exit 1
-  fi
-
-  # Permissions (The ACL Hero)
-  echo "Setting user permissions for eGPU..."
-  setfacl -m u:deck:rw /dev/dri/card1
-  setfacl -m u:deck:rw /dev/dri/renderD129
+if [ -z "$EGPU_CARD" ]; then
+  echo "ERROR: Hardware failed to appear in /dev/dri/"
+  exit 1
+fi
+echo "Success! eGPU dynamically detected as: $EGPU_CARD"
+# Permissions (The ACL Hero)
+echo "Setting user permissions for eGPU..."
+setfacl -m u:deck:rw $EGPU_CARD
+setfacl -m u:deck:rw /dev/dri/renderD*
 
   # STOP UI
-  # We must stop sddm so we can unload the driver modules
-  echo "Stopping SDDM..."
-  systemctl stop sddm
+# We must stop sddm so we can unload the driver modules
+echo "Stopping SDDM..."
+systemctl stop sddm
 
-  # DRIVER RELOAD 
+ 
+if [ "$OS_TYPE" == "steamos" ]; then
+# DRIVER RELOAD 
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Detecting NVIDIA Hardware ID..."
     NVIDIA_ID=$(lspci -n -d 10de: | head -n 1 | awk '{print $3}')
@@ -142,7 +205,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
 
     safe_add "MESA_VK_DEVICE_SELECT=$NVIDIA_ID"
     safe_add "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
-    safe_add "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+    safe_add "WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD"
     safe_add "VK_LOADER_LAYERS_DISABLE=*"
     safe_add "GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1"
 
@@ -150,7 +213,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
     echo "Injecting variables into systemd session..."
     systemctl set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
     systemctl set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-    systemctl set-environment WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0
+    systemctl set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
     systemctl set-environment VK_LOADER_LAYERS_DISABLE="*"
     systemctl set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
 
@@ -159,7 +222,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
     export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
     sudo -u deck $DECK_BUS systemctl --user set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
     sudo -u deck $DECK_BUS systemctl --user set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-    sudo -u deck $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0
+    sudo -u deck $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
 
     # Final Reload & Start
     echo "Daemon-reload and start SDDM..."
@@ -171,11 +234,14 @@ if [ "$OS_TYPE" == "steamos" ]; then
     echo "AMD Vendor detected. Refreshing DRM session..."
     # No extra variables usually needed for AMD eGPUs on SteamOS
   fi
-
-  systemctl start sddm
-
-elif [ "$OS_TYPE" == "bazzite" ]; then
-  supergfxctl -m AsusEgpu
 fi
+  echo "Refreshing DRM session..."
+  systemctl start sddm --no-block
+
+if command -v supergfxctl >/dev/null 2>&1; then #[[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+  echo "Supergfxctl Detected. Disabling so it does not interupt our boot..."
+  systemctl disable supergfxd.service 2>/dev/null || true
+fi
+
 echo "--- Enable Finished: Time for God Mode ---"
-ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" $LOG_DIR/xgmobile_manager_enable_latest.log
+sudo ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" $LOG_DIR/xgmobile_manager_enable_latest.log
