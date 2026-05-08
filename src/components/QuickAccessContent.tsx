@@ -30,7 +30,7 @@ export const QuickAccessContent = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [pluginVersion, setPluginVersion] = useState("Loading...");
-  //const [hasSupergfxctl, setHasSupergfxctl] = useState<boolean>(false);
+  const [hasSupergfxctl, setHasSupergfxctl] = useState<boolean>(false);
   //const [daemonActive, setDaemonActive] = useState<boolean>(true);
   
   // Dynamic State from Backend
@@ -39,6 +39,7 @@ export const QuickAccessContent = () => {
   const [selectedVendor, setSelectedVendor] = useState("nvidia");
   const [osType, setOsType] = useState("steamos");
   const [powerProfile, setPowerProfile] = useState("Unknown");
+  const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && (osType.includes('bazzite') || osType === 'cachyos');
 
   // 1. Initial Load: Fetch Vendor Setting once
   useEffect(() => {
@@ -51,8 +52,8 @@ export const QuickAccessContent = () => {
         const os = await call("get_os_status") as string;
         setOsType(os);
         // call() returns the boolean directly from Python
-        //const hasSgfx = await call("has_supergfxctl") as boolean;
-        //setHasSupergfxctl(hasSgfx);
+        const hasSgfx = await call("has_supergfxctl") as boolean;
+        setHasSupergfxctl(hasSgfx);
       } catch (e) { 
         console.error("Init Error:", e); 
       }
@@ -287,10 +288,27 @@ export const QuickAccessContent = () => {
                 disabled={!gpuStatus.active || isLoading}
                 onClick={() => handleAction("eject_egpu", "Ejecting")}
               >
-                {gpuStatus.active ? "Eject XG Mobile (Handheld)" : "XG Mobile is not Active"}
+                {gpuStatus.active ? "Eject XG Mobile" : "XG Mobile is not Active"}
               </ButtonItem>
             </PanelSectionRow>
 
+            {showSleepWarning && (
+              <PanelSectionRow>
+                <div style={{
+                  backgroundColor: 'rgba(255, 0, 0, 0.15)',
+                  border: '1px solid #ff4444',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  color: '#ffdddd',
+                  fontSize: '13px',
+                  lineHeight: '1.4'
+                }}>
+                  <b>⚠️ CRITICAL SLEEP WARNING</b><br/>
+                  Due to NVIDIA firmware limitations on this OS, putting the device to sleep right now will cause a fatal hardware crash requiring a hard reboot. <br/><br/>
+                  <b>You must Eject the eGPU before sleeping.</b>
+                </div>
+              </PanelSectionRow>
+            )}
             <PanelSectionRow>
               <ToggleField
                 label="NVIDIA Mode"
@@ -318,6 +336,31 @@ export const QuickAccessContent = () => {
               Install NVIDIA Drivers
             </ButtonItem>
           </PanelSectionRow>
+        )}
+
+        {/* SUPERGFXCTL CONTROLS */}
+        {hasSupergfxctl && (
+          <>
+            <PanelSectionRow>
+              <ButtonItem
+                layout="inline"
+                disabled={!gpuStatus.connected || gpuStatus.active || isLoading}
+                onClick={() => handleAction("enable_supergfxctl", "Enabling")}
+              >
+                {gpuStatus.active ? "XG Mobile is Active" : "Enable XG Mobile with Supergfxctl - beta"}
+              </ButtonItem>
+            </PanelSectionRow>
+
+            <PanelSectionRow>
+              <ButtonItem
+                layout="inline"
+                disabled={!gpuStatus.active || isLoading}
+                onClick={() => handleAction("eject_supergfxctl", "Ejecting")}
+              >
+                {gpuStatus.active ? "Eject XG Mobile with Supergfxctl - beta" : "XG Mobile is not Active"}
+              </ButtonItem>
+            </PanelSectionRow>
+          </>
         )}
 
         {/* Universal Debug Tools */}

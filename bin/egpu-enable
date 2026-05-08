@@ -17,26 +17,6 @@ if [ "$CONNECTED" -eq 0 ]; then
   exit 2
 fi
 
-# --- supergfxctl NATIVE PATH --- not currently working reliably
-#if systemctl is-active --quiet supergfxd.service; then # && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
-#  echo "Bazzite and supergfxctl Detected. Queuing AsusEgpu mode in supergfxctl..."
-  
-#  if supergfxctl -m AsusEgpu; then
-#    echo "supergfxctl hardware switch successful"
-#    echo "Executing SDDM restart to apply hardware switch..."
-#    #systemctl restart sddm --no-block
-#    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
-#    disown
-  
-#    echo "--- Enable Finished: Handing off to OS ---"
-#    ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_enable_latest.log"
-#    exit 0
-#  else 
-#    echo "WARNING: supergfxctl crashed or failed to respond."
-#    echo "Falling back to universal WMI hardware activation..."
-#  fi
-#fi
-
 if [ "$OS_TYPE" == "steamos" ]; then
   # check if its NVIDIA and if so, check for drivers before continuing
   if [ "$VENDOR" == "nvidia" ]; then
@@ -106,25 +86,10 @@ sleep 2
 
 if [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
-    echo "Generating Bazzite/Cachy Wake Hook..."
-    
-    cat << 'EOF' > /etc/systemd/system/egpu-resume.service
-[Unit]
-Description=eGPU Bazzite Resume Fix (Restart SDDM)
-After=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
-
-[Service]
-Type=oneshot
-# Wait for motherboard to power up the PCIe slot, rescan it, and restart the UI
-ExecStart=/usr/bin/bash -c 'sleep 2 && echo 1 > /sys/bus/pci/rescan && systemctl restart sddm'
-
-[Install]
-WantedBy=suspend.target hibernate.target hybrid-sleep.target suspend-then-hibernate.target
-EOF
-    systemctl daemon-reload
-    systemctl enable egpu-resume.service 2>/dev/null
     
     echo "Loading NVIDIA drivers into kernel to generate DRM nodes..."
+    systemctl enable nvidia-persistenced nvidia-powerd 2>/dev/null
+    systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null
     modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia 2>/dev/null || true
     modprobe nvidia_drm modeset=1 fbdev=1
     modprobe nvidia_modeset nvidia_uvm nvidia
@@ -235,8 +200,8 @@ if [ "$OS_TYPE" == "steamos" ]; then
     # No extra variables usually needed for AMD eGPUs on SteamOS
   fi
 fi
-  echo "Refreshing DRM session..."
-  systemctl start sddm --no-block
+echo "Refreshing DRM session..."
+systemctl start sddm --no-block
 
 if command -v supergfxctl >/dev/null 2>&1; then #[[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
   echo "Supergfxctl Detected. Disabling so it does not interupt our boot..."

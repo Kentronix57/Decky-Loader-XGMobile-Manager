@@ -36,9 +36,10 @@ NVIDIA GameMode optimizations
 **Read this before installing. You are modifying core system behaviors.**
 
 * **Beta Software:** This is a community-driven project and is currently in Beta. You are using this at your own risk.
-* **Data Corruption Risk:** This plugin modifies the read-only root filesystem, compiles kernel modules via DKMS, and manipulates `/etc/environment`. While it uses a highly protective "Bind Mount" architecture to prevent permanent system bricking, unexpected power loss during installation *could* result in a boot loop requiring a SteamOS reinstall.
-* **Sleep/Resume Game Closures:** Due to how Wayland and the open-source NVIDIA drivers handle Video RAM loss during sleep, **waking the device from sleep with an active NVIDIA eGPU will force close all open games.** The plugin uses a "Resume Fix" to instantly reboot the display server so your screen turns back on safely, but it cannot save your active game state.
-* **External Display Limitations:** Due to current upstream limitations in `gamescope`, **4K and 8K resolutions may not function correctly in Gaming Mode**. 1080p and 1440p are generally stable. X11 Desktop Mode provides wider resolution support. Toggle this in the Developer Settings in Steam
+* **Data Corruption Risk:** This plugin modifies the read-only root filesystem of SteamOS when using NVIDIA only. It compiles kernel modules via DKMS, and manipulates `/etc/environment`. While it uses a highly protective "Bind Mount" architecture to prevent permanent system bricking, unexpected power loss during installation *could* result in a boot loop requiring a SteamOS reinstall.
+* **Sleep/Resume on BazziteOS with NVIDIA forces a Hard Reboot:** When putting the device to sleep with the NVIDIA eGPU active, the GPU cuts power to its Video RAM. Waking the device causes an internal fault on the XG Mobile and triggers the kernel panic. These are caused by upstream issues with the nvidia-open drivers that Bazzite team uses, and my plugin cannot do anything about this. It is recommended to disable sleep when on AC to avoid any complications. If you do find yourself in this scenario, to recover, hold down the power button until the device reboots.
+* **External Display Limitations:** Due to current upstream limitations in `gamescope`, **4K and 8K resolutions may not function correctly in Game Mode**. 1080p and 1440p are generally stable. X11 Desktop Mode provides wider resolution support. Toggle this in the Developer Settings in Steam
+* **Power Profile overwritten by other TDP controllers:** Other TDP controls (like SimpleDeckyTDP and HHD) will override the setting of the Power Profile. Use the dropdown in this app to monitor what the current power profile is (this plugin pings the xg mobile every 3 seconds to determine the current Power Profile setting).
 
 ---
 
@@ -46,9 +47,9 @@ NVIDIA GameMode optimizations
 
 | Hardware | SteamOS | Bazzite | Notes |
 | :--- | :--- | :--- | :--- |
-| **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🟢 Tested & Working | Full DKMS driver compilation supported. BazziteOS currently reporting issues and under development. |
-| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | Untested, but uses the same nvidia drivers. |
-| **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | Uses native `amdgpu` kernel drivers. Might not consistently swap to external monitor in GameMode |
+| **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🟢 Tested & Working | Full DKMS driver compilation supported. BazziteOS cannot recover from sleep/hibernate. |
+| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | Untested, but should follow all the same rules as the 4090. |
+| **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | Uses native `amdgpu` kernel drivers. |
 
 ---
 
@@ -68,6 +69,7 @@ If a SteamOS update wipes out the background services, the plugin will automatic
 
 **For Bazzite / CachyOS (WMI God-Mode):**
 Bazzite completely strips out standard ASUS daemons (like asusd) to preserve native Steam TDP slider functionality. Because of this, the XG Mobile usually defaults to maximum power/noise. This plugin bypasses the missing daemons and writes hardware WMI codes directly to the motherboard, giving you native UI dropdowns to control the XG Mobile's Quiet/Balanced/Performance modes without breaking Bazzite's APU controls. Because of this, the plugin disables superfgxctl since it was providing inconsistent results, and interrupting this plugins' commands. 
+*(Note: Other TDP controls (like SimpleDeckyTDP and HHD) will override the setting of the Power Profile).*
 
 ---
 
@@ -146,11 +148,12 @@ If you wish to contribute or build the plugin from your own development environm
 ---
 
 ## 🐛 Known Issues
-* **Sleep/Resume Closes Games:** When putting the device to sleep with the NVIDIA eGPU active, the GPU cuts power to its Video RAM. Waking the device triggers a safety script that forcefully restarts the Steam UI to prevent a kernel panic. This successfully turns your screens back on, but any game you had open will be closed.
+* **Sleep/Resume BazziteOS with NVIDIA forces a Hard Reboot:** When putting the device to sleep with the NVIDIA eGPU active, the GPU cuts power to its Video RAM. Waking the device causes an internal fault on the XG Mobile and triggers the kernel panic. To recover, hold down the power button until the device reboots.
 * **Boot Loop after SteamOS Update:** If you update SteamOS *without* running the Reset script first, the system may try to load orphaned kernel modules. Run the Reset script from recovery or TTY to fix.
 * **Live Logs "Initializing":** Occasionally the React UI polls faster than the Python backend can open the log file. Close the log viewer and reopen it.
-* **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesn't affect performance, and is actively being investigated.
-* **X11 SteamOS Desktop Mode Sleep Bug:** When resuming from sleep mode in Desktop X11 with NVIDIA eGPU, the resume script picks up and restarts tge device in a broken GameMode environment. FOR NOW, disable sleep mode when on AC.
+* **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesn't affect performance, but is actively being investigated.
+* **X11 SteamOS Desktop Mode Sleep Bug:** When resuming from sleep mode in Desktop X11 with NVIDIA eGPU on SteamOS, the resume script picks up and restarts the device in a broken GameMode environment. For now, disable sleep mode when on AC.
+* **Power Profile overwritten by other TDP controllers:** Other TDP controls (like SimpleDeckyTDP and HHD) will override the setting of the Power Profile. Use the dropdown in this app to monitor what the current power profile is (this plugin pings the xg mobile every 3 seconds to determine the current Power Profile setting).
 
 ---
 
@@ -175,7 +178,8 @@ Please use GitHub Issues rather than Reddit DMs for technical support so the com
 This plugin required countless hours of kernel-level debugging, file system reverse-engineering, and risk to my personal hardware to build. I offer it completely free and open-source.
 
 If this tool saved you hours of troubleshooting or finally made your portable eGPU setup viable, consider buying me a coffee or an energy drink to keep the updates coming!
-**(Donation Link TBD)**
+**[(Buy me a coffee)](https://buymeacoffee.com/kentronix)**
+**[(Ko-Fi)](https://ko-fi.com/kentronix)**
 
 ## 🏆 Credits
 * **Development & Architecture:** Kentronix

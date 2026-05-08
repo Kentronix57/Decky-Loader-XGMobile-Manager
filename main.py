@@ -124,6 +124,20 @@ class Plugin:
     
     return await self._execute_script("egpu-eject", EJECT_LOG, vendor, os_type)
 
+  async def enable_supergfxctl(self):
+    vendor = await self.get_setting("gpu_vendor", "nvidia")
+    os_type = self.get_os_type()
+
+    if vendor == "nvidia" and os_type == "bazzite":
+      return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
+    return await self._execute_script("supergfx-enable", ENABLE_LOG, vendor)
+
+  async def eject_supergfxctl(self):
+    vendor = await self.get_setting("gpu_vendor", "nvidia")
+    os_type = self.get_os_type()
+    
+    return await self._execute_script("supergfx-eject", EJECT_LOG, vendor)
+
   async def repair_services(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     return await self._execute_script("repair-services", REPAIR_LOG, vendor)

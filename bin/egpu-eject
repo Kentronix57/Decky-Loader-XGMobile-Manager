@@ -10,29 +10,6 @@ exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"
 
-# --- SUPERGFXCTL NATIVE PATH --- not currently working reliably
-#if systemctl is-active --quiet supergfxd.service; then #command -v supergfxctl >/dev/null 2>&1 && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
-#  echo "Supergfxctl Detected. Queuing Integrated mode in supergfxctl..."
-
-#  if supergfxctl -m Integrated; then
-#    echo "supergfxctl hardware disconnect successful."
-#    echo "Executing detached SDDM restart..."
-    
-#    # FORK: Detaches from Decky Loader safely
-#    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
-#    disown
-#    #echo "Executing non-blocking SDDM restart to apply hardware switch..."
-#    #systemctl restart sddm --no-block
-  
-#    echo "--- Eject Finished: Waiting for detached restart ---"
-#    ln -sf "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_eject_latest.log"
-#    exit 0
-#  else
-#    echo "WARNING: supergfxctl crashed or failed to respond."
-#    echo "Falling back to universal WMI hardware deactivation..."
-#  fi
-#fi
-
 if systemctl is-active --quiet supergfxd.service; then 
   echo "Supergfxd Detected. Stopping supergfxd to avoid panic during switch..."
   systemctl stop supergfxd.service 2>/dev/null || true
@@ -96,7 +73,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
     modprobe -r nvidia_uvm || true
     modprobe -r nvidia || true
   fi
-elif [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+elif [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == *"cachyos"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Stopping NVIDIA power services..."
     systemctl stop nvidia-powerd nvidia-persistenced 2>/dev/null || true
@@ -148,15 +125,6 @@ done
 
 if [ "$SUCCESS" -eq 0 ]; then
   echo "WARNING: Hardware did not seem to drop from /dev/dri/. Proceeding anyway to restore UI."
-fi
-
-if [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
-  if [ "$VENDOR" == "nvidia" ]; then
-    echo "Cleaning up Bazzite Wake Hook..."
-    systemctl disable egpu-resume.service 2>/dev/null || true
-    rm -f /etc/systemd/system/egpu-resume.service
-    systemctl daemon-reload
-  fi
 fi
 
 systemctl start sddm --no-block
