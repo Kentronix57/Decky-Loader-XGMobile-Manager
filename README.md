@@ -15,7 +15,7 @@ A Decky Loader plugin that brings seamless, UI-driven support for the ASUS ROG X
 This plugin manages the complex hardware handshakes, dynamically compiles and intercepts NVIDIA drivers using safe bind-mount architecture on SteamOS, injects Wayland/Vulkan environment variables to make eGPUs work natively inside Steam's Gaming Mode, and provides direct motherboard-level control over the eGPU's power limits and thermals.
 
 ---
-NVIDIA GameMode optimizations
+
 ## Table of Contents
 - [Important Disclaimers & Risks](#️-important-disclaimers--risks)
 - [Compatibility Matrix](#-compatibility-matrix)
@@ -178,7 +178,9 @@ Please use GitHub Issues rather than Reddit DMs for technical support so the com
 This plugin required countless hours of kernel-level debugging, file system reverse-engineering, and risk to my personal hardware to build. I offer it completely free and open-source.
 
 If this tool saved you hours of troubleshooting or finally made your portable eGPU setup viable, consider buying me a coffee or an energy drink to keep the updates coming!
+
 **[(Buy me a coffee)](https://buymeacoffee.com/kentronix)**
+
 **[(Ko-Fi)](https://ko-fi.com/kentronix)**
 
 ## 🏆 Credits
