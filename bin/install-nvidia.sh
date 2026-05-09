@@ -32,8 +32,9 @@ LIB32_URL="$BASE_URL/l/lib32-nvidia-utils/lib32-nvidia-utils-$NV_VERSION-x86_64.
 WAYLAND2_URL="$BASE_URL/e/egl-wayland2/egl-wayland2-1.0.1-1-x86_64.pkg.tar.zst"
 SETTINGS_URL="$BASE_URL/n/nvidia-settings/nvidia-settings-$NV_VERSION-x86_64.pkg.tar.zst"
 
-DATA_DIR="$HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$HOME/homebrew/logs"
+DECK_HOME=$(eval echo ~deck)
+DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
+LOG_DIR="$DECK_HOME/homebrew/logs"
 mkdir -p "$DATA_DIR/configs"
 
 # Detect Kernel Info

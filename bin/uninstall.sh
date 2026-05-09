@@ -1,6 +1,5 @@
 #!/bin/bash
 echo "--- SURGICAL XG MOBILE UNINSTALLER ---"
-steamos-readonly disable
 
 # Check if the OS is Bazzite
 if grep -qi "bazzite" /etc/os-release; then
@@ -9,8 +8,9 @@ if grep -qi "bazzite" /etc/os-release; then
     exit 1
 fi
 
-DATA_DIR="$HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$HOME/homebrew/logs"
+DECK_HOME=$(eval echo ~deck)
+DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
+LOG_DIR="$DECK_HOME/homebrew/logs"
 mkdir -p "$DATA_DIR/configs"
 
 # Detect Kernel Info dynamically
@@ -23,6 +23,8 @@ ROOT_TARGETS=("/usr/lib/nvidia" "/usr/lib32/nvidia" "/usr/src" "/usr/lib/firmwar
 VAR_TARGETS=("/var/lib/dkms" "/var/cache/pacman/pkg")
 ALL_TARGETS=("${ROOT_TARGETS[@]}" "${VAR_TARGETS[@]}")
 BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")
+
+steamos-readonly disable
 
 echo "Ensuring all temporary bind mounts are detached..."
 for B in "${BIND_TARGETS[@]}"; do

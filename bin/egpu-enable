@@ -34,6 +34,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
         echo "CRITICAL ERROR: NVIDIA Vulkan configs missing due to v0.2.0 migration."
         echo "Please use the 'Install NVIDIA Drivers' button in the plugin to regenerate them."
         exit 4
+      fi
     fi
   fi
 
