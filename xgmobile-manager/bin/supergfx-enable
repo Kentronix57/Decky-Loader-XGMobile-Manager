@@ -1,0 +1,27 @@
+#!/bin/bash
+VENDOR=$1
+DECK_HOME=$(eval echo ~deck)
+LOG_DIR="$DECK_HOME/homebrew/logs"
+
+exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
+
+# --- SUPERGFXCTL NATIVE PATH ---
+if systemctl is-active --quiet supergfxd.service; then # && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+  echo "Supergfxctl Detected. Queuing AsusEgpu mode in supergfxctl..."
+  
+  if supergfxctl -m AsusEgpu; then
+    echo "supergfxctl hardware switch successful"
+    echo "Executing SDDM restart to apply hardware switch..."
+    #systemctl restart sddm --no-block
+    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
+    disown
+  
+    echo "--- Enable Finished: Handing off to OS ---"
+    ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_enable_latest.log"
+    exit 0
+  else 
+    echo "WARNING: supergfxctl crashed or failed to respond."
+    echo "Please copy the logs and upload them to github for assistance."
+    ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_enable_latest.log"
+  fi
+fi

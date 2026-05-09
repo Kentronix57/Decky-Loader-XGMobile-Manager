@@ -1,0 +1,18 @@
+#!/bin/sh
+# ROG Ally XG Mobile Resume Fix
+# This script is triggered by systemd-sleep after the system wakes up.
+
+case $1/$2 in
+  post/*)
+    # Check if the NVIDIA card is active (Driver check)
+    if lsmod | grep -q "nvidia_drm"; then
+        # Check if the modeset is active (The "Y" we fought for)
+        if [ "$(cat /sys/module/nvidia_drm/parameters/modeset)" = "Y" ]; then
+            echo "eGPU Active on Resume: Restarting UI to prevent freeze..."
+            # Small delay to let the NVIDIA driver re-map the VRAM
+            sleep 2
+            systemctl restart sddm
+        fi
+    fi
+    ;;
+esac

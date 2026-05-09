@@ -1,0 +1,30 @@
+#!/bin/bash
+VENDOR=$1
+DECK_HOME=$(eval echo ~deck)
+LOG_DIR="$DECK_HOME/homebrew/logs"
+
+exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
+
+# --- SUPERGFXCTL NATIVE PATH ---
+if systemctl is-active --quiet supergfxd.service; then #command -v supergfxctl >/dev/null 2>&1 && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+  echo "Supergfxctl Detected. Queuing Integrated mode in supergfxctl..."
+
+  if supergfxctl -m Integrated; then
+    echo "supergfxctl hardware disconnect successful."
+    echo "Executing detached SDDM restart..."
+    
+    # FORK: Detaches from Decky Loader safely
+    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
+    disown
+    #echo "Executing non-blocking SDDM restart to apply hardware switch..."
+    #systemctl restart sddm --no-block
+  
+    echo "--- Eject Finished: Waiting for detached restart ---"
+    ln -sf "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_eject_latest.log"
+    exit 0
+  else
+    echo "WARNING: supergfxctl crashed or failed to respond."
+    echo "Please copy the logs and upload them to github for assistance."
+    ln -sf "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_eject_latest.log"
+  fi
+fi

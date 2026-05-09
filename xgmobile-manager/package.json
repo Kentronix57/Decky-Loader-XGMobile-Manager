@@ -1,0 +1,54 @@
+{
+  "name": "xgmobile-manager",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Manage XG Mobile Ejection, Activation, and NVIDIA Driver Repairs.",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w",
+    "release": "bash build.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kentronix57/Decky-Loader-XGMobile-Manager.git"
+  },
+  "keywords": [
+    "rog-ally",
+    "xgmobile",
+    "nvidia",
+    "egpu"
+  ],
+  "author": {
+    "name": "Kenny Hood (Kentronix)"
+  },
+  "license": "GPL-3",
+  "bugs": {
+    "url": "https://github.com/Kentronix57/Decky-Loader-NVIDIA-XGMobile-Plugin/issues"
+  },
+  "homepage": "https://github.com/Kentronix57/Decky-Loader-XGMobile-Manager#readme",
+  "devDependencies": {
+    "@decky/api": "^1.0.5",
+    "@decky/rollup": "^1.0.2",
+    "@decky/ui": "^4.2.2",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@types/node": "^18.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "rollup": "^2.79.1",
+    "shx": "^0.4.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "react-icons": "^4.10.1"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": [
+        "react",
+        "react-dom",
+        "decky-frontend-lib"
+      ]
+    }
+  }
+}
