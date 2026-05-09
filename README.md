@@ -15,7 +15,7 @@ A Decky Loader plugin that brings seamless, UI-driven support for the ASUS ROG X
 This plugin manages the complex hardware handshakes, dynamically compiles and intercepts NVIDIA drivers using safe bind-mount architecture on SteamOS, injects Wayland/Vulkan environment variables to make eGPUs work natively inside Steam's Gaming Mode, and provides direct motherboard-level control over the eGPU's power limits and thermals.
 
 ---
-
+NVIDIA GameMode optimizations
 ## Table of Contents
 - [Important Disclaimers & Risks](#️-important-disclaimers--risks)
 - [Compatibility Matrix](#-compatibility-matrix)
@@ -120,6 +120,14 @@ When there is a SteamOS update available, follow this exact sequence for safety:
 * **HDR STILL IN TESTING** If you experience color issues, disable HDR under Display in Steam Settings.
 * **Auto-Dimming:** If the screen is constantly dimming on you, enable "Use Native Color Tempeture" in Steam Display Settings.
 * **Tearing/Vsync:** Enable VRR and Allow Screen Tearing in the Quick Access Menu. (Don't worry, the screen won't actually tear, this is required for how NVIDIA communicates its layers to Wayland/Gamescope).
+
+---
+
+## NVIDIA GameMode optimizations
+* **HDR STILL IN TESTING** 
+1. Disable HDR under Display in Steam Settings
+2. If the screen is constantly dimming on you, Enable Use Native Color Tempeture in Steam Display Settings.
+3. Enable VRR and Allow Screen Tearing (dont worry, the screen wont tear, this is needed for the way that NVIDIA communicates its layers to gamescope) in the QAM.
 
 ---
 
