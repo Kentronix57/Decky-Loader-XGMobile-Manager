@@ -51,18 +51,21 @@ BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")
 # --- PRE-FLIGHT KERNEL CHECK ---
 echo "Verifying Arch repository kernel headers..."
 pacman -Sy >/dev/null 2>&1 || true
-REPO_VER=$(pacman -Si "$HEADER_PKG" 2>/dev/null | grep "^Version" | awk '{print $3}')
-
 KVER_BASE=$(echo "$KVER_FULL" | cut -d'-' -f1)
+
+REPO_RAW=$(pacman -Ss "$HEADER_PKG" | grep "^jupiter-main" | head -n 1)
+REPO_VER=$(echo "$REPO_RAW" | awk '{print $2}')
 REPO_BASE=$(echo "$REPO_VER" | cut -d'.' -f1,2,3)
 
 if [ "$KVER_BASE" != "$REPO_BASE" ]; then
   echo "ERROR: Kernel mismatch detected!"
   echo "Active Kernel: $KVER_FULL"
   echo "Repository Headers: $REPO_VER"
-  echo "Please update SteamOS via Gaming Mode and reboot before installing."
+  echo "Valve has updated the kernel headers in their repository."
+  echo "Please go to SteamOS Settings -> System -> Apply Updates and reboot before installing."
   exit 1
 fi
+HEADER_PKG="${HEADER_PKG}=${REPO_VER}"
 echo "Kernel check passed: $KVER_BASE"
 
 echo "--- STARTING NVIDIA eGPU UPDATER/INSTALLER (Target: $NV_VERSION) ---"

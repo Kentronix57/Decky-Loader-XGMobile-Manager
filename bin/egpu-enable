@@ -14,7 +14,7 @@ echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
 CONNECTED=$(cat /sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
 if [ "$CONNECTED" -eq 0 ]; then
   echo "ERROR: XG Mobile not locked."
-  exit 2
+  exit 1
 fi
 
 if [ "$OS_TYPE" == "steamos" ]; then
@@ -23,9 +23,20 @@ if [ "$OS_TYPE" == "steamos" ]; then
     # Check if the kernel module is actually loadable
     if ! modinfo nvidia >/dev/null 2>&1; then
       echo "ERROR: NVIDIA Driver is not installed. Please run the Install NVIDIA drivers button, or select AMD."
-      exit 1
+      exit 2
+    fi
+    if [ ! -f "$DATA_DIR/configs_backup/nvidia_icd.json" ] && [ ! -f "/usr/share/vulkan/icd.d/nvidia_icd.json" ]; then
+      if [ -f "/home/deck/xgmobile_configs_backup/nvidia_icd.json" ]; then
+        echo "CRITICAL ERROR: NVIDIA Vulkan configs detected in old folder location due to v0.2.0 migration."
+        echo "Please use the 'Install NVIDIA Drivers' button in the plugin to regenerate them."
+        exit 3
+      else
+        echo "CRITICAL ERROR: NVIDIA Vulkan configs missing due to v0.2.0 migration."
+        echo "Please use the 'Install NVIDIA Drivers' button in the plugin to regenerate them."
+        exit 4
     fi
   fi
+
   # SELF-HEALING BLOCK (Replaces repair-services)
   echo "Verifying system services..."
   REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
@@ -115,7 +126,7 @@ done
 
 if [ -z "$EGPU_CARD" ]; then
   echo "ERROR: Hardware failed to appear in /dev/dri/"
-  exit 1
+  exit 5
 fi
 echo "Success! eGPU dynamically detected as: $EGPU_CARD"
 # Permissions (The ACL Hero)
@@ -137,7 +148,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
   
     if [ -z "$NVIDIA_ID" ]; then
       echo "ERROR: Could not detect an NVIDIA GPU ID on the PCIe bus. Aborting."
-      exit 1
+      exit 6
     fi
     echo "Dynamic Hardware Lock: $NVIDIA_ID"
 

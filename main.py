@@ -182,22 +182,21 @@ class Plugin:
       return "Error"
 
   async def set_power_profile(self, profile: str):
+    clean_profile = str(profile).strip().lower()
+    log(f"WMI PROFILE RECEIVED FROM UI: '{clean_profile}'")
+    
+    val_to_write = "0"
+    if "balanced" in clean_profile:
+      val_to_write = "0"
+    elif "performance" in  clean_profile:
+      val_to_write = "1"
+    elif "quiet" in clean_profile:
+      val_to_write = "2"
+
     try:
       policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
-      
-      # WMI Mapping: 0 = Balanced, 1 = Performance/Turbo, 2 = Quiet
-      val_to_write = "0"
-      if profile == "Balanced":
-        val_to_write = "0"
-      elif profile == "Performance":
-        val_to_write = "1"
-      elif profile == "Quiet":
-        val_to_write = "2"
-        
-      # Decky runs Python as root, so we can just write directly to the sysfs file!
       with open(policy_path, "w") as f:
         f.write(val_to_write)
-        
       return "Success"
     except Exception as e:
       error(f"Error setting power profile: {e}")
