@@ -3,7 +3,7 @@
 > Native, UI-driven support for the ASUS ROG XG Mobile eGPU ecosystem on SteamOS and Bazzite.
 
 [![SteamOS Compatible](https://img.shields.io/badge/SteamOS-Compatible-1A9FFF)](https://store.steampowered.com/steamos)
-[![Kernel 6.18](https://img.shields.io/badge/kernel-6.18.25--valve1-orange)](https://gitlab.steamos.cloud/jupiter/linux-integration)
+[![Kernel 6.18](https://img.shields.io/badge/kernel-6.18.28--valve1-orange)](https://gitlab.steamos.cloud/jupiter/linux-integration)
 [![NVIDIA 595](https://img.shields.io/badge/nvidia--dkms-595.71.05-76B900)](https://www.nvidia.com/Download/index.aspx)
 [![CUDA 12.8](https://img.shields.io/badge/CUDA-12.8-76B900)](https://developer.nvidia.com/cuda-downloads)
 [![License GPLv3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
