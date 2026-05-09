@@ -16,7 +16,7 @@ interface LogViewerModalProps {
 }
 
 export const LogViewerModal: FC<LogViewerModalProps> = ({ closeModal }) => {
-  const [logType, setSelectedLog] = useState<string | number>('install');
+  const [logType, setSelectedLog] = useState<string | number>('enable');
   const [logText, setLogText] = useState("Reading log...");
 
   useEffect(() => {

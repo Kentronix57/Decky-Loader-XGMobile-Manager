@@ -1,5 +1,5 @@
 #!/bin/bash
-
+set -e
 # 1. Cleanup old builds
 echo "Cleaning up old builds..."
 rm -rf dist

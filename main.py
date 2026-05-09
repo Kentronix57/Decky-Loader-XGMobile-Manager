@@ -4,19 +4,20 @@ import os
 import json
 import decky
 import decky_plugin
+import shutil
 from settings import SettingsManager
 from typing import TypeVar
 from datetime import datetime
 
 Initialized = False
 T = TypeVar("T")
-
-ENABLE_LOG = "/tmp/xgmobile_manager_enable_latest.log"
-EJECT_LOG = "/tmp/xgmobile_manager_eject_latest.log"
-REPAIR_LOG = "/tmp/xgmobile_manager_repair.log"
-DEBUG_LOG = "/tmp/xgmobile_manager_debug.log"
-INSTALL_LOG = "/tmp/xgmobile_manager_install.log"
-NUKE_LOG = "/tmp/xgmobile_manager_nuke.log"
+LOG_DIR = "/home/deck/homebrew/logs"
+ENABLE_LOG = LOG_DIR+"/xgmobile_manager_enable_latest.log"
+EJECT_LOG = LOG_DIR+"/xgmobile_manager_eject_latest.log"
+REPAIR_LOG = LOG_DIR+"/xgmobile_manager_repair.log"
+DEBUG_LOG = LOG_DIR+"/xgmobile_manager_debug.log"
+INSTALL_LOG = LOG_DIR+"/xgmobile_manager_install.log"
+NUKE_LOG = LOG_DIR+"/xgmobile_manager_nuke.log"
 
 def log(txt):
   decky.logger.info(txt)
@@ -27,13 +28,52 @@ def warn(txt):
 def error(txt):
   decky.logger.error(txt)
 
-
 class Plugin:
   settings: SettingsManager
 
   # Get the path where the plugin is installed
   def get_plugin_dir(self):
     return os.path.dirname(os.path.realpath(__file__))
+
+  async def get_version(self):
+    """Reads the version directly from plugin.json."""
+    try:
+      json_path = os.path.join(self.get_plugin_dir(), "plugin.json")
+      
+      with open(json_path, 'r') as f:
+        data = json.load(f)
+        return data.get('version', '0.2.0')
+    except Exception as e:
+      error(f"Error reading version: {e}")
+      return "0.2.0"
+
+  def get_os_type(self):
+    """Detects the host OS and validates the Bazzite NVIDIA image."""
+    try:
+      with open("/etc/os-release", "r") as f:
+        os_data = f.read().lower()
+                
+        if "bazzite" in os_data:
+          # Check if they actually installed the NVIDIA variant
+          if "nvidia" not in os_data:
+            return "bazzite"
+          return "bazzite-nvidia"
+        elif "cachyos" in os_data:
+          return "cachyos"
+        elif "steamos" in os_data:
+          return "steamos"
+        else:
+          return "unsupported"
+    except Exception:
+      return "unsupported"
+
+  async def get_os_status(self):
+    """Helper to pass the OS type to React on load."""
+    return self.get_os_type()
+
+  async def has_supergfxctl(self):
+    """Returns True if supergfxctl is installed and in the system PATH."""
+    return shutil.which("supergfxctl") is not None
 
   async def _execute_script(self, script_name, log_path, *args):
     """
@@ -72,22 +112,96 @@ class Plugin:
 
   async def enable_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
-    return await self._execute_script("egpu-enable", ENABLE_LOG, vendor)
+    os_type = self.get_os_type()
+
+    if vendor == "nvidia" and os_type == "bazzite":
+      return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
+    return await self._execute_script("egpu-enable", ENABLE_LOG, vendor, os_type)
 
   async def eject_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
-    return await self._execute_script("egpu-eject", EJECT_LOG, vendor)
+    os_type = self.get_os_type()
+    
+    return await self._execute_script("egpu-eject", EJECT_LOG, vendor, os_type)
+
+  async def enable_supergfxctl(self):
+    vendor = await self.get_setting("gpu_vendor", "nvidia")
+    os_type = self.get_os_type()
+
+    if vendor == "nvidia" and os_type == "bazzite":
+      return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
+    return await self._execute_script("supergfx-enable", ENABLE_LOG, vendor)
+
+  async def eject_supergfxctl(self):
+    vendor = await self.get_setting("gpu_vendor", "nvidia")
+    os_type = self.get_os_type()
+    
+    return await self._execute_script("supergfx-eject", EJECT_LOG, vendor)
 
   async def repair_services(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     return await self._execute_script("repair-services", REPAIR_LOG, vendor)
 
   async def install_nvidia(self):
+    if not self.get_os_type() == "steamos":
+      log("SteamOS not detected: Blocking DKMS driver installation.")
+      return "Error: SteamOS not detected. NVIDIA Driver install is currently only for SteamOS."
+        
+    log("SteamOS detected: Starting DKMS driver compilation.")
     return await self._execute_script("install-nvidia.sh", INSTALL_LOG)
 
   async def mega_nuke(self):
     return await self._execute_script("uninstall.sh", NUKE_LOG)
+  
+  async def reboot_system(self):
+    clean_env = os.environ.copy()
+    clean_env.pop("LD_LIBRARY_PATH", None)
+    subprocess.run(["sudo", "reboot"], env=clean_env)
+    return True
+
+  async def get_power_profile(self):
+    try:
+      policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
+      if not os.path.exists(policy_path):
+        return "Unknown"
+        
+      with open(policy_path, "r") as f:
+        val = f.read().strip()
+        
+      # WMI Mapping: 0 = Balanced, 1 = Performance/Turbo, 2 = Quiet
+      if val == "0":
+        return "Balanced"
+      elif val == "1":
+        return "Performance"
+      elif val == "2":
+        return "Quiet"
+      else:
+        return "Unknown"
+    except Exception as e:
+      error(f"Error reading power profile: {e}")
+      return "Error"
+
+  async def set_power_profile(self, profile: str):
+    clean_profile = str(profile).strip().lower()
+    log(f"WMI PROFILE RECEIVED FROM UI: '{clean_profile}'")
     
+    val_to_write = "0"
+    if "balanced" in clean_profile:
+      val_to_write = "0"
+    elif "performance" in  clean_profile:
+      val_to_write = "1"
+    elif "quiet" in clean_profile:
+      val_to_write = "2"
+
+    try:
+      policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
+      with open(policy_path, "w") as f:
+        f.write(val_to_write)
+      return "Success"
+    except Exception as e:
+      error(f"Error setting power profile: {e}")
+      return f"Error setting profile: {e}"
+
   async def get_live_logs(self, log_type="install"):
     """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'nuke'."""
     log_map = {
@@ -142,8 +256,10 @@ class Plugin:
             status["vendor"] = "amd"
 
     except Exception as e:
+      error(f"CRITICAL PYTHON ERROR in get_gpu_status: {e}")
       with open(DEBUG_LOG, "a") as dbg:
-          return "CRITICAL PYTHON ERROR: {e}"
+        dbg.write(f"CRITICAL ERROR: {e}\n")
+      return status
 
     return status
 
