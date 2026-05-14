@@ -6,8 +6,8 @@ const LOG_OPTIONS: DropdownOption[] = [
   { data: 'enable', label: 'Enable Log' },
   { data: 'eject', label: 'Eject Log' },
   { data: 'install', label: 'NVIDIA Install Log' },
-  { data: 'repair', label: 'Repair Services Log' },
-  { data: 'nuke', label: 'Reset Environment Log' },
+  //{ data: 'repair', label: 'Repair Services Log' },
+  { data: 'uninstall', label: 'Reset Environment Log' },
   { data: 'debug', label: 'Debug Logs' }
 ];
 

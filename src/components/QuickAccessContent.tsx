@@ -31,6 +31,7 @@ export const QuickAccessContent = () => {
   const [statusText, setStatusText] = useState("");
   const [pluginVersion, setPluginVersion] = useState("Loading...");
   const [hasSupergfxctl, setHasSupergfxctl] = useState<boolean>(false);
+  const [deviceType, setDeviceType] = useState<string>("unknown");
   //const [daemonActive, setDaemonActive] = useState<boolean>(true);
   
   // Dynamic State from Backend
@@ -54,6 +55,8 @@ export const QuickAccessContent = () => {
         // call() returns the boolean directly from Python
         const hasSgfx = await call("has_supergfxctl") as boolean;
         setHasSupergfxctl(hasSgfx);
+        const device = await call("get_device_type") as string;
+        setDeviceType(device);
       } catch (e) { 
         console.error("Init Error:", e); 
       }
@@ -130,6 +133,27 @@ export const QuickAccessContent = () => {
     }
   };
 
+  const enableSuperGfxd = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    setStatusText("Restarting Daemon");
+    toaster.toast({ title: "Flow Controls", body: "Restarting supergfxd..." });
+
+    try {
+      const result = await call("restart_supergfxd") as string;
+      if (result === "Success") {
+        toaster.toast({ title: "Flow Controls", body: "Daemon restarted successfully." });
+      } else {
+        toaster.toast({ title: "Error", body: result });
+      }
+    } catch (e) {
+      toaster.toast({ title: "Error", body: "Action failed." });
+    } finally {
+      setIsLoading(false);
+      setStatusText("");
+    }
+  };
+  
   const toggleVendor = async (val: boolean) => {
     const newVendor = val ? "nvidia" : "amd";
     setSelectedVendor(newVendor);
@@ -144,10 +168,10 @@ export const QuickAccessContent = () => {
         strOKButtonText="Purge & Reset"
         onOK={() => { 
           setTimeout(async () => {
-            showModal(<LiveLogViewerModal logType="nuke" />);
+            showModal(<LiveLogViewerModal logType="uninstall" />);
             setIsLoading(true);
             try {
-              const result = await call("mega_nuke") as string;
+              const result = await call("uninstall_nvidia") as string;
               if (result !== "Success") {
                 toaster.toast({ title: "Reset Error", body: result });
               } else {
@@ -339,28 +363,31 @@ export const QuickAccessContent = () => {
         )}
 
         {/* SUPERGFXCTL CONTROLS */}
-        {hasSupergfxctl && (
-          <>
+        {deviceType === "laptop" && (//{hasSupergfxctl && (
+          <PanelSection title="Flow Laptop Controls">
             <PanelSectionRow>
+              <ButtonItem layout="below" onClick={() => enableSuperGfxd()}>
+                Restart Supergfxd
+              </ButtonItem>
               <ButtonItem
                 layout="inline"
-                disabled={!gpuStatus.connected || gpuStatus.active || isLoading}
+                disabled={isLoading}
                 onClick={() => handleAction("enable_supergfxctl", "Enabling")}
               >
-                {gpuStatus.active ? "XG Mobile is Active" : "Enable XG Mobile with Supergfxctl - beta"}
+                Send Supergfxctl Hybrid command (ASUS Flow laptops) - beta
               </ButtonItem>
             </PanelSectionRow>
 
             <PanelSectionRow>
               <ButtonItem
                 layout="inline"
-                disabled={!gpuStatus.active || isLoading}
+                disabled={isLoading}
                 onClick={() => handleAction("eject_supergfxctl", "Ejecting")}
               >
-                {gpuStatus.active ? "Eject XG Mobile with Supergfxctl - beta" : "XG Mobile is not Active"}
+                Send Supergfxctl Integrated command (ASUS Flow laptops) - beta
               </ButtonItem>
             </PanelSectionRow>
-          </>
+          </PanelSection>
         )}
 
         {/* Universal Debug Tools */}

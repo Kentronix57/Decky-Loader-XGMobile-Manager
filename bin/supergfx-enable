@@ -1,15 +1,18 @@
 #!/bin/bash
-VENDOR=$1
-DECK_HOME=$(eval echo ~deck)
-LOG_DIR="$DECK_HOME/homebrew/logs"
+VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
+OS_TYPE=$2
+LOG_DIR=$3
+DATA_DIR=$4
 
 exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
 
 # --- SUPERGFXCTL NATIVE PATH ---
-if systemctl is-active --quiet supergfxd.service; then # && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
-  echo "Supergfxctl Detected. Queuing AsusEgpu mode in supergfxctl..."
-  
-  if supergfxctl -m AsusEgpu; then
+if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet supergfxd.service; then # && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+  echo "Supergfxctl Detected. Queuing Hybrid mode in supergfxctl..."
+
+  systemctl start supergfxd.service 2>/dev/null || true
+
+  if supergfxctl -m Hybrid; then
     echo "supergfxctl hardware switch successful"
     echo "Executing SDDM restart to apply hardware switch..."
     #systemctl restart sddm --no-block

@@ -1,5 +1,8 @@
 #!/bin/bash
-
+LOG_DIR=$1
+DATA_DIR=$2
+#PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
+PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 echo "Checking NVIDIA driver status..."
 
 # Check if the kernel module is actually loadable
@@ -32,9 +35,6 @@ LIB32_URL="$BASE_URL/l/lib32-nvidia-utils/lib32-nvidia-utils-$NV_VERSION-x86_64.
 WAYLAND2_URL="$BASE_URL/e/egl-wayland2/egl-wayland2-1.0.1-1-x86_64.pkg.tar.zst"
 SETTINGS_URL="$BASE_URL/n/nvidia-settings/nvidia-settings-$NV_VERSION-x86_64.pkg.tar.zst"
 
-DECK_HOME=$(eval echo ~deck)
-DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$DECK_HOME/homebrew/logs"
 mkdir -p "$DATA_DIR/configs"
 
 # Detect Kernel Info
@@ -179,12 +179,12 @@ if [ "$ROOT_FREE_KIB" -lt "$MIN_ROOT_KIB" ]; then
 fi
 if [ "$HOME_FREE_KIB" -lt "$MIN_HOME_KIB" ]; then
   echo "ERROR: Not enough space on /home partition."
-  echo "You have $(($HOME_FREE_KIB / 4096)) MiB, but this install requires 4096 MiB."
+  echo "You have $(($HOME_FREE_KIB / 1024)) MiB, but this install requires 4096 MiB."
   exit 1
 fi
 
-echo "Initial space check: $(($HOME_FREE_KIB / 4096)) MiB available on /home."
-echo "Initial space check: $(($ROOT_FREE_KIB / 2048)) MiB available on /."
+echo "Initial space check: $(($HOME_FREE_KIB / 1024)) MiB available on /home."
+echo "Initial space check: $(($ROOT_FREE_KIB / 1024)) MiB available on /."
 
 # INSTALL SYSTEM TOOLS & HEADERS
 echo "[3/9] Signing pacman-keys and syncing system dependencies (Headers: $HEADER_PKG)..."
@@ -269,10 +269,8 @@ mkinitcpio -P || true
 echo "[9/9] Restoring services and terminal commands..."
 ln -sf "$REPO_ROOT/bin/egpu-enable" /usr/local/bin/egpu-enable
 ln -sf "$REPO_ROOT/bin/egpu-eject" /usr/local/bin/egpu-eject
-ln -sf "$REPO_ROOT/bin/egpu-resume-fix" /usr/lib/systemd/system-sleep/egpu-resume-fix
 chmod +x "$REPO_ROOT/bin/egpu-enable"
 chmod +x "$REPO_ROOT/bin/egpu-eject"
-chmod +x "$REPO_ROOT/bin/egpu-resume-fix"
 cp "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable nvidia-persistenced nvidia-powerd nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service|| true

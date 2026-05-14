@@ -1,10 +1,12 @@
 #!/bin/bash
 VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
 OS_TYPE=$2
+LOG_DIR=$3
+DATA_DIR=$4
 SUPERGFX_TRIG=0
-DECK_HOME=$(eval echo ~deck)
-DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$DECK_HOME/homebrew/logs"
+#PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
+PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
+[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
 mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
 
@@ -17,7 +19,7 @@ if [ "$CONNECTED" -eq 0 ]; then
   exit 1
 fi
 
-if [ "$OS_TYPE" == "steamos" ]; then
+if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
   # check if its NVIDIA and if so, check for drivers before continuing
   if [ "$VENDOR" == "nvidia" ]; then
     # Check if the kernel module is actually loadable
@@ -48,7 +50,6 @@ if [ "$OS_TYPE" == "steamos" ]; then
 
   # Check if NVIDIA services/sleep scripts are missing
   if [ "$VENDOR" == "nvidia" ]; then
-    [ ! -f /usr/lib/systemd/system-sleep/egpu-resume-fix ] && NEEDS_REPAIR=1
     [ ! -f /etc/systemd/system/nvidia-suspend.service ] && NEEDS_REPAIR=1
   fi
 
@@ -65,9 +66,7 @@ if [ "$OS_TYPE" == "steamos" ]; then
     cp "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
   
     if [ "$VENDOR" == "nvidia" ]; then
-      echo "Restoring NVIDIA sleep/resume fixes..."
-      ln -sf "$REPO_ROOT/bin/egpu-resume-fix" /usr/lib/systemd/system-sleep/egpu-resume-fix
-      chmod +x "$REPO_ROOT/bin/egpu-resume-fix"
+      echo "Restoring NVIDIA sleep services..."
       systemctl daemon-reload
       systemctl enable nvidia-persistenced nvidia-powerd nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service 2>/dev/null
       systemctl start nvidia-persistenced 2>/dev/null
@@ -79,9 +78,19 @@ if [ "$OS_TYPE" == "steamos" ]; then
   fi
 fi
 
+if [ -L /usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f /usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
+  echo "Purging obsolete legacy egpu-resume-fix..."
+  steamos-readonly disable
+  rm -f /usr/lib/systemd/system-sleep/egpu-resume-fix
+  rm -f /etc/systemd/system/egpu-resume-fix.service
+  rm -f /etc/systemd/system/egpu-boot-guardian.service
+  steamos-readonly enable
+fi
+
 if systemctl is-active --quiet supergfxd.service; then 
   echo "Supergfxd Detected. Stopping supergfxd to avoid panic during switch..."
   systemctl stop supergfxd.service 2>/dev/null || true
+  SUPERGFX_TRIG=1
 fi
 
 # Used for all OSes for consistency
@@ -96,9 +105,8 @@ echo 1 > /sys/bus/pci/rescan
 
 sleep 2
 
-if [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+if [[ "$OS_TYPE" == *"bazzite"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
-    
     echo "Loading NVIDIA drivers into kernel to generate DRM nodes..."
     systemctl enable nvidia-persistenced nvidia-powerd 2>/dev/null
     systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null
@@ -131,9 +139,15 @@ if [ -z "$EGPU_CARD" ]; then
 fi
 echo "Success! eGPU dynamically detected as: $EGPU_CARD"
 # Permissions (The ACL Hero)
-echo "Setting user permissions for eGPU..."
-setfacl -m u:deck:rw $EGPU_CARD
-setfacl -m u:deck:rw /dev/dri/renderD*
+#echo "Setting user permissions for eGPU..."
+echo "Setting permissions for user: $PRIMARY_USER"
+setfacl -m u:$PRIMARY_USER:rw $EGPU_CARD
+setfacl -m u:$PRIMARY_USER:rw /dev/dri/renderD*
+
+if [ -e /dev/nvidiactl ]; then
+  echo "Granting NVIDIA node permissions for overlay..."
+  setfacl -m "u:$PRIMARY_USER:rw" /dev/nvidia*
+fi
 
   # STOP UI
 # We must stop sddm so we can unload the driver modules
@@ -141,7 +155,7 @@ echo "Stopping SDDM..."
 systemctl stop sddm
 
  
-if [ "$OS_TYPE" == "steamos" ]; then
+if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 # DRIVER RELOAD 
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Detecting NVIDIA Hardware ID..."
@@ -183,6 +197,9 @@ if [ "$OS_TYPE" == "steamos" ]; then
     safe_add "MESA_VK_DEVICE_SELECT=$NVIDIA_ID"
     safe_add "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
     safe_add "WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD"
+    #safe_add "KWIN_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD"
+    #safe_add "GBM_BACKEND=nvidia-drm"
+    #safe_add "__GLX_VENDOR_LIBRARY_NAME=nvidia"
     safe_add "VK_LOADER_LAYERS_DISABLE=*"
     safe_add "GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1"
 
@@ -191,20 +208,39 @@ if [ "$OS_TYPE" == "steamos" ]; then
     systemctl set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
     systemctl set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
     systemctl set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+    #systemctl set-environment KWIN_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+    #systemctl set-environment GBM_BACKEND=nvidia-drm
+    #systemctl set-environment __GLX_VENDOR_LIBRARY_NAME=nvidia
     systemctl set-environment VK_LOADER_LAYERS_DISABLE="*"
     systemctl set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
 
     # Environment Injection (User-Session Fix)
     # We explicitly define the XDG_RUNTIME_DIR so root can talk to the deck session
-    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
-    sudo -u deck $DECK_BUS systemctl --user set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
-    sudo -u deck $DECK_BUS systemctl --user set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
-    sudo -u deck $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+    USER_UID=$(id -u $PRIMARY_USER)
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment MESA_VK_DEVICE_SELECT=$NVIDIA_ID
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+    #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment KWIN_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+    #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment GBM_BACKEND=nvidia-drm
+    #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment __GLX_VENDOR_LIBRARY_NAME=nvidia
+
+    echo "Creating isolated KDE Plasma environment config..."
+    PLASMA_ENV_DIR="/home/$PRIMARY_USER/.config/plasma-workspace/env"
+    sudo -u $PRIMARY_USER mkdir -p "$PLASMA_ENV_DIR"
+  
+    sudo -u $PRIMARY_USER bash -c "cat > '$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh' << EOF
+#!/bin/bash
+export KWIN_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+export GBM_BACKEND=nvidia-drm
+export __GLX_VENDOR_LIBRARY_NAME=nvidia
+EOF"
+    chmod +x "$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh"
 
     # Final Reload & Start
     echo "Daemon-reload and start SDDM..."
     systemctl daemon-reload
-    sudo -u deck $DECK_BUS systemctl --user daemon-reload
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
 
   elif [ "$VENDOR" == "amd" ]; then
     # AMD Lean Path (Assumes amdgpu driver handles it)
@@ -215,9 +251,28 @@ fi
 echo "Refreshing DRM session..."
 systemctl start sddm --no-block
 
-if command -v supergfxctl >/dev/null 2>&1; then #[[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
-  echo "Supergfxctl Detected. Disabling so it does not interupt our boot..."
-  systemctl disable supergfxd.service 2>/dev/null || true
+#if [ $SUPERGFX_TRIG == 1 ]; then
+#  echo "Restarting supergfxctl..."
+#  systemctl restart supergfxd.service 2>/dev/null || true
+#fi
+#This was too destructive for Flow Laptops
+#if command -v supergfxctl >/dev/null 2>&1; then #[[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
+#  echo "Supergfxctl Detected. Disabling so it does not interupt our boot..."
+#  systemctl disable supergfxd.service 2>/dev/null || true
+#fi
+
+PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+
+if command -v supergfxctl >/dev/null 2>&1; then
+  if [[ "$PRODUCT_NAME" == *"RC71L"* || "$PRODUCT_NAME" == *"Ally"* ]]; then
+    echo "Handheld Detected ($PRODUCT_NAME). Disabling supergfxd to prevent interference..."
+    systemctl disable supergfxd.service 2>/dev/null || true
+  elif [[ "$PRODUCT_NAME" == *"Flow"* || "$PRODUCT_NAME" == *"GV"* || "$PRODUCT_NAME" == *"GZ"* ]]; then
+    echo "Flow Laptop Detected ($PRODUCT_NAME). Leaving supergfxd active for MUX control..."
+    # You can add supergfxctl restart logic here if Flow laptops require it after the WMI switch
+  else
+    echo "Unknown ASUS device ($PRODUCT_NAME). Leaving supergfxd alone."
+  fi
 fi
 
 echo "--- Enable Finished: Time for God Mode ---"

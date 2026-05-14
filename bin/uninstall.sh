@@ -1,4 +1,8 @@
 #!/bin/bash
+LOG_DIR=$1
+DATA_DIR=$2
+#PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
+PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 echo "--- SURGICAL XG MOBILE UNINSTALLER ---"
 
 # Check if the OS is Bazzite
@@ -8,9 +12,12 @@ if grep -qi "bazzite" /etc/os-release; then
     exit 1
 fi
 
-DECK_HOME=$(eval echo ~deck)
-DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$DECK_HOME/homebrew/logs"
+if grep -qi "cachy" /etc/os-release; then
+    echo "ERROR: CachyOS detected. This plugin's driver installation is built for SteamOS (Arch)."
+    echo "CachyOS natively handles the XG Mobile via supergfxctl. No need to reset driver environment."
+    exit 1
+fi
+
 mkdir -p "$DATA_DIR/configs"
 
 # Detect Kernel Info dynamically
@@ -31,19 +38,29 @@ for B in "${BIND_TARGETS[@]}"; do
   umount -l "$B" 2>/dev/null || true
 done
 
+#echo "Removing drivers and build dependencies safely..."
+#yes | pacman -Rn \
+#  nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings \
+#  dkms "$HEADER_PKG" \
+#  2>/dev/null || true
 echo "Removing drivers and build dependencies safely..."
-yes | pacman -Rn \
-  nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings \
-  dkms "$HEADER_PKG" \
-  2>/dev/null || true
+PACKAGES=("nvidia-open-dkms" "nvidia-utils" "lib32-nvidia-utils" "nvidia-settings" "dkms" "$HEADER_PKG")
+
+for pkg in "${PACKAGES[@]}"; do
+  yes | pacman -Rn "$pkg" 2>/dev/null || true
+done
 
 echo "Purging orphaned kernel modules..."
 rm -f /usr/lib/modules/$(uname -r)/updates/dkms/nvidia*.ko* 2>/dev/null || true
 depmod -a
 
 echo "Purging NVIDIA system services..."
-systemctl disable nvidia- nvidia-powerd nvidia-suspend nvidia-hibernate nvidia-resume 2>/dev/null || true
+systemctl disable nvidia-persistenced nvidia-powerd nvidia-suspend nvidia-hibernate nvidia-resume 2>/dev/null || true
 rm -f /etc/systemd/system/nvidia-*
+rm -f /usr/lib/systemd/system-sleep/egpu-resume-fix
+rm -f /usr/lib/systemd/system-sleep/egpu-boot-guardian
+rm -f /etc/systemd/system/egpu-resume-fix.service
+rm -f /etc/systemd/system/egpu-boot-guardian.service
 systemctl daemon-reload
 
 echo "Reverting native SteamOS directory structures..."
@@ -84,7 +101,7 @@ rm -f /etc/ld.so.conf.d/nvidia.conf
 
 echo "Resetting hardware flags and UI session locks..."
 echo 0 > /sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || true
-rm -f /home/deck/.config/gamescope/edid.bin
+rm -f /home/$PRIMARY_USER/.config/gamescope/edid.bin
 rm -f /tmp/.X*lock
 
 #if systemctl list-unit-files | grep -q all-ways-egpu; then
