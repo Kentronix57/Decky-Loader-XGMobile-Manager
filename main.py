@@ -94,6 +94,46 @@ class Plugin:
     """Returns True if supergfxctl is installed and in the system PATH."""
     return shutil.which("supergfxctl") is not None
 
+  async def get_version(self):
+    """Reads the version directly from plugin.json."""
+    try:
+      json_path = os.path.join(self.get_plugin_dir(), "plugin.json")
+      
+      with open(json_path, 'r') as f:
+        data = json.load(f)
+        return data.get('version', '0.2.0')
+    except Exception as e:
+      error(f"Error reading version: {e}")
+      return "0.2.0"
+
+  def get_os_type(self):
+    """Detects the host OS and validates the Bazzite NVIDIA image."""
+    try:
+      with open("/etc/os-release", "r") as f:
+        os_data = f.read().lower()
+                
+        if "bazzite" in os_data:
+          # Check if they actually installed the NVIDIA variant
+          if "nvidia" not in os_data:
+            return "bazzite"
+          return "bazzite-nvidia"
+        elif "cachyos" in os_data:
+          return "cachyos"
+        elif "steamos" in os_data:
+          return "steamos"
+        else:
+          return "unsupported"
+    except Exception:
+      return "unsupported"
+
+  async def get_os_status(self):
+    """Helper to pass the OS type to React on load."""
+    return self.get_os_type()
+
+  async def has_supergfxctl(self):
+    """Returns True if supergfxctl is installed and in the system PATH."""
+    return shutil.which("supergfxctl") is not None
+
   async def _execute_script(self, script_name, log_path, *args):
     """
     Unified executor that redirects output to a specific log file.
