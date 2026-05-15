@@ -1,10 +1,10 @@
 #!/bin/bash
 VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
 OS_TYPE=$2
+LOG_DIR=$3
+DATA_DIR=$4
 SUPERGFX_TRIG=0
-DECK_HOME=$(eval echo ~deck)
-DATA_DIR="$DECK_HOME/homebrew/data/xgmobile-manager"
-LOG_DIR="$DECK_HOME/homebrew/logs"
+PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 
@@ -21,11 +21,14 @@ fi
 echo "Stopping SDDM..."
 systemctl stop sddm
 
-if [ "$OS_TYPE" == "steamos" ]; then
+if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   echo "Sanitizing /etc/environment..."
   sed -i '/MESA_VK_DEVICE_SELECT/d' /etc/environment
   sed -i '/VK_ICD_FILENAMES/d' /etc/environment
   sed -i '/WLR_DRM_DEVICES/d' /etc/environment
+  #sed -i '/KWIN_DRM_DEVICES/d' /etc/environment
+  #sed -i '/GBM_BACKEND/d' /etc/environment
+  #sed -i '/__GLX_VENDOR_LIBRARY_NAME/d' /etc/environment
   sed -i '/VK_LOADER_LAYERS_DISABLE/d' /etc/environment
   sed -i '/GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT/d' /etc/environment
 
@@ -47,15 +50,25 @@ if [ "$OS_TYPE" == "steamos" ]; then
     systemctl unset-environment MESA_VK_DEVICE_SELECT
     systemctl unset-environment VK_ICD_FILENAMES
     systemctl unset-environment WLR_DRM_DEVICES
+    #systemctl unset-environment KWIN_DRM_DEVICES
+    #systemctl unset-environment GBM_BACKEND
+    #systemctl unset-environment __GLX_VENDOR_LIBRARY_NAME
     systemctl unset-environment VK_LOADER_LAYERS_DISABLE
     systemctl unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT
 
     # Environment Cleanup (User-Session)
     # Mirroring the Enable script's use of the deck user's session bus
-    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
-    sudo -u deck $DECK_BUS systemctl --user unset-environment MESA_VK_DEVICE_SELECT
-    sudo -u deck $DECK_BUS systemctl --user unset-environment VK_ICD_FILENAMES
-    sudo -u deck $DECK_BUS systemctl --user unset-environment WLR_DRM_DEVICES
+    USER_UID=$(id -u $PRIMARY_USER)
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment MESA_VK_DEVICE_SELECT
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment VK_ICD_FILENAMES
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment WLR_DRM_DEVICES
+    #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment KWIN_DRM_DEVICES
+    #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment GBM_BACKEND
+    #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment __GLX_VENDOR_LIBRARY_NAME
+
+    echo "Removing isolated KDE Plasma environment config..."
+    rm -f "/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-kwin.sh"
 
     # DISK CLEANUP
     echo "Removing environment variables from disk..."
@@ -73,10 +86,11 @@ if [ "$OS_TYPE" == "steamos" ]; then
     modprobe -r nvidia_uvm || true
     modprobe -r nvidia || true
   fi
-elif [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == *"cachyos"* ]]; then
+elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Stopping NVIDIA power services..."
     systemctl stop nvidia-powerd nvidia-persistenced 2>/dev/null || true
+    systemctl disable nvidia-powerd nvidia-persistenced 2>/dev/null || true
     
     echo "Force killing any lingering GPU processes and unloading NVIDIA modules..."
     fuser -kv /dev/nvidia* >/dev/null 2>&1 || true
@@ -84,6 +98,14 @@ elif [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == *"cachyos"* ]]; then
     modprobe -r nvidia_modeset || true
     modprobe -r nvidia_uvm || true
     modprobe -r nvidia || true
+
+    echo "Applying Bazzite overlay environment fixes..."
+    USER_UID=$(id -u $PRIMARY_USER)
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+  
+    systemctl unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT
+
   fi
 fi 
 
@@ -91,9 +113,10 @@ echo "Ensuring card is free..."
 fuser -kv /dev/dri/card* >/dev/null 2>&1 || true 
 systemctl daemon-reload
 # Final Reload & Restore Handheld UI
-if [ "$OS_TYPE" == "steamos" ]; then
-  export DECK_BUS="XDG_RUNTIME_DIR=/run/user/1000"
-  sudo -u deck $DECK_BUS systemctl --user daemon-reload
+if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
+  USER_UID=$(id -u $PRIMARY_USER)
+  export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+  sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
 fi
 
 # Hardware Deactivation
@@ -129,6 +152,10 @@ fi
 
 systemctl start sddm --no-block
 
+#if [ $SUPERGFX_TRIG == 1 ]; then
+#  echo "Restarting supergfxctl..."
+#  systemctl restart supergfxd.service 2>/dev/null || true
+#fi
 #Bazzite leaves this off by default in the deck images so lets just let the user re-enable if they need to
 #if command -v supergfxctl >/dev/null 2>&1; then #[[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
   #echo "Restarting ASUS daemon to restore Power Profile UI controls..."
@@ -138,6 +165,19 @@ systemctl start sddm --no-block
   #( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
   #disown
 #fi 
+PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+
+if command -v supergfxctl >/dev/null 2>&1; then
+  if [[ "$PRODUCT_NAME" == *"RC71L"* || "$PRODUCT_NAME" == *"Ally"* ]]; then
+    echo "Handheld Detected ($PRODUCT_NAME). Disabling supergfxd to prevent interference..."
+    systemctl disable supergfxd.service 2>/dev/null || true
+  elif [[ "$PRODUCT_NAME" == *"Flow"* || "$PRODUCT_NAME" == *"GV"* || "$PRODUCT_NAME" == *"GZ"* ]]; then
+    echo "Flow Laptop Detected ($PRODUCT_NAME). Re-enabling supergfxd for MUX control just in case..."
+    systemctl enable supergfxd.service 2>/dev/null || true
+  else
+    echo "Unknown ASUS device ($PRODUCT_NAME). Leaving supergfxd alone."
+  fi
+fi
 
 echo "--- Eject Finished: Back to Handheld Mode ---"
 ln -sf "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" $LOG_DIR/xgmobile_manager_eject_latest.log

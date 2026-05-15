@@ -11,13 +11,18 @@ from datetime import datetime
 
 Initialized = False
 T = TypeVar("T")
-LOG_DIR = "/home/deck/homebrew/logs"
-ENABLE_LOG = LOG_DIR+"/xgmobile_manager_enable_latest.log"
-EJECT_LOG = LOG_DIR+"/xgmobile_manager_eject_latest.log"
-REPAIR_LOG = LOG_DIR+"/xgmobile_manager_repair.log"
-DEBUG_LOG = LOG_DIR+"/xgmobile_manager_debug.log"
-INSTALL_LOG = LOG_DIR+"/xgmobile_manager_install.log"
-NUKE_LOG = LOG_DIR+"/xgmobile_manager_nuke.log"
+PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
+HOMEBREW_DIR = os.path.abspath(os.path.join(PLUGIN_DIR, "../../"))
+LOG_DIR = os.path.join(HOMEBREW_DIR, "logs")
+DATA_DIR = os.path.join(HOMEBREW_DIR, "data", "xgmobile-manager")
+ENABLE_LOG = os.path.join(LOG_DIR, "xgmobile_manager_enable_latest.log")
+EJECT_LOG = os.path.join(LOG_DIR, "xgmobile_manager_eject_latest.log")
+#REPAIR_LOG = os.path.join(LOG_DIR, "xgmobile_manager_repair.log")
+DEBUG_LOG = os.path.join(LOG_DIR, "xgmobile_manager_debug.log")
+INSTALL_LOG = os.path.join(LOG_DIR, "xgmobile_manager_install.log")
+UNINSTALL_LOG = os.path.join(LOG_DIR, "xgmobile_manager_uninstall.log")
+
+os.makedirs(os.path.join(DATA_DIR, "configs"), exist_ok=True)
 
 def log(txt):
   decky.logger.info(txt)
@@ -33,7 +38,61 @@ class Plugin:
 
   # Get the path where the plugin is installed
   def get_plugin_dir(self):
-    return os.path.dirname(os.path.realpath(__file__))
+    return PLUGIN_DIR
+
+  async def get_version(self):
+    """Reads the version directly from package.json."""
+    try:
+      json_path = os.path.join(self.get_plugin_dir(), "package.json")
+      
+      with open(json_path, 'r') as f:
+        data = json.load(f)
+        return data.get('version', '0.2.0')
+    except Exception as e:
+      error(f"Error reading version: {e}")
+      return "0.2.0"
+
+  async def get_device_type(self):
+    try:
+      with open('/sys/class/dmi/id/product_name', 'r') as f:
+        product_name = f.read().strip()
+              
+      if "RC71L" in product_name or "Ally" in product_name:
+        return "handheld"
+      elif "Flow" in product_name or "GV" in product_name or "GZ" in product_name:
+        return "laptop"
+      else:
+        return "unknown"
+    except Exception as e:
+      return "unknown"
+
+  def get_os_type(self):
+    """Detects the host OS and validates the Bazzite NVIDIA image."""
+    try:
+      with open("/etc/os-release", "r") as f:
+        os_data = f.read().lower()
+                
+        if "bazzite" in os_data:
+          # Check if they actually installed the NVIDIA variant
+          if "nvidia" not in os_data:
+            return "bazzite"
+          return "bazzite-nvidia"
+        elif "cachyos" in os_data:
+          return "cachyos"
+        elif "steamos" in os_data:
+          return "steamos"
+        else:
+          return "unsupported"
+    except Exception:
+      return "unsupported"
+
+  async def get_os_status(self):
+    """Helper to pass the OS type to React on load."""
+    return self.get_os_type()
+
+  async def has_supergfxctl(self):
+    """Returns True if supergfxctl is installed and in the system PATH."""
+    return shutil.which("supergfxctl") is not None
 
   async def get_version(self):
     """Reads the version directly from plugin.json."""
@@ -116,13 +175,13 @@ class Plugin:
 
     if vendor == "nvidia" and os_type == "bazzite":
       return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
-    return await self._execute_script("egpu-enable", ENABLE_LOG, vendor, os_type)
+    return await self._execute_script("egpu-enable", ENABLE_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def eject_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     os_type = self.get_os_type()
     
-    return await self._execute_script("egpu-eject", EJECT_LOG, vendor, os_type)
+    return await self._execute_script("egpu-eject", EJECT_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def enable_supergfxctl(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
@@ -130,13 +189,13 @@ class Plugin:
 
     if vendor == "nvidia" and os_type == "bazzite":
       return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
-    return await self._execute_script("supergfx-enable", ENABLE_LOG, vendor)
+    return await self._execute_script("supergfx-enable", ENABLE_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def eject_supergfxctl(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     os_type = self.get_os_type()
     
-    return await self._execute_script("supergfx-eject", EJECT_LOG, vendor)
+    return await self._execute_script("supergfx-eject", EJECT_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def repair_services(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
@@ -148,16 +207,37 @@ class Plugin:
       return "Error: SteamOS not detected. NVIDIA Driver install is currently only for SteamOS."
         
     log("SteamOS detected: Starting DKMS driver compilation.")
-    return await self._execute_script("install-nvidia.sh", INSTALL_LOG)
+    return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
 
-  async def mega_nuke(self):
-    return await self._execute_script("uninstall.sh", NUKE_LOG)
+  async def uninstall_nvidia(self):
+    return await self._execute_script("uninstall.sh", UNINSTALL_LOG, LOG_DIR, DATA_DIR)
   
   async def reboot_system(self):
     clean_env = os.environ.copy()
     clean_env.pop("LD_LIBRARY_PATH", None)
     subprocess.run(["sudo", "reboot"], env=clean_env)
     return True
+
+  async def restart_supergfxd(self):
+    """Safely enables and restarts the Asus daemon for Flow Laptop users."""
+    log("Attempting to enable and restart supergfxd.service...")
+    clean_env = os.environ.copy()
+    clean_env.pop("LD_LIBRARY_PATH", None)
+    
+    try:
+      # Chain enable and restart to guarantee boot persistence and immediate application
+      process = await asyncio.create_subprocess_exec(
+        'sudo', 'bash', '-c', 'systemctl enable supergfxd.service && systemctl restart supergfxd.service',
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=clean_env
+      )
+      await process.wait()
+      
+      return "Success" if process.returncode == 0 else f"Failed (Code {process.returncode})"
+    except Exception as e:
+      error(f"Error enabling supergfxd: {e}")
+      return f"Error: {str(e)}"
 
   async def get_power_profile(self):
     try:
@@ -203,16 +283,16 @@ class Plugin:
       return f"Error setting profile: {e}"
 
   async def get_live_logs(self, log_type="install"):
-    """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'nuke'."""
+    """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'uninstall'."""
     log_map = {
       "enable": ENABLE_LOG,
       "eject": EJECT_LOG,
       "install": INSTALL_LOG,
-      "repair": REPAIR_LOG,
-      "nuke": NUKE_LOG,
+      #"repair": REPAIR_LOG,
+      "uninstall": UNINSTALL_LOG,
       "debug": DEBUG_LOG
     }
-    path = log_map.get(log_type, REPAIR_LOG)
+    path = log_map.get(log_type, ENABLE_LOG)
     
     if not os.path.exists(path):
       return ""
@@ -292,15 +372,15 @@ class Plugin:
   async def get_latest_logs(self, log_type="enable"):
     """Reads logs for display in a modal."""
     log_map = {
-      "repair": REPAIR_LOG,
+      #"repair": REPAIR_LOG,
       "enable": ENABLE_LOG,
       "eject": EJECT_LOG,
       "debug": DEBUG_LOG,
       "install": INSTALL_LOG,
-      "nuke": NUKE_LOG
+      "uninstall": UNINSTALL_LOG
     }
     
-    path = log_map.get(log_type, DEBUG_LOG)
+    path = log_map.get(log_type, ENABLE_LOG)
 
     if not os.path.exists(path):
       return f"No log file found at {path}"
