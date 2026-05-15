@@ -16,12 +16,13 @@ echo "Staging files for release..."
 mkdir -p deploy_staging
 mkdir -p deploy_staging/dist
 mkdir -p deploy_staging/bin
+mkdir -p deploy_staging/assets/services
 
 # 4. Copy the essential files
 # We exclude things like node_modules, .git, and src to keep the zip small
 cp -r dist deploy_staging/
 cp -r bin deploy_staging/
-cp -r assets deploy_staging/
+cp -r assets/services/ deploy_staging/assets/
 cp decky.pyi deploy_staging/
 cp main.py deploy_staging/
 cp plugin.json deploy_staging/

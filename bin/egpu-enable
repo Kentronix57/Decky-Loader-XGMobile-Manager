@@ -149,6 +149,14 @@ if [ -e /dev/nvidiactl ]; then
   setfacl -m "u:$PRIMARY_USER:rw" /dev/nvidia*
 fi
 
+#if [[ "$OS_TYPE" == *"bazzite"* ]]; then
+#  echo "Applying Bazzite overlay environment fixes..."
+#  USER_UID=$(id -u $PRIMARY_USER)
+#  export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+#  
+#  systemctl set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
+#  sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
+#fi
   # STOP UI
 # We must stop sddm so we can unload the driver modules
 echo "Stopping SDDM..."

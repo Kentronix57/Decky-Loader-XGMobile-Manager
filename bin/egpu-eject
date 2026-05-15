@@ -98,6 +98,14 @@ elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
     modprobe -r nvidia_modeset || true
     modprobe -r nvidia_uvm || true
     modprobe -r nvidia || true
+
+    echo "Applying Bazzite overlay environment fixes..."
+    USER_UID=$(id -u $PRIMARY_USER)
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+  
+    systemctl unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT
+
   fi
 fi 
 

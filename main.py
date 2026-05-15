@@ -41,9 +41,9 @@ class Plugin:
     return PLUGIN_DIR
 
   async def get_version(self):
-    """Reads the version directly from plugin.json."""
+    """Reads the version directly from package.json."""
     try:
-      json_path = os.path.join(self.get_plugin_dir(), "plugin.json")
+      json_path = os.path.join(self.get_plugin_dir(), "package.json")
       
       with open(json_path, 'r') as f:
         data = json.load(f)
