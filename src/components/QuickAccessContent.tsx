@@ -30,7 +30,7 @@ export const QuickAccessContent = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [statusText, setStatusText] = useState("");
   const [pluginVersion, setPluginVersion] = useState("Loading...");
-  const [hasSupergfxctl, setHasSupergfxctl] = useState<boolean>(false);
+  //const [hasSupergfxctl, setHasSupergfxctl] = useState<boolean>(false);
   const [deviceType, setDeviceType] = useState<string>("unknown");
   //const [daemonActive, setDaemonActive] = useState<boolean>(true);
   
@@ -53,8 +53,8 @@ export const QuickAccessContent = () => {
         const os = await call("get_os_status") as string;
         setOsType(os);
         // call() returns the boolean directly from Python
-        const hasSgfx = await call("has_supergfxctl") as boolean;
-        setHasSupergfxctl(hasSgfx);
+        //const hasSgfx = await call("has_supergfxctl") as boolean;
+        //setHasSupergfxctl(hasSgfx);
         const device = await call("get_device_type") as string;
         setDeviceType(device);
       } catch (e) { 
@@ -153,7 +153,7 @@ export const QuickAccessContent = () => {
       setStatusText("");
     }
   };
-  
+
   const toggleVendor = async (val: boolean) => {
     const newVendor = val ? "nvidia" : "amd";
     setSelectedVendor(newVendor);

@@ -11,16 +11,16 @@ if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet 
   echo "Supergfxctl Detected. Queuing Integrated mode in supergfxctl..."
 
   systemctl start supergfxd.service 2>/dev/null || true
-  
+
   if supergfxctl -m Integrated; then
     echo "supergfxctl hardware disconnect successful."
     echo "Executing detached SDDM restart..."
     
     # FORK: Detaches from Decky Loader safely
-    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
-    disown
-    #echo "Executing non-blocking SDDM restart to apply hardware switch..."
-    #systemctl restart sddm --no-block
+    #( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
+    #disown
+    echo "Executing non-blocking SDDM restart to apply hardware switch..."
+    systemctl restart sddm --no-block
   
     echo "--- Eject Finished: Waiting for detached restart ---"
     ln -sf "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_eject_latest.log"

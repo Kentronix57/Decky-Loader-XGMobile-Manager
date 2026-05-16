@@ -4,7 +4,9 @@ OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
 SUPERGFX_TRIG=0
-PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
+#PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
+PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
+[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
 mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 

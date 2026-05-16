@@ -15,9 +15,9 @@ if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet 
   if supergfxctl -m Hybrid; then
     echo "supergfxctl hardware switch successful"
     echo "Executing SDDM restart to apply hardware switch..."
-    #systemctl restart sddm --no-block
-    ( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
-    disown
+    systemctl restart sddm --no-block
+    #( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
+    #disown
   
     echo "--- Enable Finished: Handing off to OS ---"
     ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" "$LOG_DIR/xgmobile_manager_enable_latest.log"
