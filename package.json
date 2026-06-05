@@ -1,6 +1,6 @@
 {
   "name": "xgmobile-manager",
-  "version": "0.2.3",
+  "version": "0.2.4-beta-2",
   "type": "module",
   "description": "Manage XG Mobile Ejection, Activation, and NVIDIA Driver Repairs.",
   "scripts": {
@@ -29,7 +29,7 @@
   "devDependencies": {
     "@decky/api": "^1.0.5",
     "@decky/rollup": "^1.0.2",
-    "@decky/ui": "^4.2.2",
+    "@decky/ui": "latest",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "@types/node": "^18.0.0",

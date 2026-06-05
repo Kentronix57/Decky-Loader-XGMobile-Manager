@@ -19,7 +19,7 @@ importers:
         specifier: ^1.0.2
         version: 1.0.2
       '@decky/ui':
-        specifier: ^4.2.2
+        specifier: latest
         version: 4.11.4
       '@types/node':
         specifier: ^18.0.0
