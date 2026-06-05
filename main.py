@@ -398,10 +398,10 @@ class Plugin:
         
     log("SteamOS detected: Starting DKMS driver compilation.")
     #return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
-    res = self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
-    if res.returncode == 1:
+    res = await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
+    if "Code 1" in res:
         return "ALREADY_INSTALLED"
-    elif res.returncode == 0:
+    elif res == "Success":
         return "SUCCESS"
     else:
         return "ERROR"

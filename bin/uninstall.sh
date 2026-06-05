@@ -33,25 +33,45 @@ BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")
 
 steamos-readonly disable
 
-echo "Ensuring all temporary bind mounts are detached..."
-for B in "${BIND_TARGETS[@]}"; do
-  umount -l "$B" 2>/dev/null || true
-done
+#echo "Ensuring all temporary bind mounts are detached..."
+#for B in "${BIND_TARGETS[@]}"; do
+#  umount -l "$B" 2>/dev/null || true
+#done
 
 #echo "Removing drivers and build dependencies safely..."
 #yes | pacman -Rn \
 #  nvidia-open-dkms nvidia-utils lib32-nvidia-utils nvidia-settings \
 #  dkms "$HEADER_PKG" \
 #  2>/dev/null || true
+#echo "Removing drivers and build dependencies safely..."
+#PACKAGES=("nvidia-open-dkms" "nvidia-utils" "lib32-nvidia-utils" "nvidia-settings" "dkms" "$HEADER_PKG")
+
+#for pkg in "${PACKAGES[@]}"; do
+#  yes | pacman -Rn "$pkg" 2>/dev/null || true
+#done
+
+#echo "Purging orphaned kernel modules..."
+#rm -f /usr/lib/modules/$(uname -r)/updates/dkms/nvidia*.ko* 2>/dev/null || true
+#depmod -a
+echo "Unloading NVIDIA modules from memory..."
+modprobe -r nvidia-drm nvidia-modeset nvidia-peermem nvidia-uvm nvidia 2>/dev/null || true
+
+echo "Forcing DKMS cleanup (bypassing pacman amnesia)..."
+# Extract version dynamically from the leftover source folder
+NV_VER=$(ls /usr/src 2>/dev/null | grep nvidia- | cut -d'-' -f2 | head -n 1)
+if [ ! -z "$NV_VER" ]; then
+    dkms remove nvidia/"$NV_VER" --all 2>/dev/null || true
+fi
+
 echo "Removing drivers and build dependencies safely..."
 PACKAGES=("nvidia-open-dkms" "nvidia-utils" "lib32-nvidia-utils" "nvidia-settings" "dkms" "$HEADER_PKG")
-
 for pkg in "${PACKAGES[@]}"; do
   yes | pacman -Rn "$pkg" 2>/dev/null || true
 done
 
 echo "Purging orphaned kernel modules..."
-rm -f /usr/lib/modules/$(uname -r)/updates/dkms/nvidia*.ko* 2>/dev/null || true
+# Use find to catch compressed .zst modules that Arch/DKMS sometimes leaves behind
+find /usr/lib/modules/$(uname -r)/ -name "nvidia*.ko*" -delete
 depmod -a
 
 echo "Purging NVIDIA system services..."
@@ -72,6 +92,10 @@ for T in "${ALL_TARGETS[@]}"; do
     mkdir -p "$T"       # Recreate the empty native directory
   fi
 done
+
+echo "Scrubbing persistent payload data to prevent zombie re-installs..."
+rm -rf "$DATA_DIR/system/usr" 2>/dev/null || true
+rm -rf "$DATA_DIR/system/var/lib/dkms" 2>/dev/null || true
 
 # Clean up Steam update redirects
 if [ -L "/usr/lib/steam/bootstraplinux_ubuntu12_32.tar.xz" ]; then
