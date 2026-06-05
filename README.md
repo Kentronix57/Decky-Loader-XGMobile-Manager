@@ -18,9 +18,9 @@ This plugin manages the complex hardware handshakes, dynamically compiles and in
 ---
 
 ## Table of Contents
-- [Important Disclaimers & Risks](#️-important-disclaimers--risks)
+- [Important Disclaimers & Risks](#-important-disclaimers--risks)
 - [Compatibility Matrix](#-compatibility-matrix)
-- [How It Works (Under the Hood)](#️-how-it-works-under-the-hood)
+- [How It Works (Under the Hood)](#-how-it-works-under-the-hood)
 - [Installation](#-installation)
 - [How To Use](#-how-to-use)
 - [NVIDIA GameMode Optimizations](#️-nvidia-gamemode-optimizations)
