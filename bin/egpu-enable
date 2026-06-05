@@ -253,9 +253,20 @@ EOF"
     sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
 
   elif [ "$VENDOR" == "amd" ]; then
-    # AMD Lean Path (Assumes amdgpu driver handles it)
-    echo "AMD Vendor detected. Refreshing DRM session..."
-    # No extra variables usually needed for AMD eGPUs on SteamOS
+    echo "AMD Vendor detected. Injecting minimal variables to prioritize the new GPU..."
+    echo "Writing environment variables to disk......"
+    safe_add() {
+      grep -qF "$1" /etc/environment || echo "$1" >> /etc/environment
+    }
+
+    safe_add "WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD"
+    echo "Injecting variables into systemd session..."
+    systemctl set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+
+    USER_UID=$(id -u $PRIMARY_USER)
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
+
   fi
 fi
 echo "Refreshing DRM session..."

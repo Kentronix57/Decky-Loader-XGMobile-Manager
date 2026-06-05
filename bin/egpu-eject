@@ -89,6 +89,13 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     modprobe -r nvidia_modeset || true
     modprobe -r nvidia_uvm || true
     modprobe -r nvidia || true
+  elif [ "$VENDOR" == "amd" ]; then
+    echo "AMD Vendor detected. Removing injected variables..."
+    echo "Removing environment variables from volitile memory..."
+    systemctl unset-environment WLR_DRM_DEVICES
+    USER_UID=$(id -u $PRIMARY_USER)
+    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
+    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment WLR_DRM_DEVICES
   fi
 elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then

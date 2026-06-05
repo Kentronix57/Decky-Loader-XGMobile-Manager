@@ -24,16 +24,18 @@ set -e
 echo "Drivers missing or mismatched. Starting repair..."
 
 # --- CONFIGURATION ---
-NV_VERSION="595.71.05-1"
+NV_VERSION="610.43.02-2"
+NVSETTINGS_VERSION="610.43.02-1"
+EGL_VERSION="1.0.1-1"
 REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
 BASE_URL="https://archive.archlinux.org/packages"
 
 # Package list for 595 setup
 DKMS_URL="$BASE_URL/n/nvidia-open-dkms/nvidia-open-dkms-$NV_VERSION-x86_64.pkg.tar.zst"
 UTILS_URL="$BASE_URL/n/nvidia-utils/nvidia-utils-$NV_VERSION-x86_64.pkg.tar.zst"
-LIB32_URL="$BASE_URL/l/lib32-nvidia-utils/lib32-nvidia-utils-$NV_VERSION-x86_64.pkg.tar.zst"
-WAYLAND2_URL="$BASE_URL/e/egl-wayland2/egl-wayland2-1.0.1-1-x86_64.pkg.tar.zst"
-SETTINGS_URL="$BASE_URL/n/nvidia-settings/nvidia-settings-$NV_VERSION-x86_64.pkg.tar.zst"
+LIB32_URL="$BASE_URL/l/lib32-nvidia-utils/lib32-nvidia-utils-$NVSETTINGS_VERSION-x86_64.pkg.tar.zst"
+WAYLAND2_URL="$BASE_URL/e/egl-wayland2/egl-wayland2-$EGL_VERSION-x86_64.pkg.tar.zst"
+SETTINGS_URL="$BASE_URL/n/nvidia-settings/nvidia-settings-$NVSETTINGS_VERSION-x86_64.pkg.tar.zst"
 
 mkdir -p "$DATA_DIR/configs"
 
