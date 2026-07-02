@@ -126,6 +126,9 @@ class Plugin:
 
     clean_env = os.environ.copy()
     clean_env.pop("LD_LIBRARY_PATH", None)
+    clean_env.pop('http_proxy', None)
+    clean_env.pop('https_proxy', None)
+    clean_env.pop('ALL_PROXY', None)
 
     try:
       with open(log_path, "w") as f:
