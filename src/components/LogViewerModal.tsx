@@ -48,7 +48,7 @@ export const LogViewerModal: FC<LogViewerModalProps> = ({ closeModal }) => {
           <Dropdown
             rgOptions={LOG_OPTIONS}
             selectedOption={logType}
-            onChange={(option) => setSelectedLog(option.data)}
+            onChange={(option: DropdownOption) => setSelectedLog(option.data)}
           />
 
           <div style={{ height: '400px', backgroundColor: '#000000', borderRadius: '4px' }}>
