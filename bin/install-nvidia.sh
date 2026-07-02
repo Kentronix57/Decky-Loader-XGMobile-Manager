@@ -24,7 +24,7 @@ set -e
 echo "Drivers missing or mismatched. Starting repair..."
 
 # --- CONFIGURATION ---
-NV_VERSION="610.43.02-2"
+NV_VERSION="610.43.02-3"
 NVSETTINGS_VERSION="610.43.02-1"
 EGL_VERSION="1.0.1-1"
 REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
@@ -79,18 +79,30 @@ fi
 
 # Extract the base version (e.g., 6.16.12 from 6.16.12.valve21-1)
 REPO_BASE=$(echo "$REPO_VER" | cut -d'.' -f1,2,3)
+REPO_EXACT=$(echo "$REPO_VER" | cut -d'-' -f1)
+KVER_EXACT=$(echo "$KVER_FULL" | cut -d'-' -f1,2 | tr '-' '.')
 
-if [ "$KVER_BASE" != "$REPO_BASE" ]; then
-  echo "ERROR: Kernel mismatch detected!"
-  echo "Active Kernel: $KVER_FULL"
-  echo "Repository Headers: $REPO_VER"
-  echo "Valve has updated the kernel headers in their repository."
-  echo "Please go to SteamOS Settings -> System -> Apply Updates and reboot before installing."
+#if [ "$KVER_BASE" != "$REPO_BASE" ]; then
+#  echo "ERROR: Kernel mismatch detected!"
+#  echo "Active Kernel: $KVER_FULL"
+#  echo "Repository Headers: $REPO_VER"
+#  echo "Valve has updated the kernel headers in their repository."
+#  echo "Please go to SteamOS Settings -> System -> Apply Updates and reboot before installing."
+#  exit 4
+#fi
+if [ "$KVER_EXACT" != "$REPO_EXACT" ]; then
+  echo "ERROR: Kernel revision mismatch detected!"
+  echo "Active Kernel: $KVER_EXACT"
+  echo "Repository Headers: $REPO_EXACT"
+  echo "Valve has updated the kernel headers in their pacman repository."
+  echo "DKMS requires an exact byte-for-byte match to compile the NVIDIA drivers."
+  echo "Please go to SteamOS Settings -> System -> Apply Updates and reboot."
   exit 4
 fi
 
 HEADER_PKG="${HEADER_PKG}=${REPO_VER}"
-echo "Kernel check passed: $KVER_BASE"
+#echo "Kernel check passed: $KVER_BASE"
+echo "Kernel check passed: $KVER_EXACT"
 
 echo "--- STARTING NVIDIA eGPU UPDATER/INSTALLER (Target: $NV_VERSION) ---"
 
