@@ -21,10 +21,11 @@ const LOG_OPTIONS: DropdownOption[] = [
 
 interface LogViewerModalProps {
   closeModal?: () => void;
+  initialLog?: string;
 }
 
-export const LogViewerModal: FC<LogViewerModalProps> = ({ closeModal }) => {
-  const [logType, setSelectedLog] = useState<string | number>('enable');
+export const LogViewerModal: FC<LogViewerModalProps> = ({ closeModal, initialLog = 'enable' }) => {
+  const [logType, setSelectedLog] = useState<string | number>(initialLog);
   const [logText, setLogText] = useState("Reading log...");
 
   useEffect(() => {

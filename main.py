@@ -34,6 +34,151 @@ PYTHONERROR_LOG = os.path.join(LOG_DIR, "xgmobile_manager_python_crash.log")
 
 os.makedirs(os.path.join(DATA_DIR, "configs"), exist_ok=True)
 
+LOG_MAP = {
+  # key: (path, label shown in LogViewerModal dropdown)
+  "enable":        (ENABLE_LOG,        "Enable Log"),
+  "enabledesktop": (ENABLEDESKTOP_LOG, "Enable Desktop Link Log"),
+  "eject":         (EJECT_LOG,         "Eject Log"),
+  "ejectdesktop":  (EJECTDESKTOP_LOG,  "Eject Desktop Link Log"),
+  "transition":    (TRANSITION_LOG,    "Desktop Transition Log"),
+  "hybrid":        (HYBRID_LOG,        "Supergfx Hybrid Log"),
+  "integrated":    (INTEGRATED_LOG,    "Supergfx Integrated Log"),
+  "install":       (INSTALL_LOG,       "NVIDIA Install Log"),
+  "uninstall":     (UNINSTALL_LOG,     "Reset Environment Log"),
+  "shortcuts":     (SHORTCUTS_LOG,     "Install Desktop Shortcuts Log"),
+  "sync":          (SYNC_LOG,          "Boot NVIDIA DRM sync Log"),
+  "python":        (PYTHONERROR_LOG,   "Python Critical Error Log"),
+  "debug":         (DEBUG_LOG,         "Debug Log"),
+}
+
+# Per-script copy: log key, success title/message, failure title, action label (for the generic fallback)
+SCRIPT_META = {
+  "egpu-enable": {
+    "log_key": "enable",
+    "title": "XG Mobile",
+    "message": "XG Mobile enabled.",
+    "fail_title": "Enable Failed",
+    "action": "Enabling the XG Mobile",
+  },
+  "egpu-eject": {
+    "log_key": "eject",
+    "title": "XG Mobile",
+    "message": "XG Mobile ejected. It's now safe to unlock the cable.",
+    "fail_title": "Eject Failed",
+    "action": "Ejecting the XG Mobile",
+  },
+  "create-shortcuts": {
+    "log_key": "shortcuts",
+    "title": "Desktop Shortcuts",
+    "message": "Enable/Eject shortcuts were added to your Desktop.",
+    "fail_title": "Shortcut Creation Failed",
+    "action": "Creating desktop shortcuts",
+  },
+  "supergfx-hybrid": {
+    "log_key": "hybrid",
+    "title": "Flow Controls",
+    "message": "Switched to Hybrid mode. The display session is restarting.",
+    "fail_title": "Hybrid Switch Failed",
+    "action": "Switching to Hybrid mode",
+  },
+  "supergfx-integrated": {
+    "log_key": "integrated",
+    "title": "Flow Controls",
+    "message": "Switched to Integrated mode. The display session is restarting.",
+    "fail_title": "Integrated Switch Failed",
+    "action": "Switching to Integrated mode",
+  },
+  "install-nvidia.sh": {
+    "log_key": "install",
+    "title": "NVIDIA Setup",
+    "message": "NVIDIA drivers installed.",
+    "fail_title": "NVIDIA Install Failed",
+    "action": "The NVIDIA driver install",
+  },
+  "uninstall.sh": {
+    "log_key": "uninstall",
+    "title": "Reset Driver Environment",
+    "message": "Driver environment reset.",
+    "fail_title": "Reset Failed",
+    "action": "Resetting the driver environment",
+  },
+}
+
+_SUPERGFX_ERRORS = {
+  1: ("supergfxctl failed to switch GPU modes.",
+      "Press Restart Supergfxd, then try again. If it still fails, share this log in a GitHub issue."),
+  2: ("supergfxctl isn't installed on this system.",
+      "Install supergfxctl (asusctl) for your distro, then try again. Bazzite and CachyOS include it by default."),
+}
+
+# script -> exit code -> (message, hint)
+SCRIPT_ERROR_CATALOG = {
+  "egpu-enable": {
+    1: ("XG Mobile isn't locked in. Check the cable latch and try again.",
+        "The laptop reports the XG Mobile is not connected. Push the connector fully in, slide the lock switch to locked, wait for the XG Mobile LED, then press Enable again."),
+    2: ("NVIDIA driver isn't installed for this kernel.",
+        "On SteamOS, run Advanced → Install NVIDIA Drivers and reboot (needed again after every SteamOS kernel update). If your XG Mobile is AMD, turn off NVIDIA Mode."),
+    3: ("NVIDIA Vulkan configs are in the old v0.2.0 location.",
+        "Run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs in the new data folder, then reboot and enable again."),
+    4: ("NVIDIA Vulkan configs are missing.",
+        "Run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs, then reboot and enable again."),
+    5: ("The eGPU never appeared as a display device.",
+        "The XG Mobile was switched on but no new GPU showed up in /dev/dri in time. Eject, unlock and re-lock the cable, then try again. If it keeps happening, share the Enable Log on GitHub."),
+    6: ("No NVIDIA GPU found on the PCIe bus.",
+        "Enable stopped because no NVIDIA device was detected. If your XG Mobile is AMD, turn off NVIDIA Mode. Otherwise re-lock the cable and retry."),
+  },
+  "egpu-eject": {},
+  "install-nvidia.sh": {
+    10: ("NVIDIA drivers already match your kernel. No reboot needed.", ""),
+    2: ("Unsupported OS. The driver installer is SteamOS-only.",
+        "On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers. CachyOS ships NVIDIA drivers through its own packages."),
+    3: ("Kernel headers for your kernel aren't in the SteamOS repo.",
+        "Go to Settings → System → Check for Updates, apply any update, reboot, then run Install NVIDIA Drivers again."),
+    4: ("Kernel and header versions don't match. Update SteamOS first.",
+        "DKMS needs headers that exactly match the running kernel (both versions are in the install log). Apply SteamOS updates and reboot. If you're already up to date, Valve may not have published matching headers yet, so try again after the next update."),
+    5: ("Not enough free space on the system partition (/).",
+        "The installer needs at least 500 MiB free on the root filesystem. The install log shows how much is free."),
+    6: ("Not enough free space on /home (4 GiB needed).",
+        "Free up space (for example, uninstall a game), then run Install NVIDIA Drivers again."),
+    1: ("The driver build failed and was rolled back.",
+        "A step in the install failed and your system was restored. Open the install log, look at the lines just before \"INSTALL FAILED\", and share the log in a GitHub issue."),
+  },
+  "create-shortcuts": {
+    2: ("NVIDIA driver isn't installed, so shortcuts weren't created.",
+        "Run Advanced → Install NVIDIA Drivers first, or turn off NVIDIA Mode if your XG Mobile is AMD."),
+  },
+  "uninstall.sh": {
+    1: ("Reset isn't needed on Bazzite or CachyOS.",
+        "Your OS manages the NVIDIA drivers and XG Mobile switching natively (via supergfxctl), so there is nothing for this plugin to reset."),
+  },
+  "supergfx-hybrid": _SUPERGFX_ERRORS,
+  "supergfx-integrated": _SUPERGFX_ERRORS,
+}
+
+WRONG_BAZZITE_TITLE = "Wrong Bazzite Image"
+WRONG_BAZZITE_MESSAGE = "NVIDIA XG Mobile needs the bazzite-deck-nvidia image."
+WRONG_BAZZITE_HINT = "Rebase to the bazzite-deck-nvidia image (see the Bazzite docs), or turn off NVIDIA Mode if your XG Mobile is an AMD unit."
+
+def _result(ok, status, title, message, hint="", code=None, script="", log_key=""):
+  return {"ok": ok, "status": status, "code": code, "script": script,
+          "title": title, "message": message, "hint": hint, "log_key": log_key}
+
+LAUNCH_FAILURE_HINT = "The plugin couldn't launch this script. Open Activity Logs → Python Critical Error Log for details, and share it in a GitHub issue if it keeps happening."
+SYSTEMCTL_LAUNCH_FAILURE_HINT = "The plugin couldn't run systemctl to restart supergfxd. Open Activity Logs → Python Critical Error Log for details, and share it in a GitHub issue if it keeps happening."
+
+def _log_python_error(message):
+  """Appends a timestamped line to the Python Critical Error Log; never raises."""
+  try:
+    with open(PYTHONERROR_LOG, "a") as f:
+      f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
+  except Exception:
+    pass
+
+def _short_exc(e, limit=120):
+  """One-line, length-capped exception text for toasts and hints."""
+  text = (str(e).strip().splitlines() or [type(e).__name__])[0]
+  return text[:limit]
+
 def log(txt):
   decky.logger.info(txt)
 
@@ -119,10 +264,19 @@ class Plugin:
     """
     script_path = os.path.join(self.get_plugin_dir(), "bin", script_name)
     log(f"Executing: {script_path} with args: {args} Logging to: {log_path}")
-        
+
+    meta = SCRIPT_META.get(script_name, {
+      "log_key": "", "title": script_name, "message": f"{script_name} finished.",
+      "fail_title": f"{script_name} Failed", "action": script_name,
+    })
+    log_key = meta["log_key"]
+
     if not os.path.exists(script_path):
       error(f"Script not found: {script_path}")
-      return f"Error: {script_name} not found"
+      return _result(False, "error", meta["fail_title"],
+                     f"Plugin file missing: bin/{script_name}. Reinstall XG Mobile Manager.",
+                     hint="The plugin installation looks incomplete. Reinstall it from the Decky store or the latest GitHub release.",
+                     script=script_name, log_key="")
 
     clean_env = os.environ.copy()
     clean_env.pop("LD_LIBRARY_PATH", None)
@@ -142,18 +296,40 @@ class Plugin:
         )
         
         await process.wait()
-            
-      return "Success" if process.returncode == 0 else f"Failed (Code {process.returncode})"
     except Exception as e:
       error(f"Execution Error: {str(e)}")
-      return f"Error: {str(e)}"
+      _log_python_error(f"SCRIPT LAUNCH FAILURE ({script_name}): {str(e)}")
+      return _result(False, "error", meta["fail_title"],
+                     f"Couldn't start {script_name}: {_short_exc(e)}"[:120],
+                     hint=LAUNCH_FAILURE_HINT, script=script_name, log_key="python")
+
+    code = process.returncode
+    if code == 0:
+      return _result(True, "success", meta["title"], meta["message"],
+                     code=0, script=script_name, log_key=log_key)
+
+    entry = SCRIPT_ERROR_CATALOG.get(script_name, {}).get(code)
+
+    if script_name == "install-nvidia.sh" and code == 10:
+      message, hint = entry
+      return _result(True, "already_installed", meta["title"], message, hint=hint,
+                     code=code, script=script_name, log_key=log_key)
+
+    if entry:
+      message, hint = entry
+    else:
+      log_label = LOG_MAP[log_key][1] if log_key in LOG_MAP else "the plugin logs"
+      message = f"{meta['action']} failed (exit code {code})."
+      hint = f"Open Activity Logs → {log_label} and check the last lines. If you can't tell what went wrong, share that log in a GitHub issue."
+    return _result(False, "error", meta["fail_title"], message, hint=hint,
+                   code=code, script=script_name, log_key=log_key)
 
   async def enable_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
     os_type = self.get_os_type()
 
     if vendor == "nvidia" and os_type == "bazzite":
-      return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
+      return _result(False, "error", WRONG_BAZZITE_TITLE, WRONG_BAZZITE_MESSAGE, hint=WRONG_BAZZITE_HINT)
     return await self._execute_script("egpu-enable", ENABLE_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def eject_egpu(self):
@@ -381,7 +557,7 @@ class Plugin:
     os_type = self.get_os_type()
 
     if vendor == "nvidia" and os_type == "bazzite":
-      return "Error: Wrong OS Image. Please use the bazzite-nvidia-deck image."
+      return _result(False, "error", WRONG_BAZZITE_TITLE, WRONG_BAZZITE_MESSAGE, hint=WRONG_BAZZITE_HINT)
     return await self._execute_script("supergfx-hybrid", HYBRID_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def integrated_supergfxctl(self):
@@ -397,17 +573,12 @@ class Plugin:
   async def install_nvidia(self):
     if not self.get_os_type() == "steamos":
       log("SteamOS not detected: Blocking DKMS driver installation.")
-      return "Error: SteamOS not detected. NVIDIA Driver install is currently only for SteamOS."
-        
+      return _result(False, "error", "NVIDIA Install Unavailable",
+                     "Driver install is only needed on SteamOS.",
+                     hint="Bazzite (deck-nvidia image) and CachyOS already ship NVIDIA drivers. No install is required.")
+
     log("SteamOS detected: Starting DKMS driver compilation.")
-    #return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
-    res = await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
-    if "Code 1" in res:
-        return "ALREADY_INSTALLED"
-    elif res == "Success":
-        return "SUCCESS"
-    else:
-        return "ERROR"
+    return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
 
   async def uninstall_nvidia(self):
     return await self._execute_script("uninstall.sh", UNINSTALL_LOG, LOG_DIR, DATA_DIR)
@@ -416,9 +587,12 @@ class Plugin:
     try:
       with open("/var/tmp/xgmobile_desktop_trigger", "w") as f:
         f.write("transition_requested")
-      return "SUCCESS: File Written"
+      return _result(True, "success", "Desktop Mode", "Desktop Mode switch scheduled.")
     except Exception as e:
-      return f"ERROR: {str(e)}"
+      error(f"Error writing desktop transition flag: {e}")
+      return _result(False, "error", "Desktop Mode",
+                     "Couldn't schedule the Desktop Mode switch. Enabling without it.",
+                     hint=f"{_short_exc(e)}. You can switch to Desktop manually from the Power menu.")
 
   async def check_and_clear_desktop_flag(self):
     flag_path = "/var/tmp/xgmobile_desktop_trigger"
@@ -535,7 +709,11 @@ class Plugin:
     log("Attempting to enable and restart supergfxd.service...")
     clean_env = os.environ.copy()
     clean_env.pop("LD_LIBRARY_PATH", None)
-    
+
+    if shutil.which("supergfxctl") is None:
+      return _result(False, "error", "Flow Controls", "supergfxctl isn't installed on this system.",
+                     hint="Install supergfxctl (asusctl) for your distro, then try again. Bazzite and CachyOS include it by default.")
+
     try:
       # Chain enable and restart to guarantee boot persistence and immediate application
       process = await asyncio.create_subprocess_exec(
@@ -544,12 +722,23 @@ class Plugin:
         stderr=asyncio.subprocess.PIPE,
         env=clean_env
       )
-      await process.wait()
-      
-      return "Success" if process.returncode == 0 else f"Failed (Code {process.returncode})"
+      _, stderr = await process.communicate()
     except Exception as e:
       error(f"Error enabling supergfxd: {e}")
-      return f"Error: {str(e)}"
+      _log_python_error(f"SUPERGFXD RESTART LAUNCH FAILURE: {str(e)}")
+      return _result(False, "error", "Flow Controls", f"Couldn't start systemctl: {_short_exc(e)}"[:120],
+                     hint=SYSTEMCTL_LAUNCH_FAILURE_HINT, log_key="python")
+
+    code = process.returncode
+    if code == 0:
+      return _result(True, "success", "Flow Controls", "supergfxd restarted and enabled at boot.", code=0)
+
+    lines = [l.strip() for l in (stderr or b"").decode(errors="replace").splitlines() if l.strip()]
+    last_line = lines[-1][:200] if lines else ""
+    error(f"supergfxd restart failed (exit {code}): {last_line}")
+    return _result(False, "error", "Flow Controls", f"Couldn't restart supergfxd (exit {code}).",
+                   hint=f"systemctl reported: \"{last_line}\". Try rebooting, then press Restart Supergfxd again.",
+                   code=code)
 
   async def get_power_profile(self):
     try:
@@ -578,41 +767,44 @@ class Plugin:
     log(f"WMI PROFILE RECEIVED FROM UI: '{clean_profile}'")
     
     val_to_write = "0"
+    label = "Balanced"
     if "balanced" in clean_profile:
       val_to_write = "0"
     elif "performance" in  clean_profile:
       val_to_write = "1"
+      label = "Performance"
     elif "quiet" in clean_profile:
       val_to_write = "2"
+      label = "Quiet"
 
     try:
       policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
       with open(policy_path, "w") as f:
         f.write(val_to_write)
-      return "Success"
+      return _result(True, "success", "ASUS Power Profile", f"Power profile set to {label}.")
     except Exception as e:
       error(f"Error setting power profile: {e}")
-      return f"Error setting profile: {e}"
+      return _result(False, "error", "ASUS Power Profile", f"Couldn't set the power profile to {label}.",
+                     hint=f"The ASUS WMI policy file couldn't be written ({_short_exc(e)}). Make sure the asus-nb-wmi driver is loaded and that Decky is running as root.")
+
+  def _resolve_log_path(self, log_type: str) -> str:
+    """Maps a LOG_MAP key to a file. Enable/Eject prefer the vendor log the scripts actually write to."""
+    if log_type not in LOG_MAP:
+      log_type = "enable"
+    if log_type in ("enable", "eject"):
+      try:
+        vendor = Plugin.settings.getSetting("gpu_vendor", "nvidia")
+      except Exception:
+        # Plugin.settings doesn't exist until _main has run
+        vendor = "nvidia"
+      vendor_path = os.path.join(LOG_DIR, f"xgmobile_manager_{log_type}_{vendor}.log")
+      if os.path.exists(vendor_path):
+        return vendor_path
+    return LOG_MAP[log_type][0]
 
   async def get_live_logs(self, log_type="install"):
     """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'uninstall'."""
-    log_map = {
-      "enable": ENABLE_LOG,
-      "enabledesktop": ENABLEDESKTOP_LOG,
-      "eject": EJECT_LOG,
-      "ejectdesktop": EJECTDESKTOP_LOG,
-      "transition": TRANSITION_LOG,
-      "hybrid": HYBRID_LOG,
-      "integrated": INTEGRATED_LOG,
-      "install": INSTALL_LOG,
-      #"repair": REPAIR_LOG,
-      "uninstall": UNINSTALL_LOG,
-      "shortcuts": SHORTCUTS_LOG,
-      "sync": SYNC_LOG,
-      "python": PYTHONERROR_LOG,
-      "debug": DEBUG_LOG
-    }
-    path = log_map.get(log_type, ENABLE_LOG)
+    path = self._resolve_log_path(log_type)
     
     if not os.path.exists(path):
       return ""
@@ -623,42 +815,46 @@ class Plugin:
       return "Error reading log file."
 
   async def get_gpu_status(self):
-    status = {"connected": False, "active": False, "vendor": "none"}
+    status = {"connected": False, "active": False, "vendor": "none", "error": ""}
     
     try:
-      with open(DEBUG_LOG, "a") as dbg:
+      conn_path = "/sys/devices/platform/asus-nb-wmi/egpu_connected"
+      if os.path.exists(conn_path):
+        with open(conn_path, "r") as f:
+          val = f.read().strip()
+          status["connected"] = (val == "1")
+      else:
+        status["error"] = "asus-nb-wmi eGPU interface not found (egpu_connected missing)."
+        return status
 
-        conn_path = "/sys/devices/platform/asus-nb-wmi/egpu_connected"
-        if os.path.exists(conn_path):
-          with open(conn_path, "r") as f:
-            val = f.read().strip()
-            status["connected"] = (val == "1")
-        else:
-          return "Error: egpu_connected path missing"
+      # Check Active Flag
+      enable_path = "/sys/devices/platform/asus-nb-wmi/egpu_enable"
+      if os.path.exists(enable_path):
+        with open(enable_path, "r") as f:
+          val = f.read().strip()
+          status["active"] = (val == "1")
+      else:
+        status["error"] = "asus-nb-wmi eGPU interface not found (egpu_enable missing)."
+        return status
 
-        # Check Active Flag
-        enable_path = "/sys/devices/platform/asus-nb-wmi/egpu_enable"
-        if os.path.exists(enable_path):
-          with open(enable_path, "r") as f:
-            val = f.read().strip()
-            status["active"] = (val == "1")
-        else:
-          return "Error: egpu_enable path missing"
-
-        # Vendor check (PCI Bus)
-        try:
-          # Ask for ANY NVIDIA device on the PCI bus (Vendor ID 10de)
-          res = subprocess.check_output(["lspci", "-n", "-d", "10de:"]).decode()
-          if "10de:" in res:
-            status["vendor"] = "nvidia"
-        except:
-          if os.path.exists("/dev/dri/card1"):
-            status["vendor"] = "amd"
+      # Vendor check (PCI Bus)
+      try:
+        # Ask for ANY NVIDIA device on the PCI bus (Vendor ID 10de)
+        res = subprocess.check_output(["lspci", "-n", "-d", "10de:"]).decode()
+        if "10de:" in res:
+          status["vendor"] = "nvidia"
+      except:
+        if os.path.exists("/dev/dri/card1"):
+          status["vendor"] = "amd"
 
     except Exception as e:
       error(f"CRITICAL PYTHON ERROR in get_gpu_status: {e}")
-      with open(DEBUG_LOG, "a") as dbg:
-        dbg.write(f"CRITICAL ERROR: {e}\n")
+      status["error"] = f"Status check failed: {e}."
+      try:
+        with open(DEBUG_LOG, "a") as dbg:
+          dbg.write(f"CRITICAL ERROR: {e}\n")
+      except Exception:
+        pass
       return status
 
     return status
@@ -691,24 +887,7 @@ class Plugin:
 
   async def get_latest_logs(self, log_type="enable"):
     """Reads logs for display in a modal."""
-    log_map = {
-      "enable": ENABLE_LOG,
-      "enabledesktop": ENABLEDESKTOP_LOG,
-      "eject": EJECT_LOG,
-      "ejectdesktop": EJECTDESKTOP_LOG,
-      "transition": TRANSITION_LOG,
-      "hybrid": HYBRID_LOG,
-      "integrated": INTEGRATED_LOG,
-      "install": INSTALL_LOG,
-      #"repair": REPAIR_LOG,
-      "uninstall": UNINSTALL_LOG,
-      "shortcuts": SHORTCUTS_LOG,
-      "sync": SYNC_LOG,
-      "python": PYTHONERROR_LOG,
-      "debug": DEBUG_LOG
-    }
-    
-    path = log_map.get(log_type, ENABLE_LOG)
+    path = self._resolve_log_path(log_type)
 
     if not os.path.exists(path):
       return f"No log file found at {path}"
