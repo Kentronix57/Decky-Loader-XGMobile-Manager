@@ -24,7 +24,6 @@ EJECTDESKTOP_LOG = os.path.join(LOG_DIR, "xgmobile_manager_desktop_eject_request
 TRANSITION_LOG = os.path.join(LOG_DIR, "xgmobile_manager_transition.log")
 HYBRID_LOG = os.path.join(LOG_DIR, "xgmobile_manager_supergfxd_hybrid.log")
 INTEGRATED_LOG = os.path.join(LOG_DIR, "xgmobile_manager_supergfxd_integrated.log")
-#REPAIR_LOG = os.path.join(LOG_DIR, "xgmobile_manager_repair.log")
 DEBUG_LOG = os.path.join(LOG_DIR, "xgmobile_manager_debug.log")
 INSTALL_LOG = os.path.join(LOG_DIR, "xgmobile_manager_install.log")
 UNINSTALL_LOG = os.path.join(LOG_DIR, "xgmobile_manager_uninstall.log")
@@ -571,10 +570,6 @@ class Plugin:
     
     return await self._execute_script("supergfx-integrated", INTEGRATED_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
-  async def repair_services(self):
-    vendor = await self.get_setting("gpu_vendor", "nvidia")
-    return await self._execute_script("repair-services", REPAIR_LOG, vendor)
-
   async def install_nvidia(self):
     if not self.get_os_type() == "steamos":
       log("SteamOS not detected: Blocking DKMS driver installation.")
@@ -808,7 +803,7 @@ class Plugin:
     return LOG_MAP[log_type][0]
 
   async def get_live_logs(self, log_type="install"):
-    """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'uninstall'."""
+    """Called by the frontend every 500ms. log_type is a LOG_MAP key, e.g. 'install' or 'uninstall'."""
     path = self._resolve_log_path(log_type)
     
     if not os.path.exists(path):
