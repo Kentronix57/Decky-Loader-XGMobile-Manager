@@ -17,6 +17,19 @@ echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
 DM_SERVICE=$(xgm_dm_service)
 echo "Display manager: $DM_SERVICE"
 
+# If the script exits while the display manager is stopped, start it again so the screen
+# doesn't stay black. Keeps the original exit code.
+DM_STOPPED=0
+restore_dm() {
+  local rc=$?
+  if [ "$DM_STOPPED" -eq 1 ]; then
+    echo "Exiting early (code $rc): restarting $DM_SERVICE..."
+    systemctl start "$DM_SERVICE"
+  fi
+  exit "$rc"
+}
+trap restore_dm EXIT
+
 # Hardware Lock Check
 CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
 if [ "$CONNECTED" -eq 0 ]; then
@@ -168,6 +181,7 @@ fi
 # We must stop the display manager so we can unload the driver modules
 echo "Stopping $DM_SERVICE..."
 systemctl stop "$DM_SERVICE"
+DM_STOPPED=1
 
  
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
@@ -276,6 +290,7 @@ EOF"
 fi
 echo "Refreshing DRM session..."
 systemctl start "$DM_SERVICE" #--no-block
+DM_STOPPED=0
 
 #if [ $SUPERGFX_TRIG == 1 ]; then
 #  echo "Restarting supergfxctl..."

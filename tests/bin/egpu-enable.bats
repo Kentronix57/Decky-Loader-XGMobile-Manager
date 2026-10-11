@@ -34,6 +34,7 @@ nvidia_ready() {
   assert_failure 1
   assert_equal "$(grep -c 'XG Mobile not locked' <<< "$LOG")" 1
   refute_called "systemctl stop sddm.service"
+  refute_called "systemctl start sddm.service"
 }
 
 @test "egpu_connected missing: treated as not locked, exit 1" {
@@ -100,6 +101,43 @@ nvidia_ready() {
   run_plugin_script egpu-enable nvidia
   assert_failure 6
   refute_called "modprobe nvidia_drm modeset=1 fbdev=1"
+}
+
+@test "exit 6 after the display manager stopped: it is started again, exit code kept" {
+  nvidia_ready steamos
+  set_lspci empty
+  run_plugin_script egpu-enable nvidia
+  assert_failure 6
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+  assert_equal "$(calls_matching 'systemctl start sddm.service' | wc -l)" 1
+  [[ "$LOG" == *"Exiting early (code 6): restarting sddm.service..."* ]]
+}
+
+@test "exit 6 on cachyos: plasmalogin is started again, exit code kept" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  set_lspci empty
+  run_plugin_script egpu-enable nvidia
+  assert_failure 6
+  assert_called_before "systemctl stop plasmalogin.service" "systemctl start plasmalogin.service"
+  refute_called "systemctl start sddm.service"
+}
+
+@test "exit 5 (before the display manager is stopped): display manager not touched" {
+  egpu_appears never
+  run_plugin_script egpu-enable amd
+  assert_failure 5
+  refute_called "systemctl stop sddm.service"
+  refute_called "systemctl start sddm.service"
+  [[ "$LOG" != *"Exiting early"* ]]
+}
+
+@test "success: the display manager is started exactly once (no extra start from the trap)" {
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_equal "$(calls_matching 'systemctl start sddm.service' | wc -l)" 1
+  [[ "$LOG" != *"Exiting early"* ]]
 }
 
 @test "happy path steamos/nvidia: environment, services, modules, plasma env, log symlink" {
