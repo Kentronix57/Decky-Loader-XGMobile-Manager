@@ -13,6 +13,8 @@ XGM_OPTIONAL_SHIMS="$XGM_REPO/tests/bin/shims-optional"
 
 load "$XGM_REPO/node_modules/bats-support/load"
 load "$XGM_REPO/node_modules/bats-assert/load"
+# shellcheck source=../../audit/audit.bash
+source "$XGM_REPO/tests/audit/audit.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
 SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf)
@@ -26,9 +28,33 @@ refuse_root() {
 
 refuse_root
 
+# Gate: the path audit must pass before any bin/ script runs. It runs once per bats invocation
+# (whichever file comes first) and the result is cached in $BATS_RUN_TMPDIR, so running a single
+# file, `bats -f`, or an editor test runner is gated the same way as the full suite.
+require_path_audit() {
+  local marker="$BATS_RUN_TMPDIR/xgm-path-audit" out result=pass
+  if [ ! -s "$marker" ]; then
+    out="$(audit_all 2>&1)" || result=fail
+    printf '%s\n%s\n' "$result" "$out" > "$marker.$$"
+    mv -f "$marker.$$" "$marker"
+  fi
+  if [ "$(head -n 1 "$marker")" != "pass" ]; then
+    echo "Path audit failed, so no bin/ script was run (tests/audit/path-audit.bats has details):" >&2
+    tail -n +2 "$marker" >&2
+    return 1
+  fi
+}
+
+# Call from setup_file() in every bin/ test file.
+xgm_setup_file() {
+  refuse_root
+  require_path_audit
+}
+
 # Builds the fake system tree and the sandbox PATH. Call from setup().
 make_root() {
   refuse_root
+  require_path_audit || fail "path audit failed; refusing to run bin/ scripts"
   ROOT="$BATS_TEST_TMPDIR/root"
   # Scripts use $ROOT unquoted, so the path must not contain spaces or glob characters.
   [[ "$ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "unsafe sandbox path for unquoted \$ROOT: $ROOT"

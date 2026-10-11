@@ -23,7 +23,7 @@ done
 
 step "shellcheck --severity=error"
 if command -v shellcheck >/dev/null 2>&1; then
-  shellcheck --severity=error bin/* tests/run-all.sh tests/bin/helpers/*.bash tests/bin/shims/* tests/bin/shims-optional/*
+  shellcheck --severity=error bin/* tests/run-all.sh tests/audit/audit.bash tests/bin/helpers/*.bash tests/bin/shims/* tests/bin/shims-optional/*
 elif [ -n "${CI:-}" ]; then
   echo "ERROR: shellcheck is required in CI." >&2
   exit 1

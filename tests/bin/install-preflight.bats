@@ -5,7 +5,7 @@
 
 setup_file() {
   load helpers/sandbox
-  refuse_root
+  xgm_setup_file
 }
 
 setup() {
