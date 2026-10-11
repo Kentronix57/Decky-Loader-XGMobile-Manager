@@ -120,19 +120,21 @@ set_os() {
   esac
 }
 
-# The display-manager.service alias: sddm (SteamOS, Bazzite) | plasmalogin (CachyOS Handheld) |
-# none (no alias) | any other name, linked as-is. set_os picks the OS default.
+# The display-manager.service alias: set_dm <name> [dangling]. <name> is sddm | plasmalogin | gdm
+# | ... (".service" is appended unless the name already has a suffix, e.g. bogus.target), or none
+# for no alias. The target unit file is created, or removed if "dangling" is given. set_os picks the OS
+# default: plasmalogin on cachyos, sddm otherwise.
 set_dm() {
-  local alias="$ROOT/etc/systemd/system/display-manager.service"
+  local alias="$ROOT/etc/systemd/system/display-manager.service" unit="$1"
   rm -f "$alias"
-  case "$1" in
-    none) ;;
-    sddm|plasmalogin)
-      touch "$ROOT/usr/lib/systemd/system/$1.service"
-      ln -s "$ROOT/usr/lib/systemd/system/$1.service" "$alias"
-      ;;
-    *) ln -s "$ROOT/usr/lib/systemd/system/$1" "$alias" ;;
-  esac
+  [ "$1" = "none" ] && return 0
+  [[ "$unit" == *.* ]] || unit="$unit.service"
+  if [ "${2:-}" = "dangling" ]; then
+    rm -f "$ROOT/usr/lib/systemd/system/$unit"
+  else
+    touch "$ROOT/usr/lib/systemd/system/$unit"
+  fi
+  ln -s "$ROOT/usr/lib/systemd/system/$unit" "$alias"
 }
 
 set_product() { echo "$1" > "$ROOT/sys/class/dmi/id/product_name"; }

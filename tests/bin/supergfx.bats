@@ -53,9 +53,11 @@ check_not_installed() {
 
 @test "supergfx-hybrid: cachyos restarts plasmalogin" { check_dm supergfx-hybrid cachyos plasmalogin plasmalogin.service; }
 @test "supergfx-hybrid: no alias falls back to sddm" { check_dm supergfx-hybrid cachyos none sddm.service; }
+@test "supergfx-hybrid: gdm alias falls back to sddm" { check_dm supergfx-hybrid cachyos gdm sddm.service; }
 
 @test "supergfx-integrated: success restarts sddm" { check_success supergfx-integrated Integrated; }
 @test "supergfx-integrated: cachyos restarts plasmalogin" { check_dm supergfx-integrated cachyos plasmalogin plasmalogin.service; }
 @test "supergfx-integrated: no alias falls back to sddm" { check_dm supergfx-integrated cachyos none sddm.service; }
+@test "supergfx-integrated: gdm alias falls back to sddm" { check_dm supergfx-integrated cachyos gdm sddm.service; }
 @test "supergfx-integrated: supergfxctl fails, exit 1" { check_supergfxctl_fails supergfx-integrated Integrated; }
 @test "supergfx-integrated: supergfxctl not installed, exit 2" { check_not_installed supergfx-integrated; }

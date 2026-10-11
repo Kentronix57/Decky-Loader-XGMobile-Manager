@@ -234,14 +234,36 @@ nvidia_ready() {
   run_plugin_script egpu-enable amd
   assert_success
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+  [[ "$LOG" != *"unrecognized display manager"* ]]
 }
 
-@test "alias not pointing at a .service unit: falls back to sddm.service" {
+# Unverified display managers keep today's behavior (sddm.service) and say so in the log.
+check_dm_fallback() {
   egpu_appears amd
-  set_dm bogus-target
+  set_os cachyos
+  set_dm "$@"
   run_plugin_script egpu-enable amd
   assert_success
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+  assert_equal "$(calls_matching 'systemctl stop' | grep -vc sddm.service)" 0
+  [[ "$LOG" == *"Display manager: sddm.service"* ]]
+}
+
+@test "gdm alias: not a verified display manager, falls back to sddm.service with a warning" {
+  check_dm_fallback gdm
+  [[ "$LOG" == *"WARNING: unrecognized display manager 'gdm.service', using sddm.service"* ]]
+  refute_called "systemctl stop gdm.service"
+}
+
+@test "dangling plasmalogin alias: falls back to sddm.service with a warning" {
+  check_dm_fallback plasmalogin dangling
+  [[ "$LOG" == *"WARNING: unrecognized display manager 'plasmalogin.service', using sddm.service"* ]]
+  refute_called "systemctl stop plasmalogin.service"
+}
+
+@test "alias not pointing at a .service unit: falls back to sddm.service with a warning" {
+  check_dm_fallback bogus.target
+  [[ "$LOG" == *"WARNING: unrecognized display manager 'bogus.target', using sddm.service"* ]]
 }
 
 @test "happy path steamos/amd: only WLR_DRM_DEVICES is set" {

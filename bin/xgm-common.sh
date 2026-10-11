@@ -5,16 +5,28 @@
 ROOT="${XGM_ROOT:-}"
 
 # The display-manager unit: sddm on SteamOS/Bazzite, plasmalogin on CachyOS Handheld.
-# Resolved from the display-manager.service alias; falls back to sddm.service.
+# Resolved from the display-manager.service alias, but only known units are accepted, and only if
+# the alias target exists. Anything else falls back to sddm.service (the pre-alias behavior) with
+# a warning on stderr. Other display managers (gdm, lightdm, greetd) stay on the fallback until a
+# community tester has verified enable/eject with them; then add them to the case below.
 xgm_dm_service() {
-  local target unit
-  target=$(readlink -f "$ROOT/etc/systemd/system/display-manager.service" 2>/dev/null)
-  unit=$(basename "$target" 2>/dev/null)
-  if [[ "$unit" == ?*.service ]] && [ "$unit" != "display-manager.service" ]; then
-    echo "$unit"
-  else
+  local alias="$ROOT/etc/systemd/system/display-manager.service" target unit
+  if [ ! -L "$alias" ] && [ ! -e "$alias" ]; then
     echo "sddm.service"
+    return 0
   fi
+  target=$(readlink -f "$alias" 2>/dev/null)
+  unit=$(basename "$target" 2>/dev/null)
+  case "$unit" in
+    sddm.service|plasmalogin.service)
+      if [ -e "$target" ]; then
+        echo "$unit"
+        return 0
+      fi
+      ;;
+  esac
+  echo "WARNING: unrecognized display manager '$unit', using sddm.service" >&2
+  echo "sddm.service"
 }
 
 # steamos-readonly only exists on SteamOS; elsewhere these do nothing.
