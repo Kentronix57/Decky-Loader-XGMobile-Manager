@@ -28,10 +28,11 @@ That runs, in order:
 - `python3 -m py_compile main.py`
 - `bash -n bin/*`
 - `shellcheck --severity=error` on `bin/*` and the test scripts (skipped with a warning if shellcheck isn't installed locally; required in CI)
+- `pnpm test:audit`: the path audit (`tests/audit/path-audit.bats`), as a gate. It proves every absolute path in the in-scope `bin/` scripts is `$ROOT`-prefixed before any script is executed.
 - `pnpm build` (no TypeScript errors)
 - `pnpm test`, which runs the three suites:
   - `pnpm test:py`: pytest, `tests/python/`. Backend logic (`main.py`) with a fake `decky` module and stub scripts. If `pytest` isn't importable, `run-all.sh` creates `.venv/` and installs `requirements-dev.txt`.
-  - `pnpm test:bin`: bats, `tests/bin/`. The `bin/` scripts run against a fake sysfs/rootfs, with `modinfo`, `systemctl`, `lspci`, `steamos-readonly` and the other system commands shimmed on `PATH`.
+  - `pnpm test:bin`: bats, `tests/bin/`. Runs the path audit first and stops if it fails. The `bin/` scripts run against a fake sysfs/rootfs, with `modinfo`, `systemctl`, `lspci`, `steamos-readonly` and the other system commands shimmed on `PATH`.
   - `pnpm test:ui`: vitest, `src/**/*.test.ts`. Frontend result handling (`src/lib/notify.tsx`).
 
 **Rule:** if a behavior *can* be tested at Tier 0, add a Tier 0 test for it instead of adding a hardware checklist item. Examples: exit-code → message mapping, OS/vendor branching in scripts, environment-variable injection and cleanup, result shapes, log-path resolution.
@@ -94,10 +95,15 @@ New behavior in `main.py` or `bin/` needs a Tier 0 test. The tests codify curren
 - `fakes/` holds the stand-ins for Decky's `decky`, `decky_plugin` and `settings` modules.
 
 ### Scripts (`tests/bin/`)
-- **`$XGM_ROOT` convention.** Every script under test sets `ROOT="${XGM_ROOT:-}"` and prefixes every absolute path with `$ROOT` (`$ROOT/etc/environment`, `$ROOT/sys/devices/...`). `XGM_ROOT` is unset in production, so the paths are unchanged. **Every new absolute path in `bin/` must be `$ROOT`-prefixed; `path-audit.bats` enforces it.** Commands are not prefixed; they are shimmed. Literal values that only look like paths (an environment value, log text) go in `tests/bin/ALLOWLIST`, which also lists the scripts that are out of scope or only tested up to their pre-flight checks.
+- **`$XGM_ROOT` convention.** Every script under test sets `ROOT="${XGM_ROOT:-}"` and prefixes every absolute path with `$ROOT` (`$ROOT/etc/environment`, `$ROOT/sys/devices/...`). `XGM_ROOT` is unset in production, so the paths are unchanged. **Every new absolute path in `bin/` must be `$ROOT`-prefixed; `tests/audit/path-audit.bats` enforces it.** Commands are not prefixed; they are shimmed. Literal values that only look like paths (an environment value, log text) go in `tests/bin/ALLOWLIST`, which also lists the scripts that are out of scope or only tested up to their pre-flight checks (`@until` must be the first line those tests never reach).
 - **Sandbox helpers** (`helpers/sandbox.bash`). `make_root` (called in `setup`) builds a fake system tree under `$BATS_TEST_TMPDIR/root`. Setters change it: `set_os`, `set_product`, `set_connected`, `nvidia_driver installed|missing`, `nvidia_configs backup|old|missing`, `egpu_appears nvidia|amd|never`, `egpu_drops yes|no`, `egpu_present`, `set_lspci`, `set_lsmod`, `supergfxd_active`, `enable_supergfxctl`. `run_plugin_script <name> <vendor>` runs a script with the same arguments `main.py` passes, sets bats' `$status`/`$output`, and sets `$LOG` to what the script wrote to its log.
 - **Shims** (`shims/`). One small script per system command. Each appends `<cmd> <args>` to `$SHIM_LOG`; assert with `assert_called "systemctl stop sddm"`, `refute_called "steamos-readonly"` and `assert_called_before`. Behavior is controlled through files in `$SHIM_STATE`, which the setters write. `sleep` returns instantly and simulates hotplug: card1 appears once `egpu_enable` is 1 and disappears once it is 0. The sandbox `PATH` holds only the shims plus a fixed list of coreutils, so an unshimmed system command fails with "command not found" instead of running for real.
-- **Safety.** `run-all.sh` and every `.bats` file refuse to run as root, so a missed `$ROOT` prefix can only fail with "permission denied". Never run the tests with `sudo`.
+- **Safety.** Three layers keep a missed `$ROOT` prefix from touching the host. They reduce the risk; they don't make it impossible:
+  1. **Audit gate first.** `path-audit.bats` runs before any `bin/` script executes (in `run-all.sh` and in `pnpm test:bin`), so a missing prefix is normally reported before it can do anything.
+  2. **Not root.** `run-all.sh` and every `.bats` file refuse to run as root, so writes to system locations (`/etc`, `/usr`, `/sys`, `/dev`) fail with "permission denied".
+  3. **A test user that doesn't exist.** The shims report the primary user as `xgmtest`, so paths built from `$PRIMARY_USER` point at a home directory that can't exist.
+
+  What's left: user-writable locations (`/tmp`, `/var/tmp`, your own home) and the few paths the scripts hardcode to `/home/deck`, which on a SteamOS dev machine is your real home. Only the audit gate protects those, so never skip it, and never run the tests with `sudo`.
 
 ### Error catalog
 Every `(script, code)` in `SCRIPT_ERROR_CATALOG` needs a matching `exit N` in `bin/<script>`; `test_catalog_integrity.py` checks this, and that `LOG_MAP` matches the Activity Logs dropdown and `ActionResult` matches `src/lib/notify.tsx`. Codes that come from `set -e` instead of a literal `exit` must be added to `IMPLICIT_EXITS` in that test.
