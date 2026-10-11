@@ -108,7 +108,7 @@ _SUPERGFX_ERRORS = {
   1: ("supergfxctl failed to switch GPU modes.",
       "Press Restart Supergfxd, then try again. If it still fails, share this log in a GitHub issue."),
   2: ("supergfxctl isn't installed on this system.",
-      "Install supergfxctl (asusctl) for your distro, then try again. Bazzite and CachyOS include it by default."),
+      "Install supergfxctl (asusctl) for your distro, then try again. Bazzite includes it by default."),
 }
 
 # script -> exit code -> (message, hint)
@@ -131,7 +131,7 @@ SCRIPT_ERROR_CATALOG = {
   "install-nvidia.sh": {
     10: ("NVIDIA drivers already match your kernel. No reboot needed.", ""),
     2: ("Unsupported OS. The driver installer is SteamOS-only.",
-        "On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers. CachyOS ships NVIDIA drivers through its own packages."),
+        "On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers. On CachyOS, install your kernel's nvidia-open package (e.g. linux-cachyos-deckify-nvidia-open) plus nvidia-utils and lib32-nvidia-utils."),
     3: ("Kernel headers for your kernel aren't in the SteamOS repo.",
         "Go to Settings → System → Check for Updates, apply any update, reboot, then run Install NVIDIA Drivers again."),
     4: ("Kernel and header versions don't match. Update SteamOS first.",
@@ -574,8 +574,8 @@ class Plugin:
     if not self.get_os_type() == "steamos":
       log("SteamOS not detected: Blocking DKMS driver installation.")
       return _result(False, "error", "NVIDIA Install Unavailable",
-                     "Driver install is only needed on SteamOS.",
-                     hint="Bazzite (deck-nvidia image) and CachyOS already ship NVIDIA drivers. No install is required.")
+                     "The plugin's driver installer is SteamOS-only for now.",
+                     hint="Bazzite's deck-nvidia image includes the drivers. On CachyOS, install your kernel's nvidia-open package with pacman (automatic install is coming in a future update).")
 
     log("SteamOS detected: Starting DKMS driver compilation.")
     return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
@@ -712,7 +712,7 @@ class Plugin:
 
     if shutil.which("supergfxctl") is None:
       return _result(False, "error", "Flow Controls", "supergfxctl isn't installed on this system.",
-                     hint="Install supergfxctl (asusctl) for your distro, then try again. Bazzite and CachyOS include it by default.")
+                     hint="Install supergfxctl (asusctl) for your distro, then try again. Bazzite includes it by default.")
 
     try:
       # Chain enable and restart to guarantee boot persistence and immediate application
