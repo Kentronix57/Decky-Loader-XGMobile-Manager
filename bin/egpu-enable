@@ -3,6 +3,7 @@ VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
 OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
+ROOT="${XGM_ROOT:-}"
 SUPERGFX_TRIG=0
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
@@ -13,7 +14,7 @@ exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
 
 # Hardware Lock Check
-CONNECTED=$(cat /sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
+CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
 if [ "$CONNECTED" -eq 0 ]; then
   echo "ERROR: XG Mobile not locked."
   exit 1
@@ -27,8 +28,8 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
       echo "ERROR: NVIDIA Driver is not installed. Please run the Install NVIDIA drivers button, or select AMD."
       exit 2
     fi
-    if [ ! -f "$DATA_DIR/configs_backup/nvidia_icd.json" ] && [ ! -f "/usr/share/vulkan/icd.d/nvidia_icd.json" ]; then
-      if [ -f "/home/deck/xgmobile_configs_backup/nvidia_icd.json" ]; then
+    if [ ! -f "$DATA_DIR/configs_backup/nvidia_icd.json" ] && [ ! -f "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]; then
+      if [ -f "$ROOT/home/deck/xgmobile_configs_backup/nvidia_icd.json" ]; then
         echo "CRITICAL ERROR: NVIDIA Vulkan configs detected in old folder location due to v0.2.0 migration."
         echo "Please use the 'Install NVIDIA Drivers' button in the plugin to regenerate them."
         exit 3
@@ -46,11 +47,11 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
   NEEDS_REPAIR=0
 
   # Check if global commands are missing
-  [ ! -L /usr/local/bin/egpu-enable ] && NEEDS_REPAIR=1
+  [ ! -L $ROOT/usr/local/bin/egpu-enable ] && NEEDS_REPAIR=1
 
   # Check if NVIDIA services/sleep scripts are missing
   if [ "$VENDOR" == "nvidia" ]; then
-    [ ! -f /etc/systemd/system/nvidia-suspend.service ] && NEEDS_REPAIR=1
+    [ ! -f $ROOT/etc/systemd/system/nvidia-suspend.service ] && NEEDS_REPAIR=1
   fi
 
   if [ "$NEEDS_REPAIR" -eq 1 ]; then
@@ -58,13 +59,13 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
     steamos-readonly disable
   
     # Restore global terminal commands
-    ln -sf "$REPO_ROOT/bin/egpu-enable" /usr/local/bin/egpu-enable
-    ln -sf "$REPO_ROOT/bin/egpu-eject" /usr/local/bin/egpu-eject
-    ln -sf "$REPO_ROOT/bin/egpu-sync" /usr/local/bin/egpu-sync
+    ln -sf "$REPO_ROOT/bin/egpu-enable" $ROOT/usr/local/bin/egpu-enable
+    ln -sf "$REPO_ROOT/bin/egpu-eject" $ROOT/usr/local/bin/egpu-eject
+    ln -sf "$REPO_ROOT/bin/egpu-sync" $ROOT/usr/local/bin/egpu-sync
     chmod +x "$REPO_ROOT/bin/egpu-enable" "$REPO_ROOT/bin/egpu-eject" "$REPO_ROOT/bin/egpu-sync"
   
     # Copy background services
-    cp "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
+    cp "$REPO_ROOT/assets/services/"*.service $ROOT/etc/systemd/system/ 2>/dev/null || true
     systemctl enable xgmobile-boot-sync.service
 
     if [ "$VENDOR" == "nvidia" ]; then
@@ -80,12 +81,12 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
   fi
 fi
 
-if [ -L /usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f /usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
+if [ -L $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
   echo "Purging obsolete legacy egpu-resume-fix..."
   steamos-readonly disable
-  rm -f /usr/lib/systemd/system-sleep/egpu-resume-fix
-  rm -f /etc/systemd/system/egpu-resume-fix.service
-  rm -f /etc/systemd/system/egpu-boot-guardian.service
+  rm -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix
+  rm -f $ROOT/etc/systemd/system/egpu-resume-fix.service
+  rm -f $ROOT/etc/systemd/system/egpu-boot-guardian.service
   steamos-readonly enable
 fi
 
@@ -97,13 +98,13 @@ fi
 
 # Used for all OSes for consistency
 # Hardware Activation
-EXISTING_CARDS=$(ls /dev/dri/card* 2>/dev/null)
+EXISTING_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
 IGPU_CARD=$(echo "$EXISTING_CARDS" | head -n 1)
-ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
+ENABLE_PATH="$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
 if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
   echo 1 > "$ENABLE_PATH" || true
 fi
-echo 1 > /sys/bus/pci/rescan
+echo 1 > $ROOT/sys/bus/pci/rescan
 
 sleep 2
 
@@ -123,7 +124,7 @@ COUNT=0
 EGPU_CARD=""
 while [ -z "$EGPU_CARD" ] && [ $COUNT -lt 15 ]; do
   echo "Waiting for eGPU card... ($COUNT)"
-  CURRENT_CARDS=$(ls /dev/dri/card* 2>/dev/null)
+  CURRENT_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
   for card in $CURRENT_CARDS; do
     if ! echo "$EXISTING_CARDS" | grep -q "$card"; then
       EGPU_CARD=$card
@@ -144,11 +145,11 @@ echo "Success! eGPU dynamically detected as: $EGPU_CARD"
 #echo "Setting user permissions for eGPU..."
 echo "Setting permissions for user: $PRIMARY_USER"
 setfacl -m u:$PRIMARY_USER:rw $EGPU_CARD
-setfacl -m u:$PRIMARY_USER:rw /dev/dri/renderD*
+setfacl -m u:$PRIMARY_USER:rw $ROOT/dev/dri/renderD*
 
-if [ -e /dev/nvidiactl ]; then
+if [ -e $ROOT/dev/nvidiactl ]; then
   echo "Granting NVIDIA node permissions for overlay..."
-  setfacl -m "u:$PRIMARY_USER:rw" /dev/nvidia*
+  setfacl -m "u:$PRIMARY_USER:rw" $ROOT/dev/nvidia*
 fi
 
 #if [[ "$OS_TYPE" == *"bazzite"* ]]; then
@@ -179,11 +180,11 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 
     echo "Re-fanging NVIDIA configs for active session..."
     steamos-readonly disable
-    mv $DATA_DIR/configs_backup/10_nvidia* /usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/*icd* /usr/share/vulkan/icd.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/*layer* /usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/*layer* /usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/10-nvidia* /usr/share/X11/xorg.conf.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/10_nvidia* $ROOT/usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/*icd* $ROOT/usr/share/vulkan/icd.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
+    mv $DATA_DIR/configs_backup/10-nvidia* $ROOT/usr/share/X11/xorg.conf.d/ 2>/dev/null || true
     steamos-readonly enable
 
     # This is what forces the NVIDIA card into Wayland mode
@@ -195,13 +196,13 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     # PERSISTENT DRIVER SETTINGS
     # We write the modeset to a config file so the kernel loads it at boot
     echo "Setting NVIDIA config file for persistence on reboot..."
-    echo "options nvidia_drm modeset=1 fbdev=1" > /etc/modprobe.d/nvidia-egpu.conf
+    echo "options nvidia_drm modeset=1 fbdev=1" > $ROOT/etc/modprobe.d/nvidia-egpu.conf
 
     # PERSISTENT ENVIRONMENT (The Global File)
     # We use a function to safely add lines to /etc/environment
     echo "Writing environment variables to disk......"
     safe_add() {
-      grep -qF "$1" /etc/environment || echo "$1" >> /etc/environment
+      grep -qF "$1" $ROOT/etc/environment || echo "$1" >> $ROOT/etc/environment
     }
 
     safe_add "MESA_VK_DEVICE_SELECT=$NVIDIA_ID"
@@ -236,7 +237,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment __GLX_VENDOR_LIBRARY_NAME=nvidia
 
     echo "Creating isolated KDE Plasma environment config..."
-    PLASMA_ENV_DIR="/home/$PRIMARY_USER/.config/plasma-workspace/env"
+    PLASMA_ENV_DIR="$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env"
     sudo -u $PRIMARY_USER mkdir -p "$PLASMA_ENV_DIR"
   
     sudo -u $PRIMARY_USER bash -c "cat > '$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh' << EOF
@@ -256,7 +257,7 @@ EOF"
     echo "AMD Vendor detected. Injecting minimal variables to prioritize the new GPU..."
     echo "Writing environment variables to disk......"
     safe_add() {
-      grep -qF "$1" /etc/environment || echo "$1" >> /etc/environment
+      grep -qF "$1" $ROOT/etc/environment || echo "$1" >> $ROOT/etc/environment
     }
 
     safe_add "WLR_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD"
@@ -282,7 +283,7 @@ systemctl start sddm #--no-block
 #  systemctl disable supergfxd.service 2>/dev/null || true
 #fi
 
-PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+PRODUCT_NAME=$(cat $ROOT/sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
 
 if command -v supergfxctl >/dev/null 2>&1; then
   if [[ "$PRODUCT_NAME" == *"RC71L"* || "$PRODUCT_NAME" == *"Ally"* ]]; then

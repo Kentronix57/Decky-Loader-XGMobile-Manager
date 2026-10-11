@@ -3,6 +3,7 @@ VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
 OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
+ROOT="${XGM_ROOT:-}"
 SUPERGFX_TRIG=0
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
@@ -25,25 +26,25 @@ systemctl stop sddm
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   echo "Sanitizing /etc/environment..."
-  sed -i '/MESA_VK_DEVICE_SELECT/d' /etc/environment
-  sed -i '/VK_ICD_FILENAMES/d' /etc/environment
-  sed -i '/WLR_DRM_DEVICES/d' /etc/environment
+  sed -i '/MESA_VK_DEVICE_SELECT/d' $ROOT/etc/environment
+  sed -i '/VK_ICD_FILENAMES/d' $ROOT/etc/environment
+  sed -i '/WLR_DRM_DEVICES/d' $ROOT/etc/environment
   #sed -i '/KWIN_DRM_DEVICES/d' /etc/environment
   #sed -i '/GBM_BACKEND/d' /etc/environment
   #sed -i '/__GLX_VENDOR_LIBRARY_NAME/d' /etc/environment
-  sed -i '/VK_LOADER_LAYERS_DISABLE/d' /etc/environment
-  sed -i '/GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT/d' /etc/environment
+  sed -i '/VK_LOADER_LAYERS_DISABLE/d' $ROOT/etc/environment
+  sed -i '/GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT/d' $ROOT/etc/environment
 
   if [ "$VENDOR" == "nvidia" ]; then
     # De-Fanging Configs
     echo "De-fanging NVIDIA configs to protect AMD Handheld Mode..."
     steamos-readonly disable
     mkdir -p $DATA_DIR/configs_backup
-    mv /usr/share/glvnd/egl_vendor.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv /usr/share/vulkan/implicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv /usr/share/vulkan/explicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv /usr/share/vulkan/icd.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv /usr/share/X11/xorg.conf.d/10-nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+    mv $ROOT/usr/share/glvnd/egl_vendor.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+    mv $ROOT/usr/share/vulkan/implicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+    mv $ROOT/usr/share/vulkan/explicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+    mv $ROOT/usr/share/vulkan/icd.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+    mv $ROOT/usr/share/X11/xorg.conf.d/10-nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
     steamos-readonly enable
   
     # Environment Cleanup (System-Wide)
@@ -70,12 +71,12 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     #sudo -u $PRIMARY_USER $DECK_BUS systemctl --user unset-environment __GLX_VENDOR_LIBRARY_NAME
 
     echo "Removing isolated KDE Plasma environment config..."
-    rm -f "/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-kwin.sh"
-    rm -f "/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
+    rm -f "$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-kwin.sh"
+    rm -f "$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
 
     # DISK CLEANUP
     echo "Removing environment variables from disk..."
-    rm -f /etc/modprobe.d/nvidia-egpu.conf
+    rm -f $ROOT/etc/modprobe.d/nvidia-egpu.conf
  
     # Driver Purge
     # We kill any processes still holding the GPU and unload the modules
@@ -84,7 +85,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     systemctl disable xgmobile-boot-sync.service 2>/dev/null
     
     echo "Force killing any lingering GPU processes and stopping NVIDIA services..."
-    fuser -kv /dev/nvidia* >/dev/null 2>&1
+    fuser -kv $ROOT/dev/nvidia* >/dev/null 2>&1
     modprobe -r nvidia_drm || true
     modprobe -r nvidia_modeset || true
     modprobe -r nvidia_uvm || true
@@ -104,7 +105,7 @@ elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
     systemctl disable nvidia-powerd nvidia-persistenced 2>/dev/null || true
     
     echo "Force killing any lingering GPU processes and unloading NVIDIA modules..."
-    fuser -kv /dev/nvidia* >/dev/null 2>&1 || true
+    fuser -kv $ROOT/dev/nvidia* >/dev/null 2>&1 || true
     modprobe -r nvidia_drm || true
     modprobe -r nvidia_modeset || true
     modprobe -r nvidia_uvm || true
@@ -121,7 +122,7 @@ elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
 fi 
 
 echo "Ensuring card is free..."
-fuser -kv /dev/dri/card* >/dev/null 2>&1 || true 
+fuser -kv $ROOT/dev/dri/card* >/dev/null 2>&1 || true 
 systemctl daemon-reload
 # Final Reload & Restore Handheld UI
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
@@ -131,20 +132,20 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 fi
 
 # Hardware Deactivation
-INITIAL_CARDS=$(ls /dev/dri/card* 2>/dev/null)
+INITIAL_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
 INITIAL_COUNT=$(echo "$INITIAL_CARDS" | wc -w)
 
 echo "Current DRM cards before disconnect: $INITIAL_COUNT"
 
-ENABLE_PATH="/sys/devices/platform/asus-nb-wmi/egpu_enable"
+ENABLE_PATH="$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
 echo 0 > "$ENABLE_PATH" || true
-echo 1 > /sys/bus/pci/rescan
+echo 1 > $ROOT/sys/bus/pci/rescan
 
 COUNT=0
 SUCCESS=0
 
 while [ $COUNT -lt 15 ]; do
-  CURRENT_COUNT=$(ls /dev/dri/card* 2>/dev/null | wc -w)
+  CURRENT_COUNT=$(ls $ROOT/dev/dri/card* 2>/dev/null | wc -w)
   
   if [ "$CURRENT_COUNT" -lt "$INITIAL_COUNT" ]; then
     echo "Success! DRM card count dropped to $CURRENT_COUNT. eGPU safely detached."
@@ -176,7 +177,7 @@ systemctl start sddm #--no-block
   #( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
   #disown
 #fi 
-PRODUCT_NAME=$(cat /sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
+PRODUCT_NAME=$(cat $ROOT/sys/class/dmi/id/product_name 2>/dev/null || echo "Unknown")
 
 if command -v supergfxctl >/dev/null 2>&1; then
   if [[ "$PRODUCT_NAME" == *"RC71L"* || "$PRODUCT_NAME" == *"Ally"* ]]; then

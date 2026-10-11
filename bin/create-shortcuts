@@ -3,9 +3,10 @@ VENDOR=$1
 OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
+ROOT="${XGM_ROOT:-}"
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 [ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
-DESKTOP_DIR="/home/$PRIMARY_USER/Desktop"
+DESKTOP_DIR="$ROOT/home/$PRIMARY_USER/Desktop"
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
   # check if its NVIDIA and if so, check for drivers before continuing
@@ -30,12 +31,12 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 fi
 
 echo "Cleaning up old desktop shortcuts"
-rm -f /etc/sudoers.d/xgmobile-manager
+rm -f $ROOT/etc/sudoers.d/xgmobile-manager
 rm -f "$DESKTOP_DIR/Enable XG Mobile.desktop"
 rm -f "$DESKTOP_DIR/Eject XG Mobile.desktop"
 
-echo "$PRIMARY_USER ALL=(root) NOPASSWD: $PLUGIN_DIR/bin/egpu-enable, $PLUGIN_DIR/bin/egpu-eject" > /etc/sudoers.d/xgmobile-manager
-chmod 0440 /etc/sudoers.d/xgmobile-manager
+echo "$PRIMARY_USER ALL=(root) NOPASSWD: $PLUGIN_DIR/bin/egpu-enable, $PLUGIN_DIR/bin/egpu-eject" > $ROOT/etc/sudoers.d/xgmobile-manager
+chmod 0440 $ROOT/etc/sudoers.d/xgmobile-manager
 
 # 2. Generate the Enable Icon
 cat > "$DESKTOP_DIR/Enable XG Mobile.desktop" << EOF
