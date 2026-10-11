@@ -1,7 +1,10 @@
 """_execute_script: exit code -> ActionResult mapping, run against stub scripts in a temp plugin dir."""
 import pytest
 
-from xgm_helpers import ACTION_RESULT_KEYS, STATIC, catalog_cases
+from xgm_helpers import STATIC, catalog_cases
+
+# Spelled out on purpose: the frontend's ActionResult interface depends on exactly these names.
+ACTION_RESULT_KEYS = {"ok", "status", "code", "script", "title", "message", "hint", "log_key"}
 
 
 def execute(xgm, script):
