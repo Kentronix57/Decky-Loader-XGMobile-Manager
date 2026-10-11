@@ -31,6 +31,10 @@ else
   echo "WARNING: shellcheck not installed, skipping (CI runs it)." >&2
 fi
 
+# Gate: prove every absolute path in bin/ is $ROOT-prefixed before any bin/ script is executed.
+step "path audit (gate)"
+pnpm test:audit
+
 if ! python3 -c "import pytest" >/dev/null 2>&1; then
   step "pytest not importable, using .venv"
   [ -x .venv/bin/python3 ] || python3 -m venv .venv

@@ -1,14 +1,16 @@
 #!/usr/bin/env bats
 # Static safety net: every absolute system path in an in-scope bin/ script must be $ROOT-prefixed,
 # so the sandboxed tests can never read or write the host. Exceptions live in tests/bin/ALLOWLIST.
+# This is a gate: `pnpm test:bin` and tests/run-all.sh run it, and stop if it fails, before any
+# bin/ script is executed.
 
 setup_file() {
-  load helpers/sandbox
+  load ../bin/helpers/sandbox
   refuse_root
 }
 
 setup() {
-  load helpers/sandbox
+  load ../bin/helpers/sandbox
   ALLOWLIST="$XGM_REPO/tests/bin/ALLOWLIST"
 }
 
