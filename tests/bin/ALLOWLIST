@@ -1,8 +1,6 @@
 # path-audit.bats exceptions. One entry per line: `<script>`, `<script> @until <line>` or
 # `<script> @allow <text>`. `* @allow <text>` applies to every script. Blank lines and lines
-# starting with # are ignored.
-
-* @allow /dev/null
+# starting with # are ignored. A bare /dev/null is exempt in the audit itself (audit.bash).
 
 # Out of scope for the sandbox: never run by the tests, so not audited at all.
 bin/install.sh

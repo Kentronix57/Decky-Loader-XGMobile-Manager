@@ -7,8 +7,14 @@
 
 XGM_ALLOWLIST="$XGM_REPO/tests/bin/ALLOWLIST"
 
-# An absolute path starting at a system top-level directory, not in the middle of a longer path.
-ABS_PATH_RE='(^|[^A-Za-z0-9_.}/~-])/(sys|etc|dev|usr|home|tmp|var|run|opt|lib)([^A-Za-z0-9_]|$)'
+# An absolute path starting at a system top-level directory: at the start of a word, or right
+# after a variable ($x/dev/... is absolute when $x is empty), but not in the middle of a longer
+# path such as $DATA_DIR/system/var/...
+ABS_PATH_RE='(^|[^A-Za-z0-9_.}/~$-]|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?)/(sys|etc|dev|usr|home|tmp|var|run|opt|lib)([^A-Za-z0-9_]|$)'
+
+# /dev/null is exempt, but only when nothing that could continue the path follows it
+# (/dev/null2, /dev/nullx/.. and /dev/null/.. are still flagged).
+DEV_NULL_RE='^(.*[^A-Za-z0-9_.}/~$-]|)/dev/null([^A-Za-z0-9_./-].*|$)'
 
 # Prints the ALLOWLIST entries as "<script>\t<kind>\t<value>" (kind: skip|until|allow).
 allowlist_entries() {
@@ -50,6 +56,9 @@ audit_script() {
       stripped="${stripped//"$value"/}"
     done
     stripped="${stripped//\$ROOT\//}"
+    while [[ "$stripped" =~ $DEV_NULL_RE ]]; do
+      stripped="${BASH_REMATCH[1]} ${BASH_REMATCH[2]}"
+    done
     if [[ "$stripped" =~ $ABS_PATH_RE ]]; then
       echo "$rel:$n: $line"
     fi

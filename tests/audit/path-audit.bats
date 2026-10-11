@@ -40,3 +40,41 @@ setup() {
   XGM_REPO="$BATS_TEST_TMPDIR" run audit_script bin/probe
   assert_output "$(printf '%s\n' 'bin/probe:6: rm -f /etc/environment' 'bin/probe:8: touch /var/tmp/flag' 'bin/probe:9: cd /tmp')"
 }
+
+# Runs the audit on a throwaway script containing one line; prints the flagged line, if any.
+audit_line() {
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  printf '%s\n' '#!/bin/bash' "$1" > "$BATS_TEST_TMPDIR/bin/probe"
+  XGM_REPO="$BATS_TEST_TMPDIR" audit_script bin/probe
+}
+
+@test "/dev/null look-alikes are flagged" {
+  local line
+  for line in \
+    'echo x > /dev/null2' \
+    'cat $x/dev/nullfoo' \
+    'cat /dev/null/../../home/x' \
+    'cat /dev/nullx/../etc/passwd'; do
+    run audit_line "$line"
+    assert_output "bin/probe:2: $line"
+  done
+}
+
+@test "plain /dev/null redirections are not flagged" {
+  local line
+  for line in \
+    'cmd >/dev/null 2>&1' \
+    'cmd 2>/dev/null || true' \
+    'cmd &>/dev/null; other </dev/null' \
+    'x=$(cmd 2>/dev/null)'; do
+    run audit_line "$line"
+    assert_output ""
+  done
+}
+
+@test "a path right after a variable is flagged" {
+  run audit_line 'rm -f $PREFIX/etc/x'
+  assert_output "bin/probe:2: rm -f \$PREFIX/etc/x"
+  run audit_line 'rm -f ${PREFIX}/etc/x'
+  assert_output "bin/probe:2: rm -f \${PREFIX}/etc/x"
+}
