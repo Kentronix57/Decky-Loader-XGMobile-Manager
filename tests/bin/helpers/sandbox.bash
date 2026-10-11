@@ -209,9 +209,20 @@ run_script() {
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \
     SHIM_STATE="$SHIM_STATE" \
+    SHIM_SANDBOX="$BATS_TEST_TMPDIR" \
+    SHIM_REAL_CHMOD="$SYSBIN/chmod" \
     FAKE_SUPERGFX_RC="${FAKE_SUPERGFX_RC:-0}" \
     "$SYSBIN/bash" "${XGM_BIN_DIR:-$XGM_REPO/bin}/$name" "$@"
   LOG="$(find "$LOG_DIR" -type f -name '*.log' -exec cat {} + 2>/dev/null)"
+
+  # egpu-enable's self-repair block chmods the plugin's own bin/ files (the repo, not $ROOT). The
+  # chmod shim refuses that; these make sure a test can't reach it without noticing.
+  if [ -e "$SHIM_STATE/chmod_refused" ]; then
+    fail "$(printf 'chmod outside the test sandbox was refused:\n%s' "$(cat "$SHIM_STATE/chmod_refused")")"
+  fi
+  if [[ "$LOG$output" == *"Initiating self-repair"* ]] && [ "${ALLOW_SELF_REPAIR:-0}" != "1" ]; then
+    fail "$name reached the self-repair block, which touches the real plugin dir. Set ALLOW_SELF_REPAIR=1 only if the test needs it and nothing outside the sandbox is modified."
+  fi
 }
 
 # run_without_helper <bin name> [args...]: runs a copy of bin/<name> from a temp bin dir that has

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Test shim: runs the real chmod ($SHIM_REAL_CHMOD), but only on files inside the test's temp dir
+# ($SHIM_SANDBOX). Anything else, such as egpu-enable's self-repair `chmod +x` on the plugin's own
+# bin/ files, is refused (exit 1) and recorded in $SHIM_STATE/chmod_refused, which fails the test.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+
+refuse() {
+  echo "SHIM: chmod REFUSED outside the test sandbox: $1" >&2
+  [ -n "${SHIM_STATE:-}" ] && printf '%s\n' "$1" >> "$SHIM_STATE/chmod_refused"
+  exit 1
+}
+
+[ -n "${SHIM_SANDBOX:-}" ] && [ -n "${SHIM_REAL_CHMOD:-}" ] || refuse "(SHIM_SANDBOX/SHIM_REAL_CHMOD unset) $*"
+sandbox=$(readlink -f "$SHIM_SANDBOX")
+
+args=("$@")
+i=0
+while [ "$i" -lt "${#args[@]}" ] && [[ "${args[$i]}" == -* ]]; do i=$((i + 1)); done  # options
+i=$((i + 1))  # mode
+[ "$i" -lt "${#args[@]}" ] || refuse "(no file operand) $*"
+for f in "${args[@]:$i}"; do
+  abs=$(readlink -f -- "$f")
+  [ -n "$abs" ] && [[ "$abs" == "$sandbox"/* ]] || refuse "$f"
+done
+exec "$SHIM_REAL_CHMOD" "$@"
