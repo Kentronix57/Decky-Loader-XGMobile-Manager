@@ -72,9 +72,8 @@ make_root() {
     "$ROOT/etc/systemd/system" "$ROOT/etc/modprobe.d" "$ROOT/etc/sudoers.d" \
     "$ROOT/usr/share/vulkan/icd.d" "$ROOT/usr/share/vulkan/implicit_layer.d" "$ROOT/usr/share/vulkan/explicit_layer.d" \
     "$ROOT/usr/share/glvnd/egl_vendor.d" "$ROOT/usr/share/X11/xorg.conf.d" \
-    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest" "$ROOT/home/deck"
+    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest"
   # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host.
-  # home/deck only exists for the few paths the scripts hardcode to /home/deck.
   : > "$SHIM_LOG"
 
   local tool path
@@ -154,8 +153,8 @@ nvidia_configs() {
       echo '{"layer": {"name": "VK_LAYER_NV_optimus"}}' > "$DATA_DIR/configs_backup/nvidia_layers.json"
       ;;
     old)
-      mkdir -p "$ROOT/home/deck/xgmobile_configs_backup"
-      echo '{}' > "$ROOT/home/deck/xgmobile_configs_backup/nvidia_icd.json"
+      mkdir -p "$ROOT/home/xgmtest/xgmobile_configs_backup"
+      echo '{}' > "$ROOT/home/xgmtest/xgmobile_configs_backup/nvidia_icd.json"
       ;;
     missing) ;;
     *) fail "nvidia_configs: unknown state '$1'" ;;

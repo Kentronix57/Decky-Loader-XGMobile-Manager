@@ -66,8 +66,17 @@ nvidia_ready() {
 @test "vulkan configs only in the old v0.2.0 location: exit 3" {
   nvidia_driver installed
   nvidia_configs old
+  assert [ -f "$ROOT/home/xgmtest/xgmobile_configs_backup/nvidia_icd.json" ]
   run_plugin_script egpu-enable nvidia
   assert_failure 3
+}
+
+@test "old v0.2.0 location is looked up in the primary user's home, not /home/deck" {
+  nvidia_driver installed
+  mkdir -p "$ROOT/home/deck/xgmobile_configs_backup"
+  echo '{}' > "$ROOT/home/deck/xgmobile_configs_backup/nvidia_icd.json"
+  run_plugin_script egpu-enable nvidia
+  assert_failure 4
 }
 
 @test "vulkan configs missing: exit 4" {
