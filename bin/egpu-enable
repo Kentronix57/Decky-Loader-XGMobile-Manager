@@ -4,6 +4,8 @@ OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
 ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh"
 SUPERGFX_TRIG=0
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
@@ -56,7 +58,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
 
   if [ "$NEEDS_REPAIR" -eq 1 ]; then
     echo "System files missing. Initiating self-repair..."
-    steamos-readonly disable
+    xgm_ro_disable
   
     # Restore global terminal commands
     ln -sf "$REPO_ROOT/bin/egpu-enable" $ROOT/usr/local/bin/egpu-enable
@@ -76,18 +78,18 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
     else
       systemctl daemon-reload
     fi
-    steamos-readonly enable
+    xgm_ro_enable
     echo "Self-repair complete."
   fi
 fi
 
 if [ -L $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
   echo "Purging obsolete legacy egpu-resume-fix..."
-  steamos-readonly disable
+  xgm_ro_disable
   rm -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix
   rm -f $ROOT/etc/systemd/system/egpu-resume-fix.service
   rm -f $ROOT/etc/systemd/system/egpu-boot-guardian.service
-  steamos-readonly enable
+  xgm_ro_enable
 fi
 
 if systemctl is-active --quiet supergfxd.service; then 
@@ -179,13 +181,13 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     echo "Dynamic Hardware Lock: $NVIDIA_ID"
 
     echo "Re-fanging NVIDIA configs for active session..."
-    steamos-readonly disable
+    xgm_ro_disable
     mv $DATA_DIR/configs_backup/10_nvidia* $ROOT/usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/*icd* $ROOT/usr/share/vulkan/icd.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/10-nvidia* $ROOT/usr/share/X11/xorg.conf.d/ 2>/dev/null || true
-    steamos-readonly enable
+    xgm_ro_enable
 
     # This is what forces the NVIDIA card into Wayland mode
     echo "Loading NVIDIA modules..."

@@ -47,6 +47,20 @@ setup() {
   assert_called_before "steamos-readonly disable" "steamos-readonly enable"
 }
 
+@test "cachyos without steamos-readonly: WLR_DRM_DEVICES still rewritten, exit 0" {
+  no_steamos_readonly
+  egpu_present nvidia
+  echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+
+  run_script egpu-sync nvidia cachyos
+  assert_success
+
+  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  refute_called "steamos-readonly"
+}
+
 @test "nvidia with the eGPU card missing: exit 1, environment untouched" {
   echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
   echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"

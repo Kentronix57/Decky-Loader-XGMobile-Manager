@@ -95,6 +95,9 @@ make_root() {
   ln -s "$XGM_REPO/bin/egpu-enable" "$ROOT/usr/local/bin/egpu-enable"
   touch "$ROOT/etc/systemd/system/nvidia-suspend.service"
 
+  # steamos-readonly is on PATH by default; no_steamos_readonly removes it (CachyOS, Bazzite).
+  ln -s "$XGM_OPTIONAL_SHIMS/steamos-readonly" "$OPTBIN/steamos-readonly"
+
   set_os steamos
   set_product "RC71L"
   set_connected 1
@@ -164,6 +167,9 @@ egpu_present() {
 }
 
 supergfxd_active() { touch "$SHIM_STATE/active/supergfxd.service"; }
+
+# Takes steamos-readonly off PATH, as on CachyOS and Bazzite.
+no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
 
 # Puts the supergfxctl shim on PATH; without this, `command -v supergfxctl` fails.
 enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergfxctl"; }
