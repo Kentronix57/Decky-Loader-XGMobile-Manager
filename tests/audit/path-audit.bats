@@ -83,7 +83,7 @@ in_scope_scripts() {
   local script kind value
   while IFS=$'\t' read -r script kind value; do
     [ "$kind" = "until" ] || continue
-    grep -Eq "^[[:space:]]*$(printf '%s' "$value" | sed 's/[][\.*^$/]/\\&/g')\$" "$XGM_REPO/$script" \
+    awk -v m="$value" '{ sub(/^[[:space:]]+/, "") } $0 == m { found=1 } END { exit !found }' "$XGM_REPO/$script" \
       || fail "$script: @until marker not found: $value"
   done < <(allowlist_entries)
 }
