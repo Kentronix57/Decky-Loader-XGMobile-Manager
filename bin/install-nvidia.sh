@@ -9,7 +9,7 @@ echo "Checking NVIDIA driver status..."
 if modinfo nvidia >/dev/null 2>&1; then
   VERSION=$(modinfo nvidia | grep "^version:" | awk '{print $2}')
   echo "ALREADY_INSTALLED NVIDIA Driver $VERSION is matched to the current kernel."
-  exit 1
+  exit 10
 fi
 
 if ! grep -qi "steamos" /etc/os-release; then
@@ -209,7 +209,7 @@ MIN_HOME_KIB=4194304 #4GB
 
 MIN_ROOT_KIB=512000 # 500 MiB #614400 # 600 MiB
 if [ "$ROOT_FREE_KIB" -lt "$MIN_ROOT_KIB" ]; then
-  echo "ERROR: Rootfs (/) is too full. You have $(($ROOT_FREE_KIB / 1024)) MiB, but require at least 800 MiB."
+  echo "ERROR: Rootfs (/) is too full. You have $(($ROOT_FREE_KIB / 1024)) MiB, but require at least 500 MiB."
   exit 5
 fi
 if [ "$HOME_FREE_KIB" -lt "$MIN_HOME_KIB" ]; then
