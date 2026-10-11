@@ -195,7 +195,7 @@ no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
 enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergfxctl"; }
 
 # run_script <bin name> [args...]
-# Runs bin/<name> in a clean environment on the sandbox PATH. Sets bats' $status/$output, and
+# Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR.
 run_script() {
   local name="$1"
@@ -210,8 +210,18 @@ run_script() {
     SHIM_LOG="$SHIM_LOG" \
     SHIM_STATE="$SHIM_STATE" \
     FAKE_SUPERGFX_RC="${FAKE_SUPERGFX_RC:-0}" \
-    "$SYSBIN/bash" "$XGM_REPO/bin/$name" "$@"
+    "$SYSBIN/bash" "${XGM_BIN_DIR:-$XGM_REPO/bin}/$name" "$@"
   LOG="$(find "$LOG_DIR" -type f -name '*.log' -exec cat {} + 2>/dev/null)"
+}
+
+# run_without_helper <bin name> [args...]: runs a copy of bin/<name> from a temp bin dir that has
+# no xgm-common.sh. The real bin/xgm-common.sh is never touched.
+run_without_helper() {
+  local dir="$BATS_TEST_TMPDIR/bin-nohelper"
+  mkdir -p "$dir"
+  cp "$XGM_REPO/bin/$1" "$dir/$1"
+  [ ! -e "$dir/xgm-common.sh" ] || fail "run_without_helper: $dir/xgm-common.sh exists"
+  XGM_BIN_DIR="$dir" run_script "$@"
 }
 
 # run_plugin_script <bin name> <vendor>: the argument order main.py uses.

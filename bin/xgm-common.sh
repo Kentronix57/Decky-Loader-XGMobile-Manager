@@ -1,6 +1,7 @@
 #!/bin/bash
-# Shared helpers for the bin/ scripts. Source it, don't run it:
-#   . "$(dirname "$(readlink -f "$0")")/xgm-common.sh"
+# Shared helpers for the bin/ scripts. Source it, don't run it, and fail fast (exit 9, catalogued
+# in main.py) before touching anything if it's missing:
+#   . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: ..."; exit 9; }
 # Only defines functions; sourcing it has no side effects.
 ROOT="${XGM_ROOT:-}"
 

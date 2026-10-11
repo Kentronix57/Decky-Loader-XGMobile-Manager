@@ -108,11 +108,16 @@ SCRIPT_META = {
   },
 }
 
+# Exit 9 from every script that sources bin/xgm-common.sh, when that file is missing.
+_MISSING_HELPER = ("Plugin files are incomplete (xgm-common.sh missing).",
+                   "Reinstall XG Mobile Manager from the latest release, then try again.")
+
 _SUPERGFX_ERRORS = {
   1: ("supergfxctl failed to switch GPU modes.",
       "Press Restart Supergfxd, then try again. If it still fails, share this log in a GitHub issue."),
   2: ("supergfxctl isn't installed on this system.",
       "Install supergfxctl (asusctl) for your distro, then try again. Bazzite includes it by default."),
+  9: _MISSING_HELPER,
 }
 
 # script -> exit code -> (message, hint)
@@ -130,8 +135,11 @@ SCRIPT_ERROR_CATALOG = {
         "The XG Mobile was switched on but no new GPU showed up in /dev/dri in time. Eject, unlock and re-lock the cable, then try again. If it keeps happening, share the Enable Log on GitHub."),
     6: ("No NVIDIA GPU found on the PCIe bus.",
         "Enable stopped because no NVIDIA device was detected. If your XG Mobile is AMD, turn off NVIDIA Mode. Otherwise re-lock the cable and retry."),
+    9: _MISSING_HELPER,
   },
-  "egpu-eject": {},
+  "egpu-eject": {
+    9: _MISSING_HELPER,
+  },
   "install-nvidia.sh": {
     10: ("NVIDIA drivers already match your kernel. No reboot needed.", ""),
     2: ("Unsupported OS. The driver installer is SteamOS-only.",
@@ -150,6 +158,7 @@ SCRIPT_ERROR_CATALOG = {
   "create-shortcuts": {
     2: ("NVIDIA driver isn't installed, so shortcuts weren't created.",
         "Run Advanced → Install NVIDIA Drivers first, or turn off NVIDIA Mode if your XG Mobile is AMD."),
+    9: _MISSING_HELPER,
   },
   "uninstall.sh": {
     1: ("Reset isn't needed on Bazzite or CachyOS.",
