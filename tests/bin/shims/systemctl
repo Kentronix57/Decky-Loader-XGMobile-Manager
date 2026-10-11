@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test shim: records the call. `is-active <unit>` succeeds only if $SHIM_STATE/active/<unit> exists.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ "$1" = "is-active" ]; then
+  unit="${*: -1}"
+  [ -e "$SHIM_STATE/active/$unit" ] && exit 0
+  exit 3
+fi
+exit 0

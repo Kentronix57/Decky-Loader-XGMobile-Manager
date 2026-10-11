@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test shim: the Steam process belongs to "deck".
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+echo "deck"

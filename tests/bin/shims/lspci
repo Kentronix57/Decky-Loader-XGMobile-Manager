@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Test shim: prints one NVIDIA device line when $SHIM_STATE/lspci is "nvidia", otherwise nothing.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ "$(cat "$SHIM_STATE/lspci" 2>/dev/null)" = "nvidia" ]; then
+  echo "03:00.0 0300: 10de:2717 (rev a1)"
+fi
+exit 0

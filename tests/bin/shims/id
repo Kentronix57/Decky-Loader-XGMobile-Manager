@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test shim: every user is uid 1000.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+echo "1000"
