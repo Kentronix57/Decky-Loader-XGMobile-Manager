@@ -9,35 +9,116 @@ from xgm_helpers import ACTION_RESULT_KEYS, REPO, STATIC, catalog_cases
 # EXIT trap leaves with that step's status (1 for nearly every command the installer runs).
 IMPLICIT_EXITS = {("install-nvidia.sh", 1)}
 
-# `exit N` in command position only (line start, after ; & | or then/else/do). Quoted strings are
-# removed first, so the words "exit 3" inside an echo don't count.
-EXIT_RE = re.compile(r"(?:^\s*|[;&|]\s*|\b(?:then|else|do)\s+)exit\s+(\d+)\b")
-QUOTED_RE = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'")
+# `exit N` in command position: line start, after ; & | ( {, or after then/else/do.
+EXIT_RE = re.compile(r"(?:^\s*|[;&|({]\s*|\b(?:then|else|do)\s+)exit\s+(\d+)\b")
+HEREDOC_RE = re.compile(r"<<(-?)\s*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\2")
+COMMENT_START_PREV = set(" \t;&|()")
 
 
-def exit_codes_in(line):
-  return [int(c) for c in EXIT_RE.findall(QUOTED_RE.sub('""', line))]
+def shell_code_lines(text):
+  """
+  Returns each line of a bash script with everything that isn't code removed: comments, quoted
+  strings (replaced by ""), and heredoc bodies. Quotes and heredocs are tracked across lines, so
+  a multi-line echo string or a heredoc body can't produce a fake `exit N`. A small scanner, not a
+  full parser; good enough for the scripts in bin/.
+  """
+  out = []
+  quote = None        # None, '"', "'" or "$'"
+  heredocs = []       # pending (terminator, strip_tabs), bodies start on the next line
+  for line in text.split("\n"):
+    if heredocs and quote is None:
+      term, strip_tabs = heredocs[0]
+      if (line.lstrip("\t") if strip_tabs else line) == term:
+        heredocs.pop(0)
+      out.append("")
+      continue
+
+    code = []
+    i = 0
+    while i < len(line):
+      c = line[i]
+      if quote == '"' or quote == "$'":
+        if c == "\\":
+          i += 2
+          continue
+        if c == ("'" if quote == "$'" else '"'):
+          quote = None
+          code.append('""')
+        i += 1
+        continue
+      if quote == "'":
+        if c == "'":
+          quote = None
+          code.append('""')
+        i += 1
+        continue
+
+      if c == "\\":
+        code.append(line[i:i + 2])
+        i += 2
+        continue
+      if c == "#" and (i == 0 or line[i - 1] in COMMENT_START_PREV):
+        break
+      if c == "<" and line.startswith("<<", i) and not line.startswith("<<<", i):
+        m = HEREDOC_RE.match(line, i)
+        if m:
+          heredocs.append((m.group(3), m.group(1) == "-"))
+          code.append(" ")
+          i = m.end()
+          continue
+      if c == "$" and line.startswith("$'", i):
+        quote = "$'"
+        i += 2
+        continue
+      if c in "\"'":
+        quote = c
+        i += 1
+        continue
+      code.append(c)
+      i += 1
+    out.append("".join(code))
+  return out
+
+
+def exit_codes_in(text):
+  return [int(c) for line in shell_code_lines(text) for c in EXIT_RE.findall(line)]
 
 
 def literal_exit_codes(script):
-  codes = set()
-  for line in (REPO / "bin" / script).read_text().splitlines():
-    if line.lstrip().startswith("#"):
-      continue
-    codes.update(exit_codes_in(line.split(" #", 1)[0]))
-  return codes
+  return set(exit_codes_in((REPO / "bin" / script).read_text()))
 
 
-@pytest.mark.parametrize("line,codes", [
+@pytest.mark.parametrize("text,codes", [
   ("  exit 4", [4]),
   ("[ -z \"$x\" ] && exit 6", [6]),
   ("if true; then exit 5; fi", [5]),
   ("else exit 2", [2]),
-  ('echo "run the installer, then exit 3 and retry"', []),
-  ('echo "ERROR (exit 7)"', []),
+  ('echo "step #1"; exit 9', [9]),
+  ("( exit 8 )", [8]),
+  ("{ exit 1; }", [1]),
+  ("exit 3 # done", [3]),
+  ("cat <<-'EOF'\n\texit 4\n\tEOF\nexit 5", [5]),
+  ('echo "a\nb"; exit 6', [6]),
 ])
-def test_exit_regex_only_matches_command_position(line, codes):
-  assert exit_codes_in(line) == codes
+def test_exit_scanner_counts_real_exits(text, codes):
+  assert exit_codes_in(text) == codes
+
+
+@pytest.mark.parametrize("text", [
+  'echo "Retry later.\nexit 3 if it keeps failing"',
+  "cat <<EOF\nexit 4\nEOF",
+  "cat <<'EOF'\nexit 4\nEOF",
+  'cat <<"EOF" > f\nexit 4\nEOF',
+  "echo $'it\\'s; exit 7'",
+  "echo 'multi\nexit 2\nline'",
+  'echo "run the installer, then exit 3 and retry"',
+  'echo "ERROR (exit 7)"',
+  'echo "escaped \\" quote\nexit 5"',
+  "# exit 1",
+  "true # ; exit 2",
+])
+def test_exit_scanner_ignores_strings_heredocs_and_comments(text):
+  assert exit_codes_in(text) == []
 
 
 @pytest.mark.parametrize("script,code", catalog_cases())
