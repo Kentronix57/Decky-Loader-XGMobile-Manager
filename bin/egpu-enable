@@ -14,6 +14,8 @@ mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
+DM_SERVICE=$(xgm_dm_service)
+echo "Display manager: $DM_SERVICE"
 
 # Hardware Lock Check
 CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
@@ -163,9 +165,9 @@ fi
 #  sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
 #fi
   # STOP UI
-# We must stop sddm so we can unload the driver modules
-echo "Stopping SDDM..."
-systemctl stop sddm
+# We must stop the display manager so we can unload the driver modules
+echo "Stopping $DM_SERVICE..."
+systemctl stop "$DM_SERVICE"
 
  
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
@@ -251,7 +253,7 @@ EOF"
     chmod +x "$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh"
 
     # Final Reload & Start
-    echo "Daemon-reload and start SDDM..."
+    echo "Daemon-reload and start $DM_SERVICE..."
     systemctl daemon-reload
     sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
 
@@ -273,7 +275,7 @@ EOF"
   fi
 fi
 echo "Refreshing DRM session..."
-systemctl start sddm #--no-block
+systemctl start "$DM_SERVICE" #--no-block
 
 #if [ $SUPERGFX_TRIG == 1 ]; then
 #  echo "Restarting supergfxctl..."

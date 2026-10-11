@@ -14,6 +14,8 @@ mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"
+DM_SERVICE=$(xgm_dm_service)
+echo "Display manager: $DM_SERVICE"
 
 if systemctl is-active --quiet supergfxd.service; then 
   echo "Supergfxd Detected. Stopping supergfxd to avoid panic during switch..."
@@ -23,8 +25,8 @@ fi
 
 # Stop UI
 # We must kill the session before we pull the rug out from the hardware
-echo "Stopping SDDM..."
-systemctl stop sddm
+echo "Stopping $DM_SERVICE..."
+systemctl stop "$DM_SERVICE"
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   echo "Sanitizing /etc/environment..."
@@ -164,7 +166,8 @@ if [ "$SUCCESS" -eq 0 ]; then
   echo "WARNING: Hardware did not seem to drop from /dev/dri/. Proceeding anyway to restore UI."
 fi
 
-systemctl start sddm #--no-block
+echo "Starting $DM_SERVICE..."
+systemctl start "$DM_SERVICE" #--no-block
 
 #if [ $SUPERGFX_TRIG == 1 ]; then
 #  echo "Restarting supergfxctl..."

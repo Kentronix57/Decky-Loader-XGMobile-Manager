@@ -31,8 +31,28 @@ enable_then_eject() {
   assert_success
 }
 
-symmetry_nvidia() {
+# CachyOS runs the symmetry tests the way CachyOS Handheld ships: plasmalogin as the display
+# manager and no steamos-readonly.
+os_like_hardware() {
   set_os "$1"
+  [ "$1" = "cachyos" ] && no_steamos_readonly
+  return 0
+}
+
+assert_dm_cycled() {
+  local dm=sddm.service
+  [ "$1" = "cachyos" ] && dm=plasmalogin.service
+  assert_equal "$(calls_matching "systemctl stop $dm" | wc -l)" 2
+  assert_equal "$(calls_matching "systemctl start $dm" | wc -l)" 2
+  if [ "$1" = "cachyos" ]; then
+    assert_equal "$(calls_matching sddm)" ""
+    refute_called "steamos-readonly"
+    [[ "$LOG" != *"command not found"* ]]
+  fi
+}
+
+symmetry_nvidia() {
+  os_like_hardware "$1"
   nvidia_driver installed
   nvidia_configs backup
   egpu_appears nvidia
@@ -53,10 +73,11 @@ symmetry_nvidia() {
   assert_called "modprobe -r nvidia"
   assert_called "systemctl disable xgmobile-boot-sync.service"
   [[ "$LOG" == *"Success! DRM card count dropped to 1"* ]]
+  assert_dm_cycled "$1"
 }
 
 symmetry_amd() {
-  set_os "$1"
+  os_like_hardware "$1"
   egpu_appears amd
   cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
 
@@ -68,10 +89,13 @@ symmetry_amd() {
   assert_called "systemctl --user unset-environment WLR_DRM_DEVICES"
   refute_called "modprobe"
   [[ "$LOG" == *"Success! DRM card count dropped to 1"* ]]
+  assert_dm_cycled "$1"
 }
 
 @test "symmetry: enable then eject, steamos/nvidia" {
   symmetry_nvidia steamos
+  assert_equal "$(calls_matching 'steamos-readonly disable' | wc -l)" 2
+  assert_equal "$(calls_matching 'steamos-readonly enable' | wc -l)" 2
 }
 
 @test "symmetry: enable then eject, cachyos/nvidia" {
@@ -93,8 +117,39 @@ symmetry_amd() {
   [[ "$LOG" == *"Success! DRM card count dropped to 1. eGPU safely detached."* ]]
   [[ "$LOG" != *"WARNING"* ]]
   assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
-  assert_called_before "systemctl stop sddm" "systemctl start sddm"
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
   assert_equal "$(readlink "$LOG_DIR/xgmobile_manager_eject_latest.log")" "$LOG_DIR/xgmobile_manager_eject_amd.log"
+}
+
+@test "cachyos + plasmalogin: plasmalogin stopped then started, sddm never touched" {
+  set_os cachyos
+  no_steamos_readonly
+  egpu_present nvidia
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"Display manager: plasmalogin.service"* ]]
+  assert_called_before "systemctl stop plasmalogin.service" "systemctl start plasmalogin.service"
+  assert_equal "$(calls_matching sddm)" ""
+  refute_called "steamos-readonly"
+  [[ "$LOG" != *"command not found"* ]]
+}
+
+@test "steamos/nvidia: sddm.service, configs de-fanged inside steamos-readonly" {
+  egpu_present nvidia
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"Display manager: sddm.service"* ]]
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+  assert_called_before "steamos-readonly disable" "steamos-readonly enable"
+}
+
+@test "no display-manager alias: falls back to sddm.service" {
+  set_os cachyos
+  set_dm none
+  egpu_present amd
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
 }
 
 @test "card count doesn't drop: WARNING logged, still exit 0 and sddm restarted" {
@@ -104,7 +159,7 @@ symmetry_amd() {
   assert_success
   [[ "$LOG" == *"WARNING: Hardware did not seem to drop from /dev/dri/."* ]]
   assert_equal "$(grep -c '^sleep 1$' "$SHIM_LOG")" 15
-  assert_called "systemctl start sddm"
+  assert_called "systemctl start sddm.service"
 }
 
 @test "bazzite/nvidia: modules unloaded, /etc/environment and configs untouched" {

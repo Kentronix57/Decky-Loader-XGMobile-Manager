@@ -33,7 +33,7 @@ nvidia_ready() {
   run_plugin_script egpu-enable nvidia
   assert_failure 1
   assert_equal "$(grep -c 'XG Mobile not locked' <<< "$LOG")" 1
-  refute_called "systemctl stop sddm"
+  refute_called "systemctl stop sddm.service"
 }
 
 @test "egpu_connected missing: treated as not locked, exit 1" {
@@ -121,7 +121,7 @@ nvidia_ready() {
   assert_called "systemctl --user set-environment MESA_VK_DEVICE_SELECT=10de:2717"
   assert_called "systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
 
-  assert_called_before "systemctl stop sddm" "systemctl start sddm"
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
   assert_called "modprobe nvidia_drm modeset=1 fbdev=1"
   assert_called "setfacl -m u:xgmtest:rw $ROOT/dev/dri/card1"
   assert_equal "$(cat "$ROOT/etc/modprobe.d/nvidia-egpu.conf")" "options nvidia_drm modeset=1 fbdev=1"
@@ -149,6 +149,45 @@ nvidia_ready() {
   assert_called "modprobe nvidia_drm modeset=1 fbdev=1"
 }
 
+@test "steamos: display manager resolves to sddm.service, steamos-readonly used" {
+  nvidia_ready steamos
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  [[ "$LOG" == *"Display manager: sddm.service"* ]]
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+  assert_called_before "steamos-readonly disable" "steamos-readonly enable"
+}
+
+@test "cachyos + plasmalogin: plasmalogin is stopped and started, sddm never touched" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  [[ "$LOG" == *"Display manager: plasmalogin.service"* ]]
+  assert_called_before "systemctl stop plasmalogin.service" "systemctl start plasmalogin.service"
+  assert_equal "$(calls_matching sddm)" ""
+  refute_called "steamos-readonly"
+  [[ "$LOG" != *"command not found"* ]]
+  assert [ -f "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
+}
+
+@test "no display-manager alias: falls back to sddm.service" {
+  egpu_appears amd
+  set_os cachyos
+  set_dm none
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+}
+
+@test "alias not pointing at a .service unit: falls back to sddm.service" {
+  egpu_appears amd
+  set_dm bogus-target
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
+}
+
 @test "happy path steamos/amd: only WLR_DRM_DEVICES is set" {
   egpu_appears amd
   local before
@@ -164,7 +203,7 @@ nvidia_ready() {
   refute_called "modprobe"
   refute_called "lspci"
   assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
-  assert_called_before "systemctl stop sddm" "systemctl start sddm"
+  assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
   assert_equal "$(readlink "$LOG_DIR/xgmobile_manager_enable_latest.log")" "$LOG_DIR/xgmobile_manager_enable_amd.log"
 }
 
@@ -191,7 +230,7 @@ nvidia_ready() {
   supergfxd_active
   run_plugin_script egpu-enable amd
   assert_success
-  assert_called_before "systemctl stop supergfxd.service" "systemctl stop sddm"
+  assert_called_before "systemctl stop supergfxd.service" "systemctl stop sddm.service"
 }
 
 @test "Ally + supergfxctl installed: supergfxd is disabled" {

@@ -3,8 +3,13 @@ VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
 OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh"
 
 exec > "$LOG_DIR/xgmobile_manager_supergfxd_integrated.log" 2>&1
+
+DM_SERVICE=$(xgm_dm_service)
+echo "Display manager: $DM_SERVICE"
 
 # --- SUPERGFXCTL NATIVE PATH ---
 if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet supergfxd.service; then #command -v supergfxctl >/dev/null 2>&1 && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
@@ -17,8 +22,8 @@ if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet 
     # FORK: Detaches from Decky Loader safely
     #( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
     #disown
-    echo "Executing non-blocking SDDM restart to apply hardware switch..."
-    systemctl restart sddm --no-block
+    echo "Executing non-blocking $DM_SERVICE restart to apply hardware switch..."
+    systemctl restart "$DM_SERVICE" --no-block
   
     echo "--- Eject Finished: Waiting for detached restart ---"
     exit 0

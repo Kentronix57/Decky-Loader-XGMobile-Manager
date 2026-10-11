@@ -72,7 +72,7 @@ make_root() {
     "$ROOT/etc/systemd/system" "$ROOT/etc/modprobe.d" "$ROOT/etc/sudoers.d" \
     "$ROOT/usr/share/vulkan/icd.d" "$ROOT/usr/share/vulkan/implicit_layer.d" "$ROOT/usr/share/vulkan/explicit_layer.d" \
     "$ROOT/usr/share/glvnd/egl_vendor.d" "$ROOT/usr/share/X11/xorg.conf.d" \
-    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/home/xgmtest" "$ROOT/home/deck"
+    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest" "$ROOT/home/deck"
   # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host.
   # home/deck only exists for the few paths the scripts hardcode to /home/deck.
   : > "$SHIM_LOG"
@@ -115,6 +115,25 @@ set_os() {
     bazzite-nvidia) printf '%s\n' 'NAME="Bazzite"' 'ID=bazzite' 'ID_LIKE="fedora"' 'VARIANT_ID=bazzite-deck-nvidia' ;;
     *) fail "set_os: unknown OS '$1'" ;;
   esac > "$ROOT/etc/os-release"
+  case "$1" in
+    cachyos) set_dm plasmalogin ;;
+    *)       set_dm sddm ;;
+  esac
+}
+
+# The display-manager.service alias: sddm (SteamOS, Bazzite) | plasmalogin (CachyOS Handheld) |
+# none (no alias) | any other name, linked as-is. set_os picks the OS default.
+set_dm() {
+  local alias="$ROOT/etc/systemd/system/display-manager.service"
+  rm -f "$alias"
+  case "$1" in
+    none) ;;
+    sddm|plasmalogin)
+      touch "$ROOT/usr/lib/systemd/system/$1.service"
+      ln -s "$ROOT/usr/lib/systemd/system/$1.service" "$alias"
+      ;;
+    *) ln -s "$ROOT/usr/lib/systemd/system/$1" "$alias" ;;
+  esac
 }
 
 set_product() { echo "$1" > "$ROOT/sys/class/dmi/id/product_name"; }
