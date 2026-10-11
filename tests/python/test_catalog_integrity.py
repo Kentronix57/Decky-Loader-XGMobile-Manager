@@ -9,7 +9,14 @@ from xgm_helpers import ACTION_RESULT_KEYS, REPO, STATIC, catalog_cases
 # EXIT trap leaves with that step's status (1 for nearly every command the installer runs).
 IMPLICIT_EXITS = {("install-nvidia.sh", 1)}
 
-EXIT_RE = re.compile(r"\bexit\s+(\d+)\b")
+# `exit N` in command position only (line start, after ; & | or then/else/do). Quoted strings are
+# removed first, so the words "exit 3" inside an echo don't count.
+EXIT_RE = re.compile(r"(?:^\s*|[;&|]\s*|\b(?:then|else|do)\s+)exit\s+(\d+)\b")
+QUOTED_RE = re.compile(r"\"(?:[^\"\\]|\\.)*\"|'[^']*'")
+
+
+def exit_codes_in(line):
+  return [int(c) for c in EXIT_RE.findall(QUOTED_RE.sub('""', line))]
 
 
 def literal_exit_codes(script):
@@ -17,8 +24,20 @@ def literal_exit_codes(script):
   for line in (REPO / "bin" / script).read_text().splitlines():
     if line.lstrip().startswith("#"):
       continue
-    codes.update(int(c) for c in EXIT_RE.findall(line.split(" #", 1)[0]))
+    codes.update(exit_codes_in(line.split(" #", 1)[0]))
   return codes
+
+
+@pytest.mark.parametrize("line,codes", [
+  ("  exit 4", [4]),
+  ("[ -z \"$x\" ] && exit 6", [6]),
+  ("if true; then exit 5; fi", [5]),
+  ("else exit 2", [2]),
+  ('echo "run the installer, then exit 3 and retry"', []),
+  ('echo "ERROR (exit 7)"', []),
+])
+def test_exit_regex_only_matches_command_position(line, codes):
+  assert exit_codes_in(line) == codes
 
 
 @pytest.mark.parametrize("script,code", catalog_cases())
