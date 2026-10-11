@@ -32,6 +32,9 @@ else
 fi
 
 # Gate: prove every absolute path in bin/ is $ROOT-prefixed before any bin/ script is executed.
+# This runs the full audit suite (with its self-tests) once. The bin/ suite in `pnpm test` then
+# only repeats the core check in-process (helpers/sandbox.bash), which is how it stays gated
+# when run on its own.
 step "path audit (gate)"
 pnpm test:audit
 

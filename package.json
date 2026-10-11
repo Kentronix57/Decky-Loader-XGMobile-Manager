@@ -10,7 +10,7 @@
     "test": "pnpm test:py && pnpm test:bin && pnpm test:ui",
     "test:py": "python3 -m pytest tests/python -q",
     "test:audit": "bats tests/audit",
-    "test:bin": "pnpm test:audit && bats tests/bin",
+    "test:bin": "bats tests/bin",
     "test:ui": "vitest run"
   },
   "repository": {
