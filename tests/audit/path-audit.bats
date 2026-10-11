@@ -31,6 +31,9 @@ allowlist_entries() {
   done < "$ALLOWLIST"
 }
 
+# An absolute path starting at a system top-level directory, not in the middle of a longer path.
+ABS_PATH_RE='(^|[^A-Za-z0-9_.}/~-])/(sys|etc|dev|usr|home|tmp|var|run|opt|lib)([^A-Za-z0-9_]|$)'
+
 # Prints "<file>:<n>: <line>" for every unprefixed absolute path in one script.
 audit_script() {
   local rel="$1" until="" kind value n=0 line stripped
@@ -40,7 +43,7 @@ audit_script() {
       until) until="$value" ;;
       allow) allows+=("$value") ;;
     esac
-  done < <(allowlist_entries | awk -F'\t' -v s="$rel" '$1 == s')
+  done < <(allowlist_entries | awk -F'\t' -v s="$rel" '$1 == s || ($1 == "*" && $2 == "allow")')
 
   while IFS= read -r line || [ -n "$line" ]; do
     n=$((n + 1))
@@ -54,8 +57,7 @@ audit_script() {
       stripped="${stripped//"$value"/}"
     done
     stripped="${stripped//\$ROOT\//}"
-    stripped="${stripped//\/dev\/null/}"
-    if [[ "$stripped" =~ /(sys|etc|dev|usr|home)/ ]]; then
+    if [[ "$stripped" =~ $ABS_PATH_RE ]]; then
       echo "$rel:$n: $line"
     fi
   done < "$XGM_REPO/$rel"
@@ -74,7 +76,11 @@ in_scope_scripts() {
   run allowlist_entries
   assert_success
   local script
-  while IFS=$'\t' read -r script _ _; do
+  while IFS=$'\t' read -r script kind _; do
+    if [ "$script" = "*" ]; then
+      assert_equal "$kind" "allow"
+      continue
+    fi
     assert [ -f "$XGM_REPO/$script" ]
   done <<< "$output"
 }
@@ -89,9 +95,11 @@ in_scope_scripts() {
 }
 
 @test "no unprefixed absolute paths in in-scope bin/ scripts" {
-  local rel violations=""
+  local rel v violations=""
   while IFS= read -r rel; do
-    violations+="$(audit_script "$rel")"
+    while IFS= read -r v; do
+      violations+="$v"$'\n'
+    done < <(audit_script "$rel")
   done < <(in_scope_scripts)
   [ -z "$violations" ] || fail "$(printf 'absolute paths missing the $ROOT prefix:\n%s' "$violations")"
 }
@@ -108,7 +116,7 @@ in_scope_scripts() {
 @test "the audit catches a missing prefix" {
   local tmp="$BATS_TEST_TMPDIR/bin"
   mkdir -p "$tmp"
-  printf '%s\n' '#!/bin/bash' 'ROOT="${XGM_ROOT:-}"' '# /etc/comment is fine' 'cat $ROOT/etc/os-release' 'echo x > /dev/null' 'rm -f /etc/environment' > "$tmp/probe"
+  printf '%s\n' '#!/bin/bash' 'ROOT="${XGM_ROOT:-}"' '# /etc/comment is fine' 'cat $ROOT/etc/os-release' 'echo x > /dev/null' 'rm -f /etc/environment' 'cat $ROOT/usr/lib/x $DATA_DIR/system/var/y' 'touch /var/tmp/flag' 'cd /tmp' > "$tmp/probe"
   XGM_REPO="$BATS_TEST_TMPDIR" run audit_script bin/probe
-  assert_output "bin/probe:6: rm -f /etc/environment"
+  assert_output "$(printf '%s\n' 'bin/probe:6: rm -f /etc/environment' 'bin/probe:8: touch /var/tmp/flag' 'bin/probe:9: cd /tmp')"
 }

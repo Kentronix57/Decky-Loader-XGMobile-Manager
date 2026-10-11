@@ -1,5 +1,8 @@
 # path-audit.bats exceptions. One entry per line: `<script>`, `<script> @until <line>` or
-# `<script> @allow <text>`. Blank lines and lines starting with # are ignored.
+# `<script> @allow <text>`. `* @allow <text>` applies to every script. Blank lines and lines
+# starting with # are ignored.
+
+* @allow /dev/null
 
 # Out of scope for the sandbox: never run by the tests, so not audited at all.
 bin/install.sh
@@ -18,7 +21,11 @@ bin/egpu-enable @allow failed to appear in /dev/dri/
 bin/egpu-eject @allow Sanitizing /etc/environment
 bin/egpu-eject @allow did not seem to drop from /dev/dri/
 bin/egpu-sync @allow ="/dev/dri/$(basename $card)"
+bin/egpu-enable @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
+bin/egpu-eject @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
+bin/create-shortcuts @allow Exec=bash -c "touch /tmp/xgmobile_eject_request"
 
 # install-nvidia.sh target arrays: defined during the pre-flight, only used after the unlock.
 bin/install-nvidia.sh @allow ROOT_TARGETS=("/usr/lib/nvidia" "/usr/lib32/nvidia" "/usr/src" "/usr/lib/firmware/nvidia" "/usr/share/nvidia")
+bin/install-nvidia.sh @allow VAR_TARGETS=("/var/lib/dkms" "/var/cache/pacman/pkg")
 bin/install-nvidia.sh @allow BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")
