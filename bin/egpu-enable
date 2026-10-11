@@ -143,7 +143,7 @@ while [ -z "$EGPU_CARD" ] && [ $COUNT -lt 15 ]; do
   echo "Waiting for eGPU card... ($COUNT)"
   CURRENT_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
   for card in $CURRENT_CARDS; do
-    if ! echo "$EXISTING_CARDS" | grep -q "$card"; then
+    if ! echo "$EXISTING_CARDS" | grep -qxF -- "$card"; then
       EGPU_CARD=$card
       break
     fi

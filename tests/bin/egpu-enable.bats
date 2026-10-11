@@ -140,6 +140,15 @@ nvidia_ready() {
   [[ "$LOG" != *"Exiting early"* ]]
 }
 
+@test "an existing card10 doesn't hide a new card1" {
+  touch "$ROOT/dev/dri/card10"
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  [[ "$LOG" == *"eGPU dynamically detected as: $ROOT/dev/dri/card1"$'\n'* ]]
+  assert_called "setfacl -m u:xgmtest:rw $ROOT/dev/dri/card1"
+}
+
 @test "happy path steamos/nvidia: environment, services, modules, plasma env, log symlink" {
   nvidia_ready steamos
   local before
