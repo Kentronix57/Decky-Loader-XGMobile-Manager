@@ -35,14 +35,14 @@ setup() {
 @test "nvidia with both cards: WLR_DRM_DEVICES rewritten and kwin env refreshed" {
   egpu_present nvidia
   echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"
-  mkdir -p "$ROOT/home/deck/.config/plasma-workspace/env"
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
 
   run_script egpu-sync nvidia steamos
   assert_success
 
   run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
   assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
-  run cat "$ROOT/home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
+  run cat "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
   assert_line "export KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
   assert_called_before "steamos-readonly disable" "steamos-readonly enable"
 }

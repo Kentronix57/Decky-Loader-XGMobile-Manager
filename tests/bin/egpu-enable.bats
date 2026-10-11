@@ -123,7 +123,7 @@ nvidia_ready() {
 
   assert_called_before "systemctl stop sddm" "systemctl start sddm"
   assert_called "modprobe nvidia_drm modeset=1 fbdev=1"
-  assert_called "setfacl -m u:deck:rw $ROOT/dev/dri/card1"
+  assert_called "setfacl -m u:xgmtest:rw $ROOT/dev/dri/card1"
   assert_equal "$(cat "$ROOT/etc/modprobe.d/nvidia-egpu.conf")" "options nvidia_drm modeset=1 fbdev=1"
 
   # NVIDIA configs re-fanged out of the backup
@@ -131,7 +131,7 @@ nvidia_ready() {
   assert [ -f "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
   assert [ -f "$ROOT/usr/share/vulkan/implicit_layer.d/nvidia_layers.json" ]
 
-  local plasma="$ROOT/home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
+  local plasma="$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
   assert [ -x "$plasma" ]
   run cat "$plasma"
   assert_line "export KWIN_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
@@ -163,7 +163,7 @@ nvidia_ready() {
   assert_called "systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
   refute_called "modprobe"
   refute_called "lspci"
-  assert [ ! -e "$ROOT/home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
+  assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
   assert_called_before "systemctl stop sddm" "systemctl start sddm"
   assert_equal "$(readlink "$LOG_DIR/xgmobile_manager_enable_latest.log")" "$LOG_DIR/xgmobile_manager_enable_amd.log"
 }

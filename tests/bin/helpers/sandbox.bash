@@ -46,7 +46,9 @@ make_root() {
     "$ROOT/etc/systemd/system" "$ROOT/etc/modprobe.d" "$ROOT/etc/sudoers.d" \
     "$ROOT/usr/share/vulkan/icd.d" "$ROOT/usr/share/vulkan/implicit_layer.d" "$ROOT/usr/share/vulkan/explicit_layer.d" \
     "$ROOT/usr/share/glvnd/egl_vendor.d" "$ROOT/usr/share/X11/xorg.conf.d" \
-    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/home/deck"
+    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/home/xgmtest" "$ROOT/home/deck"
+  # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host.
+  # home/deck only exists for the few paths the scripts hardcode to /home/deck.
   : > "$SHIM_LOG"
 
   local tool path

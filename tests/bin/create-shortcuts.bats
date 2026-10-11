@@ -10,7 +10,7 @@ setup() {
   load helpers/sandbox
   make_root
   PLUGIN_DIR="$(readlink -f "$XGM_REPO")"
-  DESKTOP="$ROOT/home/deck/Desktop"
+  DESKTOP="$ROOT/home/xgmtest/Desktop"
 }
 
 @test "steamos + nvidia + driver missing: exit 2, nothing written" {
@@ -27,7 +27,7 @@ setup() {
   assert_output --partial "Desktop shortcuts created successfully."
 
   run cat "$ROOT/etc/sudoers.d/xgmobile-manager"
-  assert_output "deck ALL=(root) NOPASSWD: $PLUGIN_DIR/bin/egpu-enable, $PLUGIN_DIR/bin/egpu-eject"
+  assert_output "xgmtest ALL=(root) NOPASSWD: $PLUGIN_DIR/bin/egpu-enable, $PLUGIN_DIR/bin/egpu-eject"
 
   assert [ -x "$DESKTOP/Enable XG Mobile.desktop" ]
   assert [ -x "$DESKTOP/Eject XG Mobile.desktop" ]
@@ -38,7 +38,7 @@ setup() {
   assert_line 'Exec=bash -c "touch /tmp/xgmobile_eject_request"'
 
   assert_called_before "steamos-readonly disable" "steamos-readonly enable"
-  assert_called "chown deck:deck $DESKTOP/Enable XG Mobile.desktop"
+  assert_called "chown xgmtest:xgmtest $DESKTOP/Enable XG Mobile.desktop"
 }
 
 @test "bazzite: no driver check and no steamos-readonly" {

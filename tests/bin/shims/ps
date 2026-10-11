@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-# Test shim: the Steam process belongs to "deck".
+# Test shim: the Steam process belongs to "xgmtest", a user that cannot exist on a real host,
+# so a path built from $PRIMARY_USER never points at a real home directory.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-echo "deck"
+echo "xgmtest"

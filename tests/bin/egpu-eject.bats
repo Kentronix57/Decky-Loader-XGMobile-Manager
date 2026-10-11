@@ -48,7 +48,7 @@ symmetry_nvidia() {
   assert [ -f "$DATA_DIR/configs_backup/nvidia_layers.json" ]
   assert [ ! -e "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
   assert [ ! -e "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
-  assert [ ! -e "$ROOT/home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
+  assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
   assert [ ! -e "$ROOT/etc/modprobe.d/nvidia-egpu.conf" ]
   assert_called "modprobe -r nvidia"
   assert_called "systemctl disable xgmobile-boot-sync.service"
