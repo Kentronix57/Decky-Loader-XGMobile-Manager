@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test shim: `uname -r` prints $SHIM_STATE/uname (a SteamOS kernel by default).
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+cat "$SHIM_STATE/uname" 2>/dev/null || echo "6.11.11-valve12-1-neptune-611-gb3afa9aa9ae7"

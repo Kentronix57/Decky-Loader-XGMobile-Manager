@@ -1,0 +1,29 @@
+# path-audit.bats exceptions. One entry per line: `<script>`, `<script> @until <line>` or
+# `<script> @allow <text>`. `* @allow <text>` applies to every script. Blank lines and lines
+# starting with # are ignored. A bare /dev/null is exempt in the audit itself (audit.bash).
+
+# Out of scope for the sandbox: never run by the tests, so not audited at all.
+bin/install.sh
+bin/mega-nuke.sh
+bin/mega-nuke-dry.sh
+bin/egpu-resume-fix
+
+# Pre-flight only: audit lines up to (not including) the first line equal to the marker. The
+# marker is the first line the pre-flight tests must never reach (steamos-readonly is fatal there).
+bin/install-nvidia.sh @until steamos-readonly disable || echo "Already unlocked."
+bin/uninstall.sh @until mkdir -p "$DATA_DIR/configs"
+
+# Literal values (environment values, log text) that look like paths but aren't file accesses.
+bin/egpu-enable @allow VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
+bin/egpu-enable @allow failed to appear in /dev/dri/
+bin/egpu-eject @allow Sanitizing /etc/environment
+bin/egpu-eject @allow did not seem to drop from /dev/dri/
+bin/egpu-sync @allow ="/dev/dri/$(basename $card)"
+bin/egpu-enable @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
+bin/egpu-eject @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
+bin/create-shortcuts @allow Exec=bash -c "touch /tmp/xgmobile_eject_request"
+
+# install-nvidia.sh target arrays: defined during the pre-flight, only used after the unlock.
+bin/install-nvidia.sh @allow ROOT_TARGETS=("/usr/lib/nvidia" "/usr/lib32/nvidia" "/usr/src" "/usr/lib/firmware/nvidia" "/usr/share/nvidia")
+bin/install-nvidia.sh @allow VAR_TARGETS=("/var/lib/dkms" "/var/cache/pacman/pkg")
+bin/install-nvidia.sh @allow BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")

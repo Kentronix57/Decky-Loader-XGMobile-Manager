@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test shim: lists the module named in $SHIM_STATE/lsmod (nvidia|amdgpu), or nothing.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+echo "Module                  Size  Used by"
+case "$(cat "$SHIM_STATE/lsmod" 2>/dev/null)" in
+  nvidia) echo "nvidia_drm            135168  4"; echo "nvidia              11612160  60 nvidia_uvm,nvidia_modeset" ;;
+  amdgpu) echo "amdgpu              15532032  23" ;;
+esac
+exit 0

@@ -1,0 +1,46 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tier0:
+    name: Tier 0 (no hardware)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+
+      - name: Install Python dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install shellcheck
+        run: command -v shellcheck || (sudo apt-get update && sudo apt-get install -y shellcheck)
+
+      - name: Run Tier 0
+        run: bash tests/run-all.sh

@@ -32,6 +32,11 @@ SHORTCUTS_LOG = os.path.join(LOG_DIR, "xgmobile_manager_create_shortcuts.log")
 SYNC_LOG = os.path.join(LOG_DIR, "xgmobile_manager_boot_sync.log")
 PYTHONERROR_LOG = os.path.join(LOG_DIR, "xgmobile_manager_python_crash.log")
 
+OS_RELEASE_PATH = "/etc/os-release"
+DMI_PRODUCT_PATH = "/sys/class/dmi/id/product_name"
+ASUS_WMI_DIR = "/sys/devices/platform/asus-nb-wmi"
+DESKTOP_FLAG_PATH = "/var/tmp/xgmobile_desktop_trigger"
+
 os.makedirs(os.path.join(DATA_DIR, "configs"), exist_ok=True)
 
 LOG_MAP = {
@@ -209,7 +214,7 @@ class Plugin:
 
   async def get_device_type(self):
     try:
-      with open('/sys/class/dmi/id/product_name', 'r') as f:
+      with open(DMI_PRODUCT_PATH, 'r') as f:
         product_name = f.read().strip()
               
       if "RC71L" in product_name or "Ally" in product_name:
@@ -224,7 +229,7 @@ class Plugin:
   def get_os_type(self):
     """Detects the host OS and validates the Bazzite NVIDIA image."""
     try:
-      with open("/etc/os-release", "r") as f:
+      with open(OS_RELEASE_PATH, "r") as f:
         os_data = f.read().lower()
                 
         if "bazzite" in os_data:
@@ -585,7 +590,7 @@ class Plugin:
   
   async def set_desktop_transition_flag(self):
     try:
-      with open("/var/tmp/xgmobile_desktop_trigger", "w") as f:
+      with open(DESKTOP_FLAG_PATH, "w") as f:
         f.write("transition_requested")
       return _result(True, "success", "Desktop Mode", "Desktop Mode switch scheduled.")
     except Exception as e:
@@ -595,7 +600,7 @@ class Plugin:
                      hint=f"{_short_exc(e)}. You can switch to Desktop manually from the Power menu.")
 
   async def check_and_clear_desktop_flag(self):
-    flag_path = "/var/tmp/xgmobile_desktop_trigger"
+    flag_path = DESKTOP_FLAG_PATH
     if os.path.exists(flag_path):
       os.remove(flag_path)
       return True
@@ -742,7 +747,7 @@ class Plugin:
 
   async def get_power_profile(self):
     try:
-      policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
+      policy_path = os.path.join(ASUS_WMI_DIR, "throttle_thermal_policy")
       if not os.path.exists(policy_path):
         return "Unknown"
         
@@ -778,7 +783,7 @@ class Plugin:
       label = "Quiet"
 
     try:
-      policy_path = "/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
+      policy_path = os.path.join(ASUS_WMI_DIR, "throttle_thermal_policy")
       with open(policy_path, "w") as f:
         f.write(val_to_write)
       return _result(True, "success", "ASUS Power Profile", f"Power profile set to {label}.")
@@ -818,7 +823,7 @@ class Plugin:
     status = {"connected": False, "active": False, "vendor": "none", "error": ""}
     
     try:
-      conn_path = "/sys/devices/platform/asus-nb-wmi/egpu_connected"
+      conn_path = os.path.join(ASUS_WMI_DIR, "egpu_connected")
       if os.path.exists(conn_path):
         with open(conn_path, "r") as f:
           val = f.read().strip()
@@ -828,7 +833,7 @@ class Plugin:
         return status
 
       # Check Active Flag
-      enable_path = "/sys/devices/platform/asus-nb-wmi/egpu_enable"
+      enable_path = os.path.join(ASUS_WMI_DIR, "egpu_enable")
       if os.path.exists(enable_path):
         with open(enable_path, "r") as f:
           val = f.read().strip()

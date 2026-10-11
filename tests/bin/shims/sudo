@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test shim: records the call, drops `-u USER`, `-E` and `VAR=val`, then runs the rest as the
+# current (non-root) user, still on the shim PATH.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -u) shift 2 ;;
+    -E) shift ;;
+    [A-Za-z_]*=*) shift ;;
+    *) break ;;
+  esac
+done
+exec "$@"
