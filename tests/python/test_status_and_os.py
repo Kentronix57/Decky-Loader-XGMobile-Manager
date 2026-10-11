@@ -28,6 +28,8 @@ def test_get_os_status_wraps_get_os_type(xgm):
   ("ROG Flow Z13 GZ301ZE", "laptop"),
   ("ROG Flow X13 GV301QH", "laptop"),
   ("ROG Flow X16 GV601VV", "laptop"),
+  ("GZ301ZE", "laptop"),
+  ("GV301QH", "laptop"),
   ("Jupiter", "unknown"),
   ("", "unknown"),
 ])
