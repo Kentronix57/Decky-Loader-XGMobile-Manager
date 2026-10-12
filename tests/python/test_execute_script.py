@@ -125,3 +125,17 @@ def test_args_are_passed_through(xgm):
   xgm.stub("egpu-enable", f'echo "$@" > "{out}"')
   xgm.run(xgm.plugin._execute_script("egpu-enable", xgm.mod.ENABLE_LOG, "nvidia", "steamos", "/l", "/d"))
   assert out.read_text().strip() == "nvidia steamos /l /d"
+
+
+def test_steamos_installer_unsupported_os_hint_is_bazzite_only():
+  # CachyOS is dispatched to its own installer, so this copy is only ever seen on Bazzite.
+  message, hint = STATIC.SCRIPT_ERROR_CATALOG["install-nvidia.sh"][2]
+  assert "CachyOS" not in message + hint
+  assert "bazzite-deck-nvidia" in hint
+
+
+@pytest.mark.parametrize("code", [3, 4])
+def test_enable_config_hints_cover_steamos_and_cachyos(code):
+  _, hint = STATIC.SCRIPT_ERROR_CATALOG["egpu-enable"][code]
+  assert "On SteamOS, run Advanced → Install NVIDIA Drivers" in hint
+  assert "sudo pacman -S nvidia-utils" in hint
