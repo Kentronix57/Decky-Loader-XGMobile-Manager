@@ -14,8 +14,8 @@ if grep -qi "bazzite" $ROOT/etc/os-release; then
 fi
 
 if grep -qi "cachy" $ROOT/etc/os-release; then
-    echo "ERROR: CachyOS detected. This plugin's driver installation is built for SteamOS (Arch)."
-    echo "CachyOS natively handles the XG Mobile via supergfxctl. No need to reset driver environment."
+    echo "ERROR: CachyOS detected. Reset Driver Environment is SteamOS-only."
+    echo "On CachyOS the NVIDIA drivers are regular pacman packages. Remove them with pacman if you no longer need them."
     exit 1
 fi
 

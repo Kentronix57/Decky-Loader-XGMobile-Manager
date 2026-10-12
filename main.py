@@ -99,6 +99,13 @@ SCRIPT_META = {
     "fail_title": "NVIDIA Install Failed",
     "action": "The NVIDIA driver install",
   },
+  "install-nvidia-cachyos.sh": {
+    "log_key": "install",
+    "title": "NVIDIA Setup",
+    "message": "NVIDIA drivers installed.",
+    "fail_title": "NVIDIA Install Failed",
+    "action": "The NVIDIA driver install",
+  },
   "uninstall.sh": {
     "log_key": "uninstall",
     "title": "Reset Driver Environment",
@@ -126,11 +133,11 @@ SCRIPT_ERROR_CATALOG = {
     1: ("XG Mobile isn't locked in. Check the cable latch and try again.",
         "The laptop reports the XG Mobile is not connected. Push the connector fully in, slide the lock switch to locked, wait for the XG Mobile LED, then press Enable again."),
     2: ("NVIDIA driver isn't installed for this kernel.",
-        "On SteamOS, run Advanced → Install NVIDIA Drivers and reboot (needed again after every SteamOS kernel update). If your XG Mobile is AMD, turn off NVIDIA Mode."),
+        "Run Advanced → Install NVIDIA Drivers, then reboot (on SteamOS, again after every system update). If your XG Mobile is AMD, turn off NVIDIA Mode."),
     3: ("NVIDIA Vulkan configs are in the old v0.2.0 location.",
-        "Run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs in the new data folder, then reboot and enable again."),
+        "On SteamOS, run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs, then reboot. On CachyOS, reinstall them with `sudo pacman -S nvidia-utils`."),
     4: ("NVIDIA Vulkan configs are missing.",
-        "Run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs, then reboot and enable again."),
+        "On SteamOS, run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs, then reboot. On CachyOS, reinstall them with `sudo pacman -S nvidia-utils`."),
     5: ("The eGPU never appeared as a display device.",
         "The XG Mobile was switched on but no new GPU showed up in /dev/dri in time. Eject, unlock and re-lock the cable, then try again. If it keeps happening, share the Enable Log on GitHub."),
     6: ("No NVIDIA GPU found on the PCIe bus.",
@@ -143,7 +150,7 @@ SCRIPT_ERROR_CATALOG = {
   "install-nvidia.sh": {
     10: ("NVIDIA drivers already match your kernel. No reboot needed.", ""),
     2: ("Unsupported OS. The driver installer is SteamOS-only.",
-        "On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers. On CachyOS, install your kernel's nvidia-open package (e.g. linux-cachyos-deckify-nvidia-open) plus nvidia-utils and lib32-nvidia-utils."),
+        "On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers."),
     3: ("Kernel headers for your kernel aren't in the SteamOS repo.",
         "Go to Settings → System → Check for Updates, apply any update, reboot, then run Install NVIDIA Drivers again."),
     4: ("Kernel and header versions don't match. Update SteamOS first.",
@@ -155,22 +162,55 @@ SCRIPT_ERROR_CATALOG = {
     1: ("The driver build failed and was rolled back.",
         "A step in the install failed and your system was restored. Open the install log, look at the lines just before \"INSTALL FAILED\", and share the log in a GitHub issue."),
   },
+  "install-nvidia-cachyos.sh": {
+    10: ("NVIDIA drivers are already installed for your kernel. No reboot needed.", ""),
+    2: ("Unsupported OS. This driver installer is CachyOS-only.",
+        "On SteamOS the plugin uses its SteamOS installer. On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers."),
+    3: ("CachyOS has pending updates. Update the system first.",
+        "Run `sudo pacman -Syu` in a terminal, reboot, then run Install NVIDIA Drivers again. The install log names the package that didn't match."),
+    4: ("pacman couldn't install the NVIDIA packages.",
+        "The install log shows pacman's error. Check your internet connection. If the package database is locked, wait for any other update to finish, then try again."),
+    5: ("The NVIDIA packages installed, but the kernel module is missing.",
+        "The install log names the kernel without a module. Run `sudo pacman -Syu`, reboot, then try again. If it keeps failing, share the install log in a GitHub issue."),
+    9: _MISSING_HELPER,
+  },
   "create-shortcuts": {
     2: ("NVIDIA driver isn't installed, so shortcuts weren't created.",
         "Run Advanced → Install NVIDIA Drivers first, or turn off NVIDIA Mode if your XG Mobile is AMD."),
     9: _MISSING_HELPER,
   },
   "uninstall.sh": {
-    1: ("Reset isn't needed on Bazzite or CachyOS.",
-        "Your OS manages the NVIDIA drivers and XG Mobile switching natively (via supergfxctl), so there is nothing for this plugin to reset."),
+    1: ("Reset isn't available on Bazzite or CachyOS.",
+        "Bazzite's NVIDIA drivers are part of its image. On CachyOS, remove the NVIDIA packages with pacman if you no longer need them."),
   },
   "supergfx-hybrid": _SUPERGFX_ERRORS,
   "supergfx-integrated": _SUPERGFX_ERRORS,
 }
 
+# Exit 10 from these means the drivers are already installed: a success, not an error.
+NVIDIA_INSTALLERS = ("install-nvidia.sh", "install-nvidia-cachyos.sh")
+
 WRONG_BAZZITE_TITLE = "Wrong Bazzite Image"
 WRONG_BAZZITE_MESSAGE = "NVIDIA XG Mobile needs the bazzite-deck-nvidia image."
 WRONG_BAZZITE_HINT = "Rebase to the bazzite-deck-nvidia image (see the Bazzite docs), or turn off NVIDIA Mode if your XG Mobile is an AMD unit."
+
+def _session_select_calls(os_type, desktop_default, target):
+  """
+  The steamos-session-select argument lists for switching to target ("desktop" or "gamescope"),
+  in order. CachyOS's steamos-session-select only accepts persistent, oneshot, gamescope and
+  plasma, so "make it the default" is its own call before the session. Every other OS keeps the
+  session names the plugin has always sent.
+  """
+  is_default = desktop_default == "1"
+  if os_type == "cachyos":
+    if target == "desktop":
+      return [["persistent"], ["plasma"]] if is_default else [["plasma"]]
+    return [["oneshot"], ["gamescope"]] if is_default else [["gamescope"]]
+  if target == "gamescope":
+    return [["gamescope"]]
+  if is_default:
+    return [["plasma-wayland-persistent"]]
+  return [["plasma-wayland"]] if os_type == "steamos" else [["plasma"]]
 
 def _result(ok, status, title, message, hint="", code=None, script="", log_key=""):
   return {"ok": ok, "status": status, "code": code, "script": script,
@@ -323,7 +363,7 @@ class Plugin:
 
     entry = SCRIPT_ERROR_CATALOG.get(script_name, {}).get(code)
 
-    if script_name == "install-nvidia.sh" and code == 10:
+    if script_name in NVIDIA_INSTALLERS and code == 10:
       message, hint = entry
       return _result(True, "already_installed", meta["title"], message, hint=hint,
                      code=code, script=script_name, log_key=log_key)
@@ -432,17 +472,19 @@ class Plugin:
             "XDG_RUNTIME_DIR": f"/run/user/{uid}",
             "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
           }
-          result = subprocess.run(
-            ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", "gamescope"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=safe_env
-          )
+          for session_args in _session_select_calls(os_type, desktopdefault, "gamescope"):
+            write_log(f"Running session select: {' '.join(session_args)}")
+            result = subprocess.run(
+              ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+              capture_output=True,
+              text=True,
+              check=False,
+              env=safe_env
+            )
 
-          write_log(f"Command exited with code: {result.returncode}")
-          if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
-          if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
+            write_log(f"Command exited with code: {result.returncode}")
+            if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
+            if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
         
         except Exception as e:
           # Bleed the error to the fallback log, but DO NOT return. Let the loop survive.
@@ -539,21 +581,17 @@ class Plugin:
                 "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
               }
               
-              if os_type == "steamos" or os_type == "cachyos":
-                target_session = "plasma-wayland-persistent" if desktopdefault == "1" else "plasma-wayland"
-              else:
-                target_session = "plasma-persistent" if desktopdefault == "1" else "plasma"
+              for session_args in _session_select_calls(os_type, desktopdefault, "desktop"):
+                write_log(f"Desktop {os_type} detected, running following session select: {' '.join(session_args)}")
 
-              write_log(f"Desktop {os_type} detected, running following session select: {target_session}")
+                transition_result = subprocess.run(
+                  ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+                  capture_output=True, text=True, check=False, env=safe_env
+                )
 
-              transition_result = subprocess.run(
-                ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", target_session],
-                capture_output=True, text=True, check=False, env=safe_env
-              )
-              
-              write_log(f"Transition Code: {transition_result.returncode}")
-              if transition_result.stdout: write_log("STDOUT:\n" + transition_result.stdout.strip())
-              if transition_result.stderr: write_log("STDERR:\n" + transition_result.stderr.strip())
+                write_log(f"Transition Code: {transition_result.returncode}")
+                if transition_result.stdout: write_log("STDOUT:\n" + transition_result.stdout.strip())
+                if transition_result.stderr: write_log("STDERR:\n" + transition_result.stderr.strip())
           if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
           if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
         
@@ -580,14 +618,18 @@ class Plugin:
     return await self._execute_script("supergfx-integrated", INTEGRATED_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def install_nvidia(self):
-    if not self.get_os_type() == "steamos":
-      log("SteamOS not detected: Blocking DKMS driver installation.")
-      return _result(False, "error", "NVIDIA Install Unavailable",
-                     "The plugin's driver installer is SteamOS-only for now.",
-                     hint="Bazzite's deck-nvidia image includes the drivers. On CachyOS, install your kernel's nvidia-open package with pacman (automatic install is coming in a future update).")
+    os_type = self.get_os_type()
+    if os_type == "steamos":
+      log("SteamOS detected: Starting DKMS driver compilation.")
+      return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
+    if os_type == "cachyos":
+      log("CachyOS detected: Installing the NVIDIA packages with pacman.")
+      return await self._execute_script("install-nvidia-cachyos.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
 
-    log("SteamOS detected: Starting DKMS driver compilation.")
-    return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
+    log(f"{os_type} detected: Blocking NVIDIA driver installation.")
+    return _result(False, "error", "NVIDIA Install Unavailable",
+                   "The plugin's driver installer supports SteamOS and CachyOS only.",
+                   hint="Bazzite's deck-nvidia image includes the drivers.")
 
   async def uninstall_nvidia(self):
     return await self._execute_script("uninstall.sh", UNINSTALL_LOG, LOG_DIR, DATA_DIR)
@@ -677,28 +719,24 @@ class Plugin:
       }
       desktopdefault = await self.get_setting("desktop_default", "0")
 
-      if os_type == "steamos" or os_type == "cachyos":
-        target_session = "plasma-wayland-persistent" if desktopdefault == "1" else "plasma-wayland"
-      else:
-        target_session = "plasma-wayland-persistent" if desktopdefault == "1" else "plasma"
+      for session_args in _session_select_calls(os_type, desktopdefault, "desktop"):
+        write_log(f"Desktop {os_type} detected, running following session select: {' '.join(session_args)}")
 
-      write_log(f"Desktop {os_type} detected, running following session select: {target_session}")
+        result = subprocess.run(
+          ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+          capture_output=True, text=True, check=False, env=safe_env
+        )
 
-      result = subprocess.run(
-        ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", target_session],
-        capture_output=True, text=True, check=False, env=safe_env
-      )
-      
-      write_log(f"Command exited with code: {result.returncode}")
-        
-      if result.stdout:
-        write_log("STDOUT:")
-        write_log(result.stdout.strip())
-            
-      if result.stderr:
-        write_log("STDERR (ERRORS):")
-        write_log(result.stderr.strip())
-            
+        write_log(f"Command exited with code: {result.returncode}")
+
+        if result.stdout:
+          write_log("STDOUT:")
+          write_log(result.stdout.strip())
+
+        if result.stderr:
+          write_log("STDERR (ERRORS):")
+          write_log(result.stderr.strip())
+
       return True
         
     except Exception as e:

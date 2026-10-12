@@ -41,15 +41,21 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 
   if [ "$VENDOR" == "nvidia" ]; then
     # De-Fanging Configs
-    echo "De-fanging NVIDIA configs to protect AMD Handheld Mode..."
-    xgm_ro_disable
-    mkdir -p $DATA_DIR/configs_backup
-    mv $ROOT/usr/share/glvnd/egl_vendor.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv $ROOT/usr/share/vulkan/implicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv $ROOT/usr/share/vulkan/explicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv $ROOT/usr/share/vulkan/icd.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    mv $ROOT/usr/share/X11/xorg.conf.d/10-nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    xgm_ro_enable
+    # On CachyOS these files belong to pacman packages: moving them breaks package integrity, and
+    # the next nvidia-utils update puts them back anyway. Leave them in place there.
+    if [[ "$OS_TYPE" == *"cachyos"* ]]; then
+      echo "CachyOS: NVIDIA configs are owned by pacman packages, leaving them in place."
+    else
+      echo "De-fanging NVIDIA configs to protect AMD Handheld Mode..."
+      xgm_ro_disable
+      mkdir -p $DATA_DIR/configs_backup
+      mv $ROOT/usr/share/glvnd/egl_vendor.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+      mv $ROOT/usr/share/vulkan/implicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+      mv $ROOT/usr/share/vulkan/explicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+      mv $ROOT/usr/share/vulkan/icd.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+      mv $ROOT/usr/share/X11/xorg.conf.d/10-nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
+      xgm_ro_enable
+    fi
   
     # Environment Cleanup (System-Wide)
     # We unset the exact variables we set in the enable script

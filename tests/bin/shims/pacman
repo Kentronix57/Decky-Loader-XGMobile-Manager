@@ -1,15 +1,48 @@
 #!/usr/bin/env bash
-# Test shim: `pacman -Si <pkg>` prints a Version line from $SHIM_STATE/pacman_version (nothing
-# and exit 1 when unset). Everything else just succeeds.
+# Test shim, driven by files in $SHIM_STATE (helpers/sandbox.bash has setters for them):
+#   pacman -Si <pkg>  prints one sync-db record per line of $SHIM_STATE/pacman_repo/<pkg>
+#                     ("<repo> <version>", in repo priority order), else (SteamOS pre-flight) the
+#                     version in $SHIM_STATE/pacman_version; with neither, "not found" and exit 1.
+#                     Field labels are translated like real pacman when the effective locale
+#                     (LC_ALL, LC_MESSAGES, LANG) is Spanish.
+#   pacman -Q <pkg>   prints "<pkg> <version>" from $SHIM_STATE/pacman_local/<pkg>, else exit 1.
+#   pacman -S ...     exits with $SHIM_STATE/pacman_install_rc (default 0).
+# Everything else just succeeds.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-if [ "$1" = "-Si" ]; then
-  version=$(cat "$SHIM_STATE/pacman_version" 2>/dev/null)
-  if [ -z "$version" ]; then
-    echo "error: package '$2' was not found" >&2
-    exit 1
-  fi
-  echo "Repository      : jupiter-main"
-  echo "Name            : $2"
-  echo "Version         : $version"
+locale="${LC_ALL:-${LC_MESSAGES:-${LANG:-C}}}"
+L_REPO="Repository" L_NAME="Name" L_VERSION="Version"
+if [[ "$locale" == es* ]]; then
+  L_REPO="Repositorio" L_NAME="Nombre" L_VERSION="Versión"
 fi
+record() {
+  printf '%-16s: %s\n' "$L_REPO" "$1" "$L_NAME" "$2" "$L_VERSION" "$3"
+}
+case "$1" in
+  -Si)
+    if [ -d "$SHIM_STATE/pacman_repo" ]; then
+      [ -s "$SHIM_STATE/pacman_repo/$2" ] || { echo "error: package '$2' was not found" >&2; exit 1; }
+      first=1
+      while read -r repo version; do
+        [ "$first" -eq 1 ] || echo
+        first=0
+        record "$repo" "$2" "$version"
+      done < "$SHIM_STATE/pacman_repo/$2"
+    else
+      version=$(cat "$SHIM_STATE/pacman_version" 2>/dev/null)
+      [ -n "$version" ] || { echo "error: package '$2' was not found" >&2; exit 1; }
+      record jupiter-main "$2" "$version"
+    fi
+    ;;
+  -Q)
+    version=$(cat "$SHIM_STATE/pacman_local/$2" 2>/dev/null)
+    if [ -z "$version" ]; then
+      echo "error: package '$2' was not found" >&2
+      exit 1
+    fi
+    echo "$2 $version"
+    ;;
+  -S)
+    exit "$(cat "$SHIM_STATE/pacman_install_rc" 2>/dev/null || echo 0)"
+    ;;
+esac
 exit 0
