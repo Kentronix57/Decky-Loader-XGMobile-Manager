@@ -99,6 +99,13 @@ SCRIPT_META = {
     "fail_title": "NVIDIA Install Failed",
     "action": "The NVIDIA driver install",
   },
+  "install-nvidia-cachyos.sh": {
+    "log_key": "install",
+    "title": "NVIDIA Setup",
+    "message": "NVIDIA drivers installed.",
+    "fail_title": "NVIDIA Install Failed",
+    "action": "The NVIDIA driver install",
+  },
   "uninstall.sh": {
     "log_key": "uninstall",
     "title": "Reset Driver Environment",
@@ -126,7 +133,7 @@ SCRIPT_ERROR_CATALOG = {
     1: ("XG Mobile isn't locked in. Check the cable latch and try again.",
         "The laptop reports the XG Mobile is not connected. Push the connector fully in, slide the lock switch to locked, wait for the XG Mobile LED, then press Enable again."),
     2: ("NVIDIA driver isn't installed for this kernel.",
-        "On SteamOS, run Advanced → Install NVIDIA Drivers and reboot (needed again after every SteamOS kernel update). If your XG Mobile is AMD, turn off NVIDIA Mode."),
+        "Run Advanced → Install NVIDIA Drivers, then reboot (on SteamOS, again after every system update). If your XG Mobile is AMD, turn off NVIDIA Mode."),
     3: ("NVIDIA Vulkan configs are in the old v0.2.0 location.",
         "Run Advanced → Install NVIDIA Drivers to regenerate the Vulkan configs in the new data folder, then reboot and enable again."),
     4: ("NVIDIA Vulkan configs are missing.",
@@ -155,18 +162,33 @@ SCRIPT_ERROR_CATALOG = {
     1: ("The driver build failed and was rolled back.",
         "A step in the install failed and your system was restored. Open the install log, look at the lines just before \"INSTALL FAILED\", and share the log in a GitHub issue."),
   },
+  "install-nvidia-cachyos.sh": {
+    10: ("NVIDIA drivers are already installed for your kernel. No reboot needed.", ""),
+    2: ("Unsupported OS. This driver installer is CachyOS-only.",
+        "On SteamOS the plugin uses its SteamOS installer. On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers."),
+    3: ("CachyOS has pending updates. Update the system first.",
+        "Run `sudo pacman -Syu` in a terminal, reboot, then run Install NVIDIA Drivers again. The install log names the package that didn't match."),
+    4: ("pacman couldn't install the NVIDIA packages.",
+        "The install log shows pacman's error. Check your internet connection. If the package database is locked, wait for any other update to finish, then try again."),
+    5: ("The NVIDIA packages installed, but the kernel module is missing.",
+        "The install log names the kernel without a module. Run `sudo pacman -Syu`, reboot, then try again. If it keeps failing, share the install log in a GitHub issue."),
+    9: _MISSING_HELPER,
+  },
   "create-shortcuts": {
     2: ("NVIDIA driver isn't installed, so shortcuts weren't created.",
         "Run Advanced → Install NVIDIA Drivers first, or turn off NVIDIA Mode if your XG Mobile is AMD."),
     9: _MISSING_HELPER,
   },
   "uninstall.sh": {
-    1: ("Reset isn't needed on Bazzite or CachyOS.",
-        "Your OS manages the NVIDIA drivers and XG Mobile switching natively (via supergfxctl), so there is nothing for this plugin to reset."),
+    1: ("Reset isn't available on Bazzite or CachyOS.",
+        "Bazzite's NVIDIA drivers are part of its image. On CachyOS, remove the NVIDIA packages with pacman if you no longer need them."),
   },
   "supergfx-hybrid": _SUPERGFX_ERRORS,
   "supergfx-integrated": _SUPERGFX_ERRORS,
 }
+
+# Exit 10 from these means the drivers are already installed: a success, not an error.
+NVIDIA_INSTALLERS = ("install-nvidia.sh", "install-nvidia-cachyos.sh")
 
 WRONG_BAZZITE_TITLE = "Wrong Bazzite Image"
 WRONG_BAZZITE_MESSAGE = "NVIDIA XG Mobile needs the bazzite-deck-nvidia image."
@@ -323,7 +345,7 @@ class Plugin:
 
     entry = SCRIPT_ERROR_CATALOG.get(script_name, {}).get(code)
 
-    if script_name == "install-nvidia.sh" and code == 10:
+    if script_name in NVIDIA_INSTALLERS and code == 10:
       message, hint = entry
       return _result(True, "already_installed", meta["title"], message, hint=hint,
                      code=code, script=script_name, log_key=log_key)
@@ -580,14 +602,18 @@ class Plugin:
     return await self._execute_script("supergfx-integrated", INTEGRATED_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def install_nvidia(self):
-    if not self.get_os_type() == "steamos":
-      log("SteamOS not detected: Blocking DKMS driver installation.")
-      return _result(False, "error", "NVIDIA Install Unavailable",
-                     "The plugin's driver installer is SteamOS-only for now.",
-                     hint="Bazzite's deck-nvidia image includes the drivers. On CachyOS, install your kernel's nvidia-open package with pacman (automatic install is coming in a future update).")
+    os_type = self.get_os_type()
+    if os_type == "steamos":
+      log("SteamOS detected: Starting DKMS driver compilation.")
+      return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
+    if os_type == "cachyos":
+      log("CachyOS detected: Installing the NVIDIA packages with pacman.")
+      return await self._execute_script("install-nvidia-cachyos.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
 
-    log("SteamOS detected: Starting DKMS driver compilation.")
-    return await self._execute_script("install-nvidia.sh", INSTALL_LOG, LOG_DIR, DATA_DIR)
+    log(f"{os_type} detected: Blocking NVIDIA driver installation.")
+    return _result(False, "error", "NVIDIA Install Unavailable",
+                   "The plugin's driver installer supports SteamOS and CachyOS only.",
+                   hint="Bazzite's deck-nvidia image includes the drivers.")
 
   async def uninstall_nvidia(self):
     return await self._execute_script("uninstall.sh", UNINSTALL_LOG, LOG_DIR, DATA_DIR)

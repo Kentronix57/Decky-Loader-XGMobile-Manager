@@ -46,10 +46,10 @@ def test_other_combinations_run_the_script(xgm, method, script, os_type, vendor)
   assert marker.exists()
 
 
-@pytest.mark.parametrize("os_type", ["bazzite", "bazzite-nvidia", "cachyos", "unsupported"])
-def test_install_nvidia_blocked_off_steamos(xgm, os_type):
+@pytest.mark.parametrize("os_type", ["bazzite", "bazzite-nvidia", "unsupported"])
+def test_install_nvidia_blocked_off_steamos_and_cachyos(xgm, os_type):
   xgm.set_os(os_type)
-  marker = marker_stub(xgm, "install-nvidia.sh")
+  markers = [marker_stub(xgm, s) for s in ("install-nvidia.sh", "install-nvidia-cachyos.sh")]
 
   res = xgm.run(xgm.plugin.install_nvidia())
 
@@ -57,16 +57,24 @@ def test_install_nvidia_blocked_off_steamos(xgm, os_type):
   assert res["ok"] is False
   assert res["status"] == "error"
   assert res["title"] == "NVIDIA Install Unavailable"
-  assert res["hint"] != ""
-  assert not marker.exists()
+  assert res["hint"] == "Bazzite's deck-nvidia image includes the drivers."
+  assert not any(m.exists() for m in markers)
 
 
-def test_install_nvidia_runs_on_steamos(xgm):
-  xgm.set_os("steamos")
-  marker = marker_stub(xgm, "install-nvidia.sh")
+@pytest.mark.parametrize("os_type,script,other", [
+  ("steamos", "install-nvidia.sh", "install-nvidia-cachyos.sh"),
+  ("cachyos", "install-nvidia-cachyos.sh", "install-nvidia.sh"),
+])
+def test_install_nvidia_dispatches_by_os(xgm, os_type, script, other):
+  xgm.set_os(os_type)
+  marker = marker_stub(xgm, script)
+  other_marker = marker_stub(xgm, other)
   res = xgm.run(xgm.plugin.install_nvidia())
   assert res["ok"] is True
+  assert res["script"] == script
+  assert res["log_key"] == "install"
   assert marker.exists()
+  assert not other_marker.exists()
 
 
 # --- power profile ---

@@ -25,7 +25,7 @@ def test_catalog_codes_map_to_catalog_copy(xgm, script, code):
   assert res["code"] == code
   assert res["script"] == script
   assert res["log_key"] == STATIC.SCRIPT_META[script]["log_key"]
-  if (script, code) == ("install-nvidia.sh", 10):
+  if (script, code) in {("install-nvidia.sh", 10), ("install-nvidia-cachyos.sh", 10)}:
     assert res["ok"] is True
     assert res["status"] == "already_installed"
   else:
@@ -95,12 +95,20 @@ def test_script_output_lands_in_its_log(xgm):
   assert "hello from stub" in log
 
 
-def test_install_exit_10_is_already_installed(xgm):
-  xgm.stub("install-nvidia.sh", "exit 10")
-  res = execute(xgm, "install-nvidia.sh")
+@pytest.mark.parametrize("script", ["install-nvidia.sh", "install-nvidia-cachyos.sh"])
+def test_install_exit_10_is_already_installed(xgm, script):
+  xgm.stub(script, "exit 10")
+  res = execute(xgm, script)
   assert res["ok"] is True
   assert res["status"] == "already_installed"
   assert res["code"] == 10
+
+
+def test_exit_10_from_other_scripts_is_an_error(xgm):
+  xgm.stub("egpu-enable", "exit 10")
+  res = execute(xgm, "egpu-enable")
+  assert res["ok"] is False
+  assert res["status"] == "error"
 
 
 def test_install_exit_1_is_error_not_already_installed(xgm):
