@@ -2,7 +2,7 @@
 # Shared helpers for the bin/ scripts. Source it, don't run it, and fail fast (exit 9, catalogued
 # in main.py) before touching anything if it's missing:
 #   . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: ..."; exit 9; }
-# Only defines functions; sourcing it has no side effects.
+# Only defines functions and constants; sourcing it has no side effects.
 ROOT="${XGM_ROOT:-}"
 
 # The display-manager unit: sddm on SteamOS/Bazzite, plasmalogin on CachyOS Handheld.
@@ -41,4 +41,76 @@ xgm_ro_enable() {
   if command -v steamos-readonly >/dev/null 2>&1; then
     steamos-readonly enable
   fi
+}
+
+# The host OS, with the same rules as main.py get_os_type: steamos | cachyos | bazzite |
+# bazzite-nvidia | unsupported. For callers that don't get the OS as an argument (egpu-sync at boot).
+xgm_os_type() {
+  local data
+  data=$(tr '[:upper:]' '[:lower:]' < "$ROOT/etc/os-release" 2>/dev/null) || { echo "unsupported"; return 0; }
+  case "$data" in
+    *bazzite*)
+      if [[ "$data" == *nvidia* ]]; then echo "bazzite-nvidia"; else echo "bazzite"; fi ;;
+    *cachyos*) echo "cachyos" ;;
+    *steamos*) echo "steamos" ;;
+    *) echo "unsupported" ;;
+  esac
+}
+
+# Every variable egpu-enable injects on SteamOS/CachyOS (/etc/environment and systemctl
+# set-environment). Keep in sync with egpu-enable.
+XGM_ENV_VARS=(MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAYERS_DISABLE GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT)
+
+# Undoes everything egpu-enable injects on SteamOS/CachyOS: the variables in /etc/environment,
+# the system and user systemd managers, the Plasma env files and nvidia-egpu.conf. The user
+# manager is skipped when the user has no runtime dir (no session yet, e.g. at early boot).
+xgm_sanitize_environment() {
+  local user="$1" var uid
+  echo "Sanitizing the eGPU environment..."
+  for var in "${XGM_ENV_VARS[@]}"; do
+    sed -i "/^$var=/d" "$ROOT/etc/environment"
+  done
+  for var in "${XGM_ENV_VARS[@]}"; do
+    systemctl unset-environment "$var"
+  done
+  uid=$(id -u "$user" 2>/dev/null)
+  if [ -n "$uid" ] && [ -d "$ROOT/run/user/$uid" ]; then
+    for var in "${XGM_ENV_VARS[@]}"; do
+      sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid systemctl --user unset-environment "$var"
+    done
+  fi
+  rm -f "$ROOT/home/$user/.config/plasma-workspace/env/xgmobile-kwin.sh"
+  rm -f "$ROOT/home/$user/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
+  rm -f "$ROOT/etc/modprobe.d/nvidia-egpu.conf"
+}
+
+# The eGPU's PCI device dir(s) in sysfs, one per line, resolved in this order:
+#   1. the PCI address egpu-enable recorded in <data_dir>/egpu_pci_address, if that device exists
+#   2. the DRM card(s) that aren't the boot VGA device (boot_vga != 1)
+#   3. nothing
+# DRM card numbers change between boots; the PCI address of the XG Mobile slot doesn't.
+xgm_egpu_pci_paths() {
+  local addr card
+  addr=$(cat "$1/egpu_pci_address" 2>/dev/null)
+  if [[ "$addr" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] && [ -e "$ROOT/sys/bus/pci/devices/$addr" ]; then
+    readlink -f "$ROOT/sys/bus/pci/devices/$addr"
+    return 0
+  fi
+  for card in $ROOT/sys/class/drm/card*; do
+    [[ "$(basename "$card")" =~ ^card[0-9]+$ ]] || continue
+    [ -e "$card/device" ] || continue
+    [ "$(cat "$card/device/boot_vga" 2>/dev/null)" = "1" ] && continue
+    readlink -f "$card/device"
+  done
+}
+
+# xgm_drm_nodes <pci dir> [card|renderD]: the DRM node names (card0, renderD129...) that belong to
+# that PCI device, matched through each sys/class/drm entry's device link. Never assumes numbers.
+xgm_drm_nodes() {
+  local entry name
+  for entry in $ROOT/sys/class/drm/${2:-}*; do
+    name=$(basename "$entry")
+    [[ "$name" =~ ^(card|renderD)[0-9]+$ ]] || continue
+    [ "$(readlink -f "$entry/device" 2>/dev/null)" = "$1" ] && echo "$name"
+  done
 }

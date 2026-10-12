@@ -28,7 +28,7 @@ check_missing_helper() {
 
 @test "egpu-enable: helper missing, exit 9" { check_missing_helper egpu-enable nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"; }
 @test "egpu-eject: helper missing, exit 9" { check_missing_helper egpu-eject nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"; }
-@test "egpu-sync: helper missing, exit 9" { check_missing_helper egpu-sync nvidia "$OS_TYPE"; }
+@test "egpu-sync: helper missing, exit 9" { check_missing_helper egpu-sync "$LOG_DIR"; }
 @test "create-shortcuts: helper missing, exit 9" {
   check_missing_helper create-shortcuts nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"
   assert [ ! -e "$ROOT/home/xgmtest/Desktop" ]
