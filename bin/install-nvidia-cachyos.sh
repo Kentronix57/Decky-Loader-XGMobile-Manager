@@ -29,6 +29,8 @@ if ! grep -qi "cachyos" $ROOT/etc/os-release; then
 fi
 
 # --- ALREADY INSTALLED? ---
+# Known limitation: this only checks the running kernel, so other installed kernels without the
+# module are ignored here (and the install isn't repeated for them).
 NEED_MODULE=1
 if modinfo nvidia >/dev/null 2>&1; then
   if pacman -Q nvidia-utils >/dev/null 2>&1; then
@@ -42,6 +44,9 @@ fi
 
 # --- TARGET KERNELS ---
 # Every installed kernel package leaves its pkgbase in its module directory.
+# Known limitation: a leftover module directory from an old kernel that still has a pkgbase file
+# is counted too, which can cause a false exit 5 or 10. Future fix: build KVERS
+# from `pacman -Ql "$K"` instead of the directory names.
 KERNELS=()
 KVERS=()
 for f in $ROOT/usr/lib/modules/*/pkgbase; do
