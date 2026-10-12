@@ -461,8 +461,8 @@ export const QuickAccessContent = () => {
             Create Desktop Shortcuts
           </ButtonItem>
         </PanelSectionRow>
-        {/* Render Install button ONLY on SteamOS */}
-        {osType === "steamos" && (
+        {/* Render Install button ONLY on SteamOS and CachyOS */}
+        {(osType === "steamos" || osType === "cachyos") && (
           <PanelSectionRow>
             <ButtonItem
               layout="below"
