@@ -36,6 +36,11 @@ check_missing_helper() {
 @test "supergfx-hybrid: helper missing, exit 9" { check_missing_helper supergfx-hybrid nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"; }
 @test "supergfx-integrated: helper missing, exit 9" { check_missing_helper supergfx-integrated nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"; }
 
+@test "install-nvidia-cachyos.sh: helper missing, exit 9" {
+  set_os cachyos
+  check_missing_helper install-nvidia-cachyos.sh "$LOG_DIR" "$DATA_DIR"
+}
+
 @test "the real bin/xgm-common.sh is still there" {
   assert [ -f "$XGM_REPO/bin/xgm-common.sh" ]
 }

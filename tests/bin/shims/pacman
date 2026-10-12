@@ -1,15 +1,34 @@
 #!/usr/bin/env bash
-# Test shim: `pacman -Si <pkg>` prints a Version line from $SHIM_STATE/pacman_version (nothing
-# and exit 1 when unset). Everything else just succeeds.
+# Test shim, driven by files in $SHIM_STATE (helpers/sandbox.bash has setters for them):
+#   pacman -Si <pkg>  prints a sync-db record if $SHIM_STATE/pacman_repo/<pkg> holds a version,
+#                     else (SteamOS pre-flight) the version in $SHIM_STATE/pacman_version; with
+#                     neither, "not found" and exit 1.
+#   pacman -Q <pkg>   prints "<pkg> <version>" from $SHIM_STATE/pacman_local/<pkg>, else exit 1.
+#   pacman -S ...     exits with $SHIM_STATE/pacman_install_rc (default 0).
+# Everything else just succeeds.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-if [ "$1" = "-Si" ]; then
-  version=$(cat "$SHIM_STATE/pacman_version" 2>/dev/null)
-  if [ -z "$version" ]; then
-    echo "error: package '$2' was not found" >&2
-    exit 1
-  fi
-  echo "Repository      : jupiter-main"
-  echo "Name            : $2"
-  echo "Version         : $version"
-fi
+case "$1" in
+  -Si)
+    version=$(cat "$SHIM_STATE/pacman_repo/$2" 2>/dev/null)
+    [ -n "$version" ] || [ -d "$SHIM_STATE/pacman_repo" ] || version=$(cat "$SHIM_STATE/pacman_version" 2>/dev/null)
+    if [ -z "$version" ]; then
+      echo "error: package '$2' was not found" >&2
+      exit 1
+    fi
+    echo "Repository      : jupiter-main"
+    echo "Name            : $2"
+    echo "Version         : $version"
+    ;;
+  -Q)
+    version=$(cat "$SHIM_STATE/pacman_local/$2" 2>/dev/null)
+    if [ -z "$version" ]; then
+      echo "error: package '$2' was not found" >&2
+      exit 1
+    fi
+    echo "$2 $version"
+    ;;
+  -S)
+    exit "$(cat "$SHIM_STATE/pacman_install_rc" 2>/dev/null || echo 0)"
+    ;;
+esac
 exit 0

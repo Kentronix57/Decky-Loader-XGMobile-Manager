@@ -179,6 +179,34 @@ set_lspci() { echo "$1" > "$SHIM_STATE/lspci"; }
 # nvidia | amdgpu | none
 set_lsmod() { echo "$1" > "$SHIM_STATE/lsmod"; }
 
+# pacman packages (shims/pacman). pacman_repo <pkg> <version|none>: what `pacman -Si` finds in the
+# sync database. pacman_local <pkg> <version|none>: what `pacman -Q` reports as installed. Once
+# pacman_repo is used, `pacman -Si` only finds packages set this way.
+pacman_repo() {
+  mkdir -p "$SHIM_STATE/pacman_repo"
+  if [ "$2" = "none" ]; then rm -f "$SHIM_STATE/pacman_repo/$1"; else echo "$2" > "$SHIM_STATE/pacman_repo/$1"; fi
+}
+
+pacman_local() {
+  mkdir -p "$SHIM_STATE/pacman_local"
+  if [ "$2" = "none" ]; then rm -f "$SHIM_STATE/pacman_local/$1"; else echo "$2" > "$SHIM_STATE/pacman_local/$1"; fi
+}
+
+# Exit code of `pacman -S` (default 0).
+pacman_install_rc() { echo "$1" > "$SHIM_STATE/pacman_install_rc"; }
+
+# installed_kernel <kver> <pkgbase> [version]: a kernel package with its module dir and pkgbase
+# file, installed at <version> (default 7.2.9-2), and the same version in the sync database.
+installed_kernel() {
+  mkdir -p "$ROOT/usr/lib/modules/$1"
+  echo "$2" > "$ROOT/usr/lib/modules/$1/pkgbase"
+  pacman_local "$2" "${3:-7.2.9-2}"
+  pacman_repo "$2" "${3:-7.2.9-2}"
+}
+
+# nvidia_module_for <kver>: `modinfo -k <kver> nvidia` succeeds.
+nvidia_module_for() { mkdir -p "$SHIM_STATE/modinfo_k"; touch "$SHIM_STATE/modinfo_k/$1"; }
+
 # An already-enabled eGPU (for running eject/sync on their own).
 egpu_present() {
   egpu_appears "$1"
