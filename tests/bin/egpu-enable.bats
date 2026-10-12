@@ -119,7 +119,7 @@ nvidia_ready() {
   assert_failure 6
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
   assert_equal "$(calls_matching 'systemctl start sddm.service' | wc -l)" 1
-  [[ "$LOG" == *"Exiting early (code 6): restarting sddm.service..."* ]]
+  [[ "$LOG" == *"Restoring sddm.service after early exit or interruption..."* ]]
 }
 
 @test "exit 6 on cachyos: plasmalogin is started again, exit code kept" {
@@ -138,7 +138,7 @@ nvidia_ready() {
   assert_failure 5
   refute_called "systemctl stop sddm.service"
   refute_called "systemctl start sddm.service"
-  [[ "$LOG" != *"Exiting early"* ]]
+  [[ "$LOG" != *"after early exit or interruption"* ]]
 }
 
 @test "success: the display manager is started exactly once (no extra start from the trap)" {
@@ -146,7 +146,7 @@ nvidia_ready() {
   run_plugin_script egpu-enable amd
   assert_success
   assert_equal "$(calls_matching 'systemctl start sddm.service' | wc -l)" 1
-  [[ "$LOG" != *"Exiting early"* ]]
+  [[ "$LOG" != *"after early exit or interruption"* ]]
 }
 
 @test "an existing card10 doesn't hide a new card1" {

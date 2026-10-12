@@ -23,7 +23,7 @@ DM_STOPPED=0
 restore_dm() {
   local rc=$?
   if [ "$DM_STOPPED" -eq 1 ]; then
-    echo "Exiting early (code $rc): restarting $DM_SERVICE..."
+    echo "Restoring $DM_SERVICE after early exit or interruption..."
     systemctl start "$DM_SERVICE"
   fi
   exit "$rc"
