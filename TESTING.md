@@ -132,7 +132,8 @@ Installer and first-run testing needs a "clean" OS. Reinstalling is slow, so use
 
 | Tool | Status | Purpose |
 |---|---|---|
-| `build.sh` | ✅ | Builds `xgmobile-manager.zip` |
+| `build.sh` | ✅ | Builds `xgmobile-manager.zip` (uses `--frozen-lockfile` in CI) |
+| Release workflow (`.github/workflows/release.yml`) | ✅ | Pushing a `v*` tag that matches `package.json` runs Tier 0, then `build.sh`, checks every tracked `bin/` and `assets/services/` file made it into the zip, and creates a **draft** release with `xgmobile-manager.zip`. Tags with a suffix (`-beta-1`) become pre-releases. Hardware tiers still happen before you publish the draft. |
 | No-hardware test harness (`tests/`) | ✅ | Tier 0 pytest + bats + vitest suites, run in CI via `bash tests/run-all.sh` |
 | `deploy.sh` | Planned | Build, copy to the Ally over SSH, restart `plugin_loader` |
 | `bin/collect-diagnostics` | Planned | Bundles plugin logs, journal excerpts, `/etc/environment`, `modinfo`/`lspci`, and OS version into one file. Used for test runs and for user bug reports. |

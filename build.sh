@@ -1,5 +1,8 @@
 #!/bin/bash
 set -e
+# Always run from the repo root, wherever the script is called from
+cd "$(dirname "$(readlink -f "$0")")"
+
 # 1. Cleanup old builds
 echo "Cleaning up old builds..."
 rm -rf dist
@@ -8,7 +11,12 @@ rm -f xgmobile-manager.zip
 
 # 2. Build the Frontend (React)
 echo "Building React frontend..."
-pnpm install
+# In CI, install exactly what the lockfile pins so release builds are reproducible
+if [ -n "$CI" ]; then
+  pnpm install --frozen-lockfile
+else
+  pnpm install
+fi
 pnpm run build
 
 # 3. Create a temporary staging directory
