@@ -63,11 +63,20 @@ symmetry_nvidia() {
   cmp "$BATS_TEST_TMPDIR/environment.before" "$ROOT/etc/environment"
   assert_env_symmetry
   assert_called "systemctl unset-environment WLR_DRM_DEVICES"
-  assert [ -f "$DATA_DIR/configs_backup/nvidia_icd.json" ]
-  assert [ -f "$DATA_DIR/configs_backup/10_nvidia.json" ]
-  assert [ -f "$DATA_DIR/configs_backup/nvidia_layers.json" ]
-  assert [ ! -e "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
-  assert [ ! -e "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
+  if [ "$1" = "cachyos" ]; then
+    # Enable repaired the configs an older version moved out; eject leaves the pacman-owned files.
+    assert [ -f "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
+    assert [ -f "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
+    assert [ -f "$ROOT/usr/share/vulkan/implicit_layer.d/nvidia_layers.json" ]
+    assert [ ! -e "$DATA_DIR/configs_backup/nvidia_icd.json" ]
+    assert [ ! -e "$DATA_DIR/configs_backup/10_nvidia.json" ]
+  else
+    assert [ -f "$DATA_DIR/configs_backup/nvidia_icd.json" ]
+    assert [ -f "$DATA_DIR/configs_backup/10_nvidia.json" ]
+    assert [ -f "$DATA_DIR/configs_backup/nvidia_layers.json" ]
+    assert [ ! -e "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
+    assert [ ! -e "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
+  fi
   assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
   assert [ ! -e "$ROOT/etc/modprobe.d/nvidia-egpu.conf" ]
   assert_called "modprobe -r nvidia"
@@ -141,6 +150,40 @@ symmetry_amd() {
   [[ "$LOG" == *"Display manager: sddm.service"* ]]
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
   assert_called_before "steamos-readonly disable" "steamos-readonly enable"
+}
+
+# NVIDIA configs as pacman installs them, before any eject.
+nvidia_configs_installed() {
+  echo '{"ICD": {"library_path": "libGLX_nvidia.so.0"}}' > "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json"
+  echo '{"ICD": {"library_path": "libEGL_nvidia.so.0"}}' > "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json"
+  echo '{"layer": {"name": "VK_LAYER_NV_optimus"}}' > "$ROOT/usr/share/vulkan/implicit_layer.d/nvidia_layers.json"
+}
+
+@test "cachyos/nvidia: pacman-owned NVIDIA configs are left in place" {
+  set_os cachyos
+  no_steamos_readonly
+  nvidia_configs_installed
+  egpu_present nvidia
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert [ -f "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
+  assert [ -f "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
+  assert [ -f "$ROOT/usr/share/vulkan/implicit_layer.d/nvidia_layers.json" ]
+  assert [ ! -e "$DATA_DIR/configs_backup/nvidia_icd.json" ]
+  [[ "$LOG" == *"owned by pacman packages, leaving them in place"* ]]
+  [[ "$LOG" != *"De-fanging"* ]]
+}
+
+@test "steamos/nvidia: NVIDIA configs are still moved to the backup" {
+  nvidia_configs_installed
+  egpu_present nvidia
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert [ ! -e "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
+  assert [ ! -e "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
+  assert [ -f "$DATA_DIR/configs_backup/nvidia_icd.json" ]
+  assert [ -f "$DATA_DIR/configs_backup/10_nvidia.json" ]
+  [[ "$LOG" == *"De-fanging NVIDIA configs"* ]]
 }
 
 @test "no display-manager alias: falls back to sddm.service" {

@@ -227,6 +227,41 @@ nvidia_ready() {
   assert [ -f "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]
 }
 
+@test "cachyos: re-fang never overwrites a config pacman put back (mv -n)" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  echo '{"from": "pacman"}' > "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json"
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_equal "$(cat "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json")" '{"from": "pacman"}'
+  # Files with nothing in the way are still repaired.
+  assert [ -f "$ROOT/usr/share/glvnd/egl_vendor.d/10_nvidia.json" ]
+  assert [ ! -e "$DATA_DIR/configs_backup/10_nvidia.json" ]
+}
+
+@test "steamos: re-fang still restores the backup over an existing config" {
+  nvidia_ready steamos
+  echo '{"stale": true}' > "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json"
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_equal "$(cat "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json")" '{"ICD": {"library_path": "libGLX_nvidia.so.0"}}'
+}
+
+@test "cachyos: nouveau is unloaded before the nvidia modules load" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_called_before "modprobe -r nouveau" "modprobe nvidia_drm modeset=1 fbdev=1"
+}
+
+@test "steamos: nouveau is not touched" {
+  nvidia_ready steamos
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  refute_called "modprobe -r nouveau"
+}
+
 @test "no display-manager alias: falls back to sddm.service" {
   egpu_appears amd
   set_os cachyos
