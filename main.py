@@ -194,6 +194,24 @@ WRONG_BAZZITE_TITLE = "Wrong Bazzite Image"
 WRONG_BAZZITE_MESSAGE = "NVIDIA XG Mobile needs the bazzite-deck-nvidia image."
 WRONG_BAZZITE_HINT = "Rebase to the bazzite-deck-nvidia image (see the Bazzite docs), or turn off NVIDIA Mode if your XG Mobile is an AMD unit."
 
+def _session_select_calls(os_type, desktop_default, target):
+  """
+  The steamos-session-select argument lists for switching to target ("desktop" or "gamescope"),
+  in order. CachyOS's steamos-session-select only accepts persistent, oneshot, gamescope and
+  plasma, so "make it the default" is its own call before the session. Every other OS keeps the
+  session names the plugin has always sent.
+  """
+  is_default = desktop_default == "1"
+  if os_type == "cachyos":
+    if target == "desktop":
+      return [["persistent"], ["plasma"]] if is_default else [["plasma"]]
+    return [["oneshot"], ["gamescope"]] if is_default else [["gamescope"]]
+  if target == "gamescope":
+    return [["gamescope"]]
+  if is_default:
+    return [["plasma-wayland-persistent"]]
+  return [["plasma-wayland"]] if os_type == "steamos" else [["plasma"]]
+
 def _result(ok, status, title, message, hint="", code=None, script="", log_key=""):
   return {"ok": ok, "status": status, "code": code, "script": script,
           "title": title, "message": message, "hint": hint, "log_key": log_key}
@@ -454,17 +472,19 @@ class Plugin:
             "XDG_RUNTIME_DIR": f"/run/user/{uid}",
             "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
           }
-          result = subprocess.run(
-            ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", "gamescope"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=safe_env
-          )
+          for session_args in _session_select_calls(os_type, desktopdefault, "gamescope"):
+            write_log(f"Running session select: {' '.join(session_args)}")
+            result = subprocess.run(
+              ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+              capture_output=True,
+              text=True,
+              check=False,
+              env=safe_env
+            )
 
-          write_log(f"Command exited with code: {result.returncode}")
-          if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
-          if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
+            write_log(f"Command exited with code: {result.returncode}")
+            if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
+            if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
         
         except Exception as e:
           # Bleed the error to the fallback log, but DO NOT return. Let the loop survive.
@@ -561,21 +581,17 @@ class Plugin:
                 "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
               }
               
-              if os_type == "steamos" or os_type == "cachyos":
-                target_session = "plasma-wayland-persistent" if desktopdefault == "1" else "plasma-wayland"
-              else:
-                target_session = "plasma-persistent" if desktopdefault == "1" else "plasma"
+              for session_args in _session_select_calls(os_type, desktopdefault, "desktop"):
+                write_log(f"Desktop {os_type} detected, running following session select: {' '.join(session_args)}")
 
-              write_log(f"Desktop {os_type} detected, running following session select: {target_session}")
+                transition_result = subprocess.run(
+                  ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+                  capture_output=True, text=True, check=False, env=safe_env
+                )
 
-              transition_result = subprocess.run(
-                ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", target_session],
-                capture_output=True, text=True, check=False, env=safe_env
-              )
-              
-              write_log(f"Transition Code: {transition_result.returncode}")
-              if transition_result.stdout: write_log("STDOUT:\n" + transition_result.stdout.strip())
-              if transition_result.stderr: write_log("STDERR:\n" + transition_result.stderr.strip())
+                write_log(f"Transition Code: {transition_result.returncode}")
+                if transition_result.stdout: write_log("STDOUT:\n" + transition_result.stdout.strip())
+                if transition_result.stderr: write_log("STDERR:\n" + transition_result.stderr.strip())
           if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
           if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
         
@@ -703,28 +719,24 @@ class Plugin:
       }
       desktopdefault = await self.get_setting("desktop_default", "0")
 
-      if os_type == "steamos" or os_type == "cachyos":
-        target_session = "plasma-wayland-persistent" if desktopdefault == "1" else "plasma-wayland"
-      else:
-        target_session = "plasma-wayland-persistent" if desktopdefault == "1" else "plasma"
+      for session_args in _session_select_calls(os_type, desktopdefault, "desktop"):
+        write_log(f"Desktop {os_type} detected, running following session select: {' '.join(session_args)}")
 
-      write_log(f"Desktop {os_type} detected, running following session select: {target_session}")
+        result = subprocess.run(
+          ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+          capture_output=True, text=True, check=False, env=safe_env
+        )
 
-      result = subprocess.run(
-        ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", target_session],
-        capture_output=True, text=True, check=False, env=safe_env
-      )
-      
-      write_log(f"Command exited with code: {result.returncode}")
-        
-      if result.stdout:
-        write_log("STDOUT:")
-        write_log(result.stdout.strip())
-            
-      if result.stderr:
-        write_log("STDERR (ERRORS):")
-        write_log(result.stderr.strip())
-            
+        write_log(f"Command exited with code: {result.returncode}")
+
+        if result.stdout:
+          write_log("STDOUT:")
+          write_log(result.stdout.strip())
+
+        if result.stderr:
+          write_log("STDERR (ERRORS):")
+          write_log(result.stderr.strip())
+
       return True
         
     except Exception as e:
