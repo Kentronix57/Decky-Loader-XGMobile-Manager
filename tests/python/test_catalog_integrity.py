@@ -175,3 +175,16 @@ def test_result_keys_match_frontend_action_result():
   fields = parse_action_result_interface()
   assert fields, "could not parse interface ActionResult"
   assert set(ACTION_RESULT_KEYS) == fields
+
+
+def test_every_executed_script_exists():
+  live = "\n".join(l for l in (REPO / "main.py").read_text().splitlines() if not l.strip().startswith("#"))
+  scripts = set(re.findall(r"_execute_script\(\s*\"([^\"]+)\"", live))
+  assert scripts, "could not find any _execute_script calls"
+  for script in scripts:
+    assert (REPO / "bin" / script).is_file(), f"main.py runs bin/{script}, which doesn't exist"
+
+
+def test_dead_repair_services_is_gone():
+  assert not hasattr(STATIC.Plugin, "repair_services")
+  assert "REPAIR_LOG" not in (REPO / "main.py").read_text()

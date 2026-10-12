@@ -41,6 +41,18 @@ setup() {
   assert_called "chown xgmtest:xgmtest $DESKTOP/Enable XG Mobile.desktop"
 }
 
+@test "cachyos without steamos-readonly: shortcuts and sudoers rule still written" {
+  set_os cachyos
+  no_steamos_readonly
+  nvidia_driver installed
+  run_plugin_script create-shortcuts nvidia
+  assert_success
+  assert_output --partial "Desktop shortcuts created successfully."
+  assert [ -f "$ROOT/etc/sudoers.d/xgmobile-manager" ]
+  assert [ -x "$DESKTOP/Enable XG Mobile.desktop" ]
+  refute_called "steamos-readonly"
+}
+
 @test "bazzite: no driver check and no steamos-readonly" {
   set_os bazzite-nvidia
   run_plugin_script create-shortcuts nvidia

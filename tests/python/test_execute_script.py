@@ -68,7 +68,7 @@ def test_unknown_code_gives_generic_fallback_naming_log(xgm, script):
   assert res["log_key"] == meta["log_key"]
 
 
-def test_eject_has_no_catalog_so_any_failure_is_generic(xgm):
+def test_uncatalogued_eject_code_is_generic(xgm):
   xgm.stub("egpu-eject", "exit 1")
   res = execute(xgm, "egpu-eject")
   assert res["message"] == "Ejecting the XG Mobile failed (exit code 1)."

@@ -4,6 +4,8 @@ OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
 ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 [ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
 DESKTOP_DIR="$ROOT/home/$PRIMARY_USER/Desktop"
@@ -27,7 +29,7 @@ mkdir -p "$DESKTOP_DIR"
 
 # 1. Grant passwordless sudo for the EXACT plugin paths
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
-  steamos-readonly disable 2>/dev/null || true
+  xgm_ro_disable 2>/dev/null || true
 fi
 
 echo "Cleaning up old desktop shortcuts"
@@ -69,7 +71,7 @@ chown $PRIMARY_USER:$PRIMARY_USER "$DESKTOP_DIR/Enable XG Mobile.desktop"
 chown $PRIMARY_USER:$PRIMARY_USER "$DESKTOP_DIR/Eject XG Mobile.desktop"
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
-  steamos-readonly enable 2>/dev/null || true
+  xgm_ro_enable 2>/dev/null || true
 fi
 
 echo "Desktop shortcuts created successfully."

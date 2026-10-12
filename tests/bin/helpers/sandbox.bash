@@ -72,9 +72,8 @@ make_root() {
     "$ROOT/etc/systemd/system" "$ROOT/etc/modprobe.d" "$ROOT/etc/sudoers.d" \
     "$ROOT/usr/share/vulkan/icd.d" "$ROOT/usr/share/vulkan/implicit_layer.d" "$ROOT/usr/share/vulkan/explicit_layer.d" \
     "$ROOT/usr/share/glvnd/egl_vendor.d" "$ROOT/usr/share/X11/xorg.conf.d" \
-    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/home/xgmtest" "$ROOT/home/deck"
+    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest"
   # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host.
-  # home/deck only exists for the few paths the scripts hardcode to /home/deck.
   : > "$SHIM_LOG"
 
   local tool path
@@ -95,6 +94,9 @@ make_root() {
   ln -s "$XGM_REPO/bin/egpu-enable" "$ROOT/usr/local/bin/egpu-enable"
   touch "$ROOT/etc/systemd/system/nvidia-suspend.service"
 
+  # steamos-readonly is on PATH by default; no_steamos_readonly removes it (CachyOS, Bazzite).
+  ln -s "$XGM_OPTIONAL_SHIMS/steamos-readonly" "$OPTBIN/steamos-readonly"
+
   set_os steamos
   set_product "RC71L"
   set_connected 1
@@ -112,6 +114,27 @@ set_os() {
     bazzite-nvidia) printf '%s\n' 'NAME="Bazzite"' 'ID=bazzite' 'ID_LIKE="fedora"' 'VARIANT_ID=bazzite-deck-nvidia' ;;
     *) fail "set_os: unknown OS '$1'" ;;
   esac > "$ROOT/etc/os-release"
+  case "$1" in
+    cachyos) set_dm plasmalogin ;;
+    *)       set_dm sddm ;;
+  esac
+}
+
+# The display-manager.service alias: set_dm <name> [dangling]. <name> is sddm | plasmalogin | gdm
+# | ... (".service" is appended unless the name already has a suffix, e.g. bogus.target), or none
+# for no alias. The target unit file is created, or removed if "dangling" is given. set_os picks the OS
+# default: plasmalogin on cachyos, sddm otherwise.
+set_dm() {
+  local alias="$ROOT/etc/systemd/system/display-manager.service" unit="$1"
+  rm -f "$alias"
+  [ "$1" = "none" ] && return 0
+  [[ "$unit" == *.* ]] || unit="$unit.service"
+  if [ "${2:-}" = "dangling" ]; then
+    rm -f "$ROOT/usr/lib/systemd/system/$unit"
+  else
+    touch "$ROOT/usr/lib/systemd/system/$unit"
+  fi
+  ln -s "$ROOT/usr/lib/systemd/system/$unit" "$alias"
 }
 
 set_product() { echo "$1" > "$ROOT/sys/class/dmi/id/product_name"; }
@@ -132,8 +155,8 @@ nvidia_configs() {
       echo '{"layer": {"name": "VK_LAYER_NV_optimus"}}' > "$DATA_DIR/configs_backup/nvidia_layers.json"
       ;;
     old)
-      mkdir -p "$ROOT/home/deck/xgmobile_configs_backup"
-      echo '{}' > "$ROOT/home/deck/xgmobile_configs_backup/nvidia_icd.json"
+      mkdir -p "$ROOT/home/xgmtest/xgmobile_configs_backup"
+      echo '{}' > "$ROOT/home/xgmtest/xgmobile_configs_backup/nvidia_icd.json"
       ;;
     missing) ;;
     *) fail "nvidia_configs: unknown state '$1'" ;;
@@ -165,11 +188,14 @@ egpu_present() {
 
 supergfxd_active() { touch "$SHIM_STATE/active/supergfxd.service"; }
 
+# Takes steamos-readonly off PATH, as on CachyOS and Bazzite.
+no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
+
 # Puts the supergfxctl shim on PATH; without this, `command -v supergfxctl` fails.
 enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergfxctl"; }
 
 # run_script <bin name> [args...]
-# Runs bin/<name> in a clean environment on the sandbox PATH. Sets bats' $status/$output, and
+# Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR.
 run_script() {
   local name="$1"
@@ -183,9 +209,30 @@ run_script() {
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \
     SHIM_STATE="$SHIM_STATE" \
+    SHIM_SANDBOX="$BATS_TEST_TMPDIR" \
+    SHIM_REAL_CHMOD="$SYSBIN/chmod" \
     FAKE_SUPERGFX_RC="${FAKE_SUPERGFX_RC:-0}" \
-    "$SYSBIN/bash" "$XGM_REPO/bin/$name" "$@"
+    "$SYSBIN/bash" "${XGM_BIN_DIR:-$XGM_REPO/bin}/$name" "$@"
   LOG="$(find "$LOG_DIR" -type f -name '*.log' -exec cat {} + 2>/dev/null)"
+
+  # egpu-enable's self-repair block chmods the plugin's own bin/ files (the repo, not $ROOT). The
+  # chmod shim refuses that; these make sure a test can't reach it without noticing.
+  if [ -e "$SHIM_STATE/chmod_refused" ]; then
+    fail "$(printf 'chmod outside the test sandbox was refused:\n%s' "$(cat "$SHIM_STATE/chmod_refused")")"
+  fi
+  if [[ "$LOG$output" == *"Initiating self-repair"* ]] && [ "${ALLOW_SELF_REPAIR:-0}" != "1" ]; then
+    fail "$name reached the self-repair block, which touches the real plugin dir. Set ALLOW_SELF_REPAIR=1 only if the test needs it and nothing outside the sandbox is modified."
+  fi
+}
+
+# run_without_helper <bin name> [args...]: runs a copy of bin/<name> from a temp bin dir that has
+# no xgm-common.sh. The real bin/xgm-common.sh is never touched.
+run_without_helper() {
+  local dir="$BATS_TEST_TMPDIR/bin-nohelper"
+  mkdir -p "$dir"
+  cp "$XGM_REPO/bin/$1" "$dir/$1"
+  [ ! -e "$dir/xgm-common.sh" ] || fail "run_without_helper: $dir/xgm-common.sh exists"
+  XGM_BIN_DIR="$dir" run_script "$@"
 }
 
 # run_plugin_script <bin name> <vendor>: the argument order main.py uses.

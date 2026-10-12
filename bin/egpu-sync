@@ -2,6 +2,8 @@
 VENDOR=$1
 OS_TYPE=$2
 ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 [ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
 
@@ -14,7 +16,7 @@ if [ "$ACTIVE" -eq 0 ]; then
     systemctl disable xgmobile-boot-sync.service 2>/dev/null
     
     # Optionally: Clean up the kwin env file here just to be safe
-    rm -f $ROOT/home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh
+    rm -f "$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
     
     exit 0
 fi
@@ -47,9 +49,9 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   echo "Updating environment variables with fresh boot nodes: $EGPU_CARD (NVIDIA) : $IGPU_CARD (AMD)"
 
   # 1. Update the System-Wide Environment
-  steamos-readonly disable 2>/dev/null || true
+  xgm_ro_disable 2>/dev/null || true
   sed -i 's|WLR_DRM_DEVICES=.*|WLR_DRM_DEVICES='$EGPU_CARD':'$IGPU_CARD'|' $ROOT/etc/environment
-  steamos-readonly enable 2>/dev/null || true
+  xgm_ro_enable 2>/dev/null || true
 
   # 2. Update the Isolated Plasma Environment
   PLASMA_ENV_DIR="$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env"
