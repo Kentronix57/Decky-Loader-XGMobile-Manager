@@ -44,7 +44,7 @@ export const QuickAccessContent = () => {
   const [osType, setOsType] = useState("steamos");
   const [powerProfile, setPowerProfile] = useState("Unknown");
   const [statusError, setStatusError] = useState("");
-  const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && (osType.includes('bazzite') || osType === 'cachyos');
+  const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
 
   // 1. Initial Load: Fetch Vendor Setting once
   useEffect(() => {
