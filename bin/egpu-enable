@@ -96,6 +96,19 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
     xgm_ro_enable
     echo "Self-repair complete."
   fi
+
+  # The boot safety net (egpu-sync) cleans up after a power-off without Eject, so it must be
+  # installed and enabled whenever the eGPU environment gets injected.
+  SYNC_UNIT="xgmobile-boot-sync.service"
+  if [ "$(cat "$REPO_ROOT/assets/services/$SYNC_UNIT" 2>/dev/null)" != "$(cat $ROOT/etc/systemd/system/$SYNC_UNIT 2>/dev/null)" ] \
+    || ! systemctl is-enabled --quiet "$SYNC_UNIT"; then
+    echo "Installing and enabling the boot safety net ($SYNC_UNIT)..."
+    xgm_ro_disable
+    cp "$REPO_ROOT/assets/services/$SYNC_UNIT" $ROOT/etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable "$SYNC_UNIT"
+    xgm_ro_enable
+  fi
 fi
 
 if [ -L $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
@@ -158,6 +171,15 @@ if [ -z "$EGPU_CARD" ]; then
   exit 5
 fi
 echo "Success! eGPU dynamically detected as: $EGPU_CARD"
+# Card numbers change between boots; the PCI address of the XG Mobile slot doesn't. Eject and the
+# boot safety net find the eGPU by this address.
+EGPU_PCI_ADDR=$(basename "$(readlink -f "$ROOT/sys/class/drm/$(basename "$EGPU_CARD")/device")")
+if [[ "$EGPU_PCI_ADDR" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]]; then
+  echo "$EGPU_PCI_ADDR" > "$DATA_DIR/egpu_pci_address"
+  echo "eGPU PCI address: $EGPU_PCI_ADDR"
+else
+  echo "WARNING: Could not read the eGPU's PCI address."
+fi
 # Permissions (The ACL Hero)
 #echo "Setting user permissions for eGPU..."
 echo "Setting permissions for user: $PRIMARY_USER"

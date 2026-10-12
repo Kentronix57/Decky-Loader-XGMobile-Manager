@@ -406,3 +406,93 @@ check_dm_fallback() {
   assert_success
   refute_called "systemctl disable supergfxd.service"
 }
+
+# The boot safety net is installed and enabled on every enable, not only during self-repair.
+SYNC_UNIT=xgmobile-boot-sync.service
+
+assert_sync_service_installed() {
+  cmp "$XGM_REPO/assets/services/$SYNC_UNIT" "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  assert_called "systemctl enable $SYNC_UNIT"
+  assert_called_before "systemctl daemon-reload" "systemctl enable $SYNC_UNIT"
+  assert [ -e "$SHIM_STATE/enabled/$SYNC_UNIT" ]
+}
+
+sync_service_missing() {
+  nvidia_ready "$1"
+  [ "$1" = "cachyos" ] && no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  [[ "$LOG" != *"Initiating self-repair"* ]]
+  [[ "$LOG" == *"Installing and enabling the boot safety net"* ]]
+  assert_sync_service_installed
+}
+
+@test "steamos: boot service missing (no self-repair needed): copied, daemon-reload, enabled" {
+  sync_service_missing steamos
+  assert_called_before "steamos-readonly disable" "systemctl enable $SYNC_UNIT"
+}
+
+@test "cachyos: boot service missing (no self-repair needed): copied, daemon-reload, enabled" {
+  sync_service_missing cachyos
+}
+
+@test "boot service installed but disabled (an older eject disabled it): enabled again" {
+  egpu_appears amd
+  sync_service_installed
+  rm -f "$SHIM_STATE/enabled/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+}
+
+@test "boot service unit outdated: replaced and re-enabled" {
+  egpu_appears amd
+  sync_service_installed
+  printf '%s\n' '[Service]' 'ExecStart=/usr/local/bin/egpu-sync nvidia steamos' > "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+}
+
+@test "boot service up to date and enabled: left alone" {
+  egpu_appears amd
+  sync_service_installed
+  run_plugin_script egpu-enable amd
+  assert_success
+  refute_called "systemctl enable $SYNC_UNIT"
+  refute_called "steamos-readonly"
+}
+
+@test "bazzite: boot service not installed (no environment injection there)" {
+  set_os bazzite-nvidia
+  egpu_appears nvidia
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  refute_called "systemctl enable $SYNC_UNIT"
+  assert [ ! -e "$ROOT/etc/systemd/system/$SYNC_UNIT" ]
+}
+
+@test "the eGPU's PCI address is recorded for eject and the boot safety net" {
+  nvidia_ready steamos
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+  [[ "$LOG" == *"eGPU PCI address: 0000:01:00.0"* ]]
+}
+
+@test "PCI address recorded whatever the card number (eGPU as card0, iGPU as card1)" {
+  gpu_numbering card1 renderD128 card0 renderD129
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  [[ "$LOG" == *"eGPU dynamically detected as: $ROOT/dev/dri/card0"* ]]
+  assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+}
+
+@test "bazzite: PCI address recorded too" {
+  set_os bazzite-nvidia
+  egpu_appears nvidia
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+}

@@ -103,8 +103,9 @@ symmetry_amd() {
 
 @test "symmetry: enable then eject, steamos/nvidia" {
   symmetry_nvidia steamos
-  assert_equal "$(calls_matching 'steamos-readonly disable' | wc -l)" 2
-  assert_equal "$(calls_matching 'steamos-readonly enable' | wc -l)" 2
+  # Enable: boot service install + re-fang. Eject: de-fang.
+  assert_equal "$(calls_matching 'steamos-readonly disable' | wc -l)" 3
+  assert_equal "$(calls_matching 'steamos-readonly enable' | wc -l)" 3
 }
 
 @test "symmetry: enable then eject, cachyos/nvidia" {

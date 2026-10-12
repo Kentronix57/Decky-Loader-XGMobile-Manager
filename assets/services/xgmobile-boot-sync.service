@@ -1,5 +1,7 @@
 [Unit]
 Description=XG Mobile DRM Node Sync
+# Runs on every boot, before any login reads /etc/environment: it removes the eGPU environment
+# when the XG Mobile isn't active (powered off without Eject), and refreshes the DRM nodes when it is.
 Before=display-manager.service
 After=systemd-modules-load.service
 
