@@ -145,6 +145,8 @@ SCRIPT_ERROR_CATALOG = {
     9: _MISSING_HELPER,
   },
   "egpu-eject": {
+    7: ("Eject was cancelled because the GPU is still in use.",
+        "Close running games and apps, then press Eject again. If it keeps happening, reboot with the XG Mobile connected, then eject. Share the Eject Log on GitHub."),
     9: _MISSING_HELPER,
   },
   "install-nvidia.sh": {

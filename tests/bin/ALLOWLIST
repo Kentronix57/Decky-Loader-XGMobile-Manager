@@ -16,8 +16,6 @@ bin/uninstall.sh @until mkdir -p "$DATA_DIR/configs"
 # Literal values (environment values, log text) that look like paths but aren't file accesses.
 bin/egpu-enable @allow VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json
 bin/egpu-enable @allow failed to appear in /dev/dri/
-bin/egpu-eject @allow Sanitizing /etc/environment
-bin/egpu-eject @allow did not seem to drop from /dev/dri/
 bin/egpu-sync @allow ="/dev/dri/$(basename $card)"
 bin/egpu-enable @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
 bin/egpu-eject @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
