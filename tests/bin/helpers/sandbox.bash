@@ -179,12 +179,23 @@ set_lspci() { echo "$1" > "$SHIM_STATE/lspci"; }
 # nvidia | amdgpu | none
 set_lsmod() { echo "$1" > "$SHIM_STATE/lsmod"; }
 
-# pacman packages (shims/pacman). pacman_repo <pkg> <version|none>: what `pacman -Si` finds in the
-# sync database. pacman_local <pkg> <version|none>: what `pacman -Q` reports as installed. Once
-# pacman_repo is used, `pacman -Si` only finds packages set this way.
+# pacman packages (shims/pacman). pacman_repo <pkg> none | <record>...: what `pacman -Si` finds in
+# the sync database, one record per argument in repo priority order. A record is <version>
+# (repo "cachyos") or <repo>=<version>. pacman_local <pkg> <version|none>: what `pacman -Q`
+# reports as installed. Once pacman_repo is used, `pacman -Si` only finds packages set this way.
 pacman_repo() {
+  local pkg="$1" rec
+  shift
   mkdir -p "$SHIM_STATE/pacman_repo"
-  if [ "$2" = "none" ]; then rm -f "$SHIM_STATE/pacman_repo/$1"; else echo "$2" > "$SHIM_STATE/pacman_repo/$1"; fi
+  rm -f "$SHIM_STATE/pacman_repo/$pkg"
+  [ "$1" = "none" ] && return 0
+  for rec in "$@"; do
+    if [[ "$rec" == *=* ]]; then
+      echo "${rec%%=*} ${rec#*=}"
+    else
+      echo "cachyos $rec"
+    fi
+  done > "$SHIM_STATE/pacman_repo/$pkg"
 }
 
 pacman_local() {
@@ -223,7 +234,8 @@ no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
 enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergfxctl"; }
 
 # run_script <bin name> [args...]
-# Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH. Sets bats' $status/$output, and
+# Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
+# LANG=C unless $SANDBOX_LANG is set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR.
 run_script() {
   local name="$1"
@@ -232,7 +244,7 @@ run_script() {
   find "$LOG_DIR" -mindepth 1 -delete
   run env -i \
     HOME="$BATS_TEST_TMPDIR/home" \
-    LANG=C \
+    LANG="${SANDBOX_LANG:-C}" \
     PATH="$XGM_SHIMS:$OPTBIN:$SYSBIN" \
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \

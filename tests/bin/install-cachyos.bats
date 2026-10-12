@@ -234,3 +234,56 @@ refute_db_refresh() {
   refute_called "pacman -Sy"
   refute_called "pacman -Syu"
 }
+
+@test "non-English locale: pacman's translated labels don't break the version check" {
+  pacman_repo linux-cachyos-deckify-nvidia-open 7.2.9-2
+  nvidia_module_for "$DECKIFY"
+  SANDBOX_LANG=es_ES.UTF-8 run_install
+  assert_success
+  assert_output --partial "Kernel linux-cachyos-deckify: installed 7.2.9-2, repo 7.2.9-2"
+  install_args >/dev/null
+}
+
+@test "the shim really translates the labels outside the C locale" {
+  pacman_repo linux-cachyos-deckify 7.2.9-2
+  run env PATH="$XGM_SHIMS:$SYSBIN" LANG=es_ES.UTF-8 SHIM_LOG=/dev/null SHIM_STATE="$SHIM_STATE" pacman -Si linux-cachyos-deckify
+  assert_line --regexp "^Versión +: 7\.2\.9-2$"
+  refute_line --partial "Version"
+}
+
+@test "several repo records: the first (highest-priority) one counts" {
+  pacman_repo linux-cachyos-deckify cachyos-znver4=7.2.9-2 cachyos=7.2.3-1
+  pacman_repo linux-cachyos-deckify-nvidia-open cachyos-znver4=7.2.9-2 cachyos=7.2.3-1
+  nvidia_module_for "$DECKIFY"
+  run_install
+  assert_success
+  assert_output --partial "installed 7.2.9-2, repo 7.2.9-2"
+}
+
+@test "several repo records, installed matches only the second: exit 3" {
+  pacman_local linux-cachyos-deckify 7.2.3-1
+  pacman_repo linux-cachyos-deckify cachyos-znver4=7.2.9-2 cachyos=7.2.3-1
+  pacman_repo linux-cachyos-deckify-nvidia-open cachyos-znver4=7.2.9-2 cachyos=7.2.3-1
+  run_install
+  assert_failure 3
+  assert_output --partial "linux-cachyos-deckify 7.2.3-1 is installed, the repo has 7.2.9-2"
+  refute_called "pacman -S"
+}
+
+@test "epoch in the version, installed and repo identical: proceeds" {
+  installed_kernel "$DECKIFY" linux-cachyos-deckify 1:615.78.08-1
+  pacman_repo linux-cachyos-deckify-nvidia-open 1:615.78.08-1
+  nvidia_module_for "$DECKIFY"
+  run_install
+  assert_success
+  assert_output --partial "installed 1:615.78.08-1, repo 1:615.78.08-1"
+}
+
+@test "only the pkgrel differs: exit 3" {
+  pacman_repo linux-cachyos-deckify 7.2.9-3
+  pacman_repo linux-cachyos-deckify-nvidia-open 7.2.9-3
+  run_install
+  assert_failure 3
+  assert_output --partial "linux-cachyos-deckify 7.2.9-2 is installed, the repo has 7.2.9-3"
+  refute_called "pacman -S"
+}

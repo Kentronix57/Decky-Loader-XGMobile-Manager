@@ -12,6 +12,8 @@
 LOG_DIR=$1
 DATA_DIR=$2
 ROOT="${XGM_ROOT:-}"
+# pacman translates its field labels ("Versión"), and Decky inherits LANG from locale.conf.
+export LC_ALL=C
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 
