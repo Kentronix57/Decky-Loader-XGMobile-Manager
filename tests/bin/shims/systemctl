@@ -1,9 +1,29 @@
 #!/usr/bin/env bash
 # Test shim: records the call. `is-active <unit>` succeeds only if $SHIM_STATE/active/<unit> exists.
+# `enable`/`disable` (system manager) add/remove $SHIM_STATE/enabled/<unit>, and `is-enabled <unit>`
+# succeeds only if it exists.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-if [ "$1" = "is-active" ]; then
-  unit="${*: -1}"
-  [ -e "$SHIM_STATE/active/$unit" ] && exit 0
-  exit 3
-fi
+user=0 verb="" units=()
+for arg in "$@"; do
+  case "$arg" in
+    --user) user=1 ;;
+    -*) ;;
+    *) if [ -z "$verb" ]; then verb="$arg"; else units+=("$arg"); fi ;;
+  esac
+done
+case "$verb" in
+  is-active)
+    [ -e "$SHIM_STATE/active/${units[-1]}" ] && exit 0
+    exit 3 ;;
+  is-enabled)
+    [ "$user" -eq 0 ] && [ -e "$SHIM_STATE/enabled/${units[-1]}" ] && exit 0
+    exit 1 ;;
+  enable|disable)
+    if [ "$user" -eq 0 ]; then
+      mkdir -p "$SHIM_STATE/enabled"
+      for unit in "${units[@]}"; do
+        if [ "$verb" = "enable" ]; then touch "$SHIM_STATE/enabled/$unit"; else rm -f "$SHIM_STATE/enabled/$unit"; fi
+      done
+    fi ;;
+esac
 exit 0

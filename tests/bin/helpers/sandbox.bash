@@ -15,6 +15,8 @@ load "$XGM_REPO/node_modules/bats-support/load"
 load "$XGM_REPO/node_modules/bats-assert/load"
 # shellcheck source=../../audit/audit.bash
 source "$XGM_REPO/tests/audit/audit.bash"
+# shellcheck source=fake_gpu.bash
+source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
 SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf)
@@ -68,12 +70,14 @@ make_root() {
 
   mkdir -p "$LOG_DIR" "$DATA_DIR" "$SHIM_STATE/active" "$SYSBIN" "$OPTBIN" "$BATS_TEST_TMPDIR/home" \
     "$ROOT/sys/devices/platform/asus-nb-wmi" "$ROOT/sys/bus/pci" "$ROOT/sys/class/dmi/id" \
-    "$ROOT/sys/class/drm/card0/device" "$ROOT/dev/dri" \
+    "$ROOT/sys/class/drm" "$ROOT/dev/dri" \
     "$ROOT/etc/systemd/system" "$ROOT/etc/modprobe.d" "$ROOT/etc/sudoers.d" \
     "$ROOT/usr/share/vulkan/icd.d" "$ROOT/usr/share/vulkan/implicit_layer.d" "$ROOT/usr/share/vulkan/explicit_layer.d" \
     "$ROOT/usr/share/glvnd/egl_vendor.d" "$ROOT/usr/share/X11/xorg.conf.d" \
-    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest"
-  # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host.
+    "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest" \
+    "$ROOT/sys/module" "$ROOT/run/user/64999"
+  # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host. Its uid
+  # (shims/id) is 64999, and it has a runtime dir, as when a session is running.
   : > "$SHIM_LOG"
 
   local tool path
@@ -82,9 +86,10 @@ make_root() {
     ln -s "$path" "$SYSBIN/$tool"
   done
 
-  # The iGPU is always present as card0 (AMD vendor ID).
-  touch "$ROOT/dev/dri/card0" "$ROOT/dev/dri/renderD128"
-  echo "0x1002" > "$ROOT/sys/class/drm/card0/device/vendor"
+  # The iGPU is always present: card0/renderD128 unless gpu_numbering says otherwise.
+  gpu_numbering card0 renderD128 card1 renderD129
+  printf '%s\n' 'root:x:0:0::/root:/bin/bash' 'nobody:x:65534:65534::/:/usr/bin/nologin' \
+    'nohome:x:1000:1000::/home/nohome:/bin/bash' 'xgmtest:x:64999:64999::/home/xgmtest:/bin/bash' > "$ROOT/etc/passwd"
   echo 0 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
   echo 0 > "$ROOT/sys/devices/platform/asus-nb-wmi/throttle_thermal_policy"
   : > "$ROOT/sys/bus/pci/rescan"
@@ -170,7 +175,19 @@ egpu_appears() {
   return 0
 }
 
-# Whether card1 disappears after egpu_enable is set to 0: yes | no
+# gpu_numbering <iGPU card> <iGPU render> <eGPU card> <eGPU render>: the DRM node numbers, which
+# aren't stable across boots on real hardware (the XG Mobile shows up as card0 or card1). Rebuilds
+# the iGPU (always present); the eGPU gets its numbers when it appears (shims/sleep).
+gpu_numbering() {
+  fake_gpu_remove "$FAKE_IGPU_PCI_ADDR"
+  fake_gpu_add "$FAKE_IGPU_PCI_ADDR" 0x1002 1 "$1" "$2"
+  echo "$3 $4" > "$SHIM_STATE/egpu_nodes"
+}
+
+# record_egpu_pci [address]: the eGPU PCI address egpu-enable records (default: the fake eGPU's).
+record_egpu_pci() { echo "${1:-$FAKE_EGPU_PCI_ADDR}" > "$DATA_DIR/egpu_pci_address"; }
+
+# Whether the eGPU disappears after egpu_enable is set to 0: yes | no
 egpu_drops() { echo "$1" > "$SHIM_STATE/egpu_drops"; }
 
 # nvidia | empty
@@ -223,6 +240,26 @@ egpu_present() {
   egpu_appears "$1"
   echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
   env PATH="$SYSBIN" XGM_ROOT="$ROOT" SHIM_LOG=/dev/null SHIM_STATE="$SHIM_STATE" "$SYSBIN/bash" "$XGM_SHIMS/sleep"
+}
+
+# gpu_holders <n|ignore-term|unkillable>: the next n fuser checks find the eGPU nodes in use
+# (any fuser -k frees them); or they're in use until fuser -k -KILL (ignore-term); or they stay in
+# use whatever happens. See shims/fuser.
+gpu_holders() { echo "$1" > "$SHIM_STATE/gpu_holders"; }
+
+# module_stuck <module>: `modprobe -r <module>` fails as "in use" and its sys/module dir stays.
+module_stuck() { echo "$1" >> "$SHIM_STATE/module_stuck"; }
+
+# Boot without a session: Steam isn't running (shims/ps prints nothing) and the primary user has
+# no runtime dir.
+steam_not_running() { touch "$SHIM_STATE/steam_not_running"; }
+no_user_session() { rm -rf "$ROOT/run/user/64999"; }
+
+# The boot service as egpu-enable installs it: unit file copied and enabled.
+sync_service_installed() {
+  cp "$XGM_REPO/assets/services/xgmobile-boot-sync.service" "$ROOT/etc/systemd/system/"
+  mkdir -p "$SHIM_STATE/enabled"
+  touch "$SHIM_STATE/enabled/xgmobile-boot-sync.service"
 }
 
 supergfxd_active() { touch "$SHIM_STATE/active/supergfxd.service"; }
