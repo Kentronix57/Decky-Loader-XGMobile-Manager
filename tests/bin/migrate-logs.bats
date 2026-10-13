@@ -186,6 +186,17 @@ EOF
   assert [ ! -e "$LOG_DIR/dkms/nvidia-open" ]
 }
 
+@test "failed DKMS builds: a symlinked nvidia* dir isn't moved" {
+  mkdir -p "$BATS_TEST_TMPDIR/elsewhere/nvidia/1/build"
+  echo "make failed" > "$BATS_TEST_TMPDIR/elsewhere/nvidia/1/build/make.log"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere/nvidia" "$LOGS_ROOT/nvidia"
+  run_migrate
+  assert_success
+  assert_equal "$(readlink "$LOGS_ROOT/nvidia")" "$BATS_TEST_TMPDIR/elsewhere/nvidia"
+  assert [ -f "$BATS_TEST_TMPDIR/elsewhere/nvidia/1/build/make.log" ]
+  assert [ ! -e "$LOG_DIR/dkms" ]
+}
+
 @test "failed DKMS builds: an existing dkms/<name> isn't overwritten" {
   mkdir -p "$LOGS_ROOT/nvidia/1/build" "$LOG_DIR/dkms/nvidia"
   echo "old build" > "$LOGS_ROOT/nvidia/1/build/make.log"
