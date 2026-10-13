@@ -8,8 +8,11 @@
 #
 #   - LOGS_ROOT/xgmobile_manager_<name>.log and the legacy xgmobile_<name>.log -> LOG_DIR/<name>.log.
 #     If that exists, LOG_DIR/archive/<name>.log, then .<mtime>[.N]. Nothing is overwritten.
-#   - The old *_latest.log links are removed (no other link), and LOG_DIR/{enable,eject}_latest.log
-#     recreated.
+#   - LOGS_ROOT/{enable,eject}_{nvidia,amd}.log (exactly these: other plugins log there too), which
+#     the scripts write when a stale shortcut passes the old log dir -> LOG_DIR, the same way.
+#   - The old *_latest.log links are removed (no other link; a stale shortcut's
+#     LOGS_ROOT/{enable,eject}_latest.log only if it points at one of the files above), and
+#     LOG_DIR/{enable,eject}_latest.log recreated.
 #   - Failed DKMS builds (LOGS_ROOT/nvidia*/*/build/make.log) -> LOG_DIR/dkms/.
 #   - "Enable XG Mobile" desktop shortcuts: the old log dir argument -> LOG_DIR.
 # Anything else (Decky's logs, other plugins' logs) is left alone. What changed goes to
@@ -42,6 +45,13 @@ free_path() {
   echo "$path.$stamp.$n"
 }
 
+# migrate_file <src> <new name>: to LOG_DIR/<new name>, or archive/ if that's taken.
+migrate_file() {
+  local dest="$LOG_DIR/$2"
+  exists "$dest" && dest=$(free_path "$LOG_DIR/archive/$2" "$1")
+  move "$1" "$dest"
+}
+
 # move <src> <dest>: mkdir + mv, recorded in the summary.
 move() {
   if mkdir -p "$(dirname "$2")" && mv -T "$1" "$2"; then
@@ -69,9 +79,20 @@ for old in "$LOGS_ROOT"/xgmobile_*.log; do
     xgmobile_?*.log) name="${name#xgmobile_}" ;;
     *) continue ;;
   esac
-  dest="$LOG_DIR/$name"
-  exists "$dest" && dest=$(free_path "$LOG_DIR/archive/$name" "$old")
-  move "$old" "$dest"
+  migrate_file "$old" "$name"
+done
+
+# The unprefixed logs a stale shortcut made the scripts write to LOGS_ROOT, and their links.
+for kind in enable eject; do
+  for vendor in nvidia amd; do
+    old="$LOGS_ROOT/${kind}_${vendor}.log"
+    [ -f "$old" ] && [ ! -L "$old" ] && migrate_file "$old" "${kind}_${vendor}.log"
+  done
+  old="$LOGS_ROOT/${kind}_latest.log"
+  [ -L "$old" ] || continue
+  case "$(readlink "$old")" in
+    "$LOGS_ROOT/${kind}_nvidia.log"|"$LOGS_ROOT/${kind}_amd.log") OLD_LINKS+=("$old") ;;
+  esac
 done
 
 # 2. The old *_latest.log links: removed, and the new one recreated if it doesn't exist yet,

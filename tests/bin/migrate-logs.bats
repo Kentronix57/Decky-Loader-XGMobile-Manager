@@ -140,6 +140,37 @@ EOF
   assert [ ! -L "$LOGS_ROOT/xgmobile_manager_enable_latest.log" ]
 }
 
+@test "stale shortcut: the unprefixed enable/eject logs and their links in <homebrew>/logs move" {
+  echo "stale enable" > "$LOGS_ROOT/enable_nvidia.log"
+  ln -s "$LOGS_ROOT/enable_nvidia.log" "$LOGS_ROOT/enable_latest.log"
+  echo "stale eject" > "$LOGS_ROOT/eject_amd.log"
+  ln -s "$LOGS_ROOT/eject_amd.log" "$LOGS_ROOT/eject_latest.log"
+  echo "newer amd" > "$LOG_DIR/eject_amd.log"
+  run_migrate
+  assert_success
+  assert_equal "$(cat "$LOG_DIR/enable_nvidia.log")" "stale enable"
+  assert_equal "$(readlink "$LOG_DIR/enable_latest.log")" "$LOG_DIR/enable_nvidia.log"
+  assert_equal "$(cat "$LOG_DIR/eject_amd.log")" "newer amd"
+  assert_equal "$(cat "$LOG_DIR/archive/eject_amd.log")" "stale eject"
+  assert_equal "$(readlink "$LOG_DIR/eject_latest.log")" "$LOG_DIR/eject_amd.log"
+  assert_equal "$(ls -A "$LOGS_ROOT")" "xgmobile-manager"
+}
+
+@test "stale shortcut: only those exact names; other plugins' files and links stay" {
+  echo "foo" > "$LOGS_ROOT/foo.log"
+  echo "other" > "$LOGS_ROOT/enable_other.log"
+  echo "theirs" > "$LOGS_ROOT/install.log"
+  # Another plugin's enable_latest.log link, and an eject_latest.log that isn't a link.
+  ln -s "$LOGS_ROOT/enable_other.log" "$LOGS_ROOT/enable_latest.log"
+  echo "not a link" > "$LOGS_ROOT/eject_latest.log"
+  local before
+  before=$(snapshot)
+  run_migrate
+  assert_success
+  assert_output ""
+  assert_equal "$(snapshot)" "$before"
+}
+
 @test "failed DKMS builds: moved to dkms/ only when they hold build/make.log" {
   mkdir -p "$LOGS_ROOT/nvidia/580.82.09/build" "$LOGS_ROOT/nvidia-open/580.82.09" "$LOGS_ROOT/nvidiaish"
   echo "make failed" > "$LOGS_ROOT/nvidia/580.82.09/build/make.log"
