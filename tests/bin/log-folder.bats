@@ -83,3 +83,13 @@ fake_install() {
   assert_equal "$(find "$BATS_TEST_TMPDIR/hb/logs" -mindepth 1 -printf '%P\n' | sort)" \
     "$(printf '%s\n' xgmobile-manager xgmobile-manager/boot_sync.log)"
 }
+
+# The nuke scripts are run by hand and never executed by the tests; check their log names.
+@test "mega-nuke.sh logs to nuke.log, the dry run to nuke_dry.log" {
+  run grep -F 'tee "$LOG_DIR/nuke.log"' "$XGM_REPO/bin/mega-nuke.sh"
+  assert_success
+  run grep -F 'tee "$LOG_DIR/nuke_dry.log"' "$XGM_REPO/bin/mega-nuke-dry.sh"
+  assert_success
+  run grep -F 'nuke.log"' "$XGM_REPO/bin/mega-nuke-dry.sh"
+  assert_failure
+}
