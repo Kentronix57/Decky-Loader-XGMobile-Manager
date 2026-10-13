@@ -51,7 +51,7 @@ def test_main_runs_migrate_logs_before_the_watchers(loading):
   loading.stub("migrate-logs", f'echo "migrate-logs $*" >> "{loading.events}"')
   events = loading.load()
   homebrew = loading.tmp / "homebrew"
-  assert events[0] == f"migrate-logs {homebrew / 'logs'} {homebrew / 'logs' / 'xgmobile-manager'}"
+  assert events[0] == f"migrate-logs {homebrew / 'logs'} {homebrew / 'logs' / 'xgmobile-manager' / 'activity'}"
   assert sorted(events[1:]) == ["watcher eject", "watcher enable"]
   assert loading.mod.LEGACY_LOGS_ROOT == str(homebrew / "logs")
   assert crash_log(loading) == ""
@@ -96,5 +96,6 @@ def test_real_script_migrates_on_load(loading):
   assert os.readlink(loading.mod.ENABLE_LOG) == os.path.join(log_dir, "enable_nvidia.log")
   assert loading.run(loading.plugin.get_latest_logs("enable")) == "old enable\n"
   assert sorted(os.listdir(legacy)) == ["xgmobile-manager"]
+  assert sorted(os.listdir(legacy / "xgmobile-manager")) == ["activity"]
   assert os.path.exists(os.path.join(log_dir, "migrate.log"))
   assert crash_log(loading) == ""

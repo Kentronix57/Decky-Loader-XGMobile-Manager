@@ -127,16 +127,16 @@ def test_gpu_status_exception_still_returns_dict(xgm, lspci):
 
 # --- log folder ---
 
-def test_log_dir_is_deckys_plugin_log_dir(xgm):
+def test_log_dir_is_activity_in_deckys_plugin_log_dir(xgm):
   # load_main points the fake decky.DECKY_PLUGIN_LOG_DIR at the copy's homebrew, as Decky does.
-  expected = xgm.tmp / "homebrew" / "logs" / "xgmobile-manager"
+  expected = xgm.tmp / "homebrew" / "logs" / "xgmobile-manager" / "activity"
   assert xgm.mod.LOG_DIR == str(expected)
   assert expected.is_dir()
 
 
 def test_log_dir_fallback_without_decky_value(tmp_path):
   mod = load_main(tmp_path / "homebrew" / "plugins" / "xgmobile-manager", decky_log_dir=None)
-  expected = (tmp_path / "homebrew" / "logs" / "xgmobile-manager").resolve()
+  expected = (tmp_path / "homebrew" / "logs" / "xgmobile-manager" / "activity").resolve()
   assert Path(mod.LOG_DIR).resolve() == expected
   assert expected.is_dir()
 

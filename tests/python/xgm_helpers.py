@@ -17,7 +17,7 @@ if str(FAKES) not in sys.path:
 import decky  # noqa: E402  (the fake, from FAKES)
 
 _counter = itertools.count()
-# The fake's own value (/home/deck/...), restored after every load so nothing imports it by accident.
+# The fake's own value (a path that can't exist), restored after every load.
 _FAKE_DECKY_LOG_DIR = decky.DECKY_PLUGIN_LOG_DIR
 
 # Representative /etc/os-release contents per OS.

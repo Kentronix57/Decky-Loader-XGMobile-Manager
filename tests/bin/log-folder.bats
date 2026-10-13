@@ -1,7 +1,7 @@
 #!/usr/bin/env bats
 # The plugin log folder: every script writes <LOG_DIR>/<name>.log, without the old
-# xgmobile_manager_ prefix, and xgm_log_dir finds the same folder Decky uses
-# (<homebrew>/logs/<plugin folder>) for scripts that run without a log dir.
+# xgmobile_manager_ prefix, and xgm_log_dir finds the activity/ subfolder of the one Decky uses
+# (<homebrew>/logs/<plugin folder>/activity) for scripts that run without a log dir.
 
 setup_file() {
   load helpers/sandbox
@@ -62,17 +62,17 @@ fake_install() {
   echo "$dir"
 }
 
-@test "xgm_log_dir: <homebrew>/logs/<plugin folder>, from the plugin's location" {
+@test "xgm_log_dir: <homebrew>/logs/<plugin folder>/activity, from the plugin's location" {
   local dir
   dir=$(fake_install xgmobile-manager xgm-common.sh)
   run bash -c ". '$dir/xgm-common.sh' && xgm_log_dir"
   assert_success
-  assert_output "$BATS_TEST_TMPDIR/hb/logs/xgmobile-manager"
+  assert_output "$BATS_TEST_TMPDIR/hb/logs/xgmobile-manager/activity"
 
   # Decky names the folder after the plugin dir, whatever it is.
   dir=$(fake_install XGMobile-Manager xgm-common.sh)
   run bash -c ". '$dir/xgm-common.sh' && xgm_log_dir"
-  assert_output "$BATS_TEST_TMPDIR/hb/logs/XGMobile-Manager"
+  assert_output "$BATS_TEST_TMPDIR/hb/logs/XGMobile-Manager/activity"
 }
 
 @test "egpu-sync with no arguments: boot_sync.log in the plugin log folder, created if missing" {
@@ -81,7 +81,7 @@ fake_install() {
   XGM_BIN_DIR="$dir" run_script egpu-sync
   assert_success
   assert_equal "$(find "$BATS_TEST_TMPDIR/hb/logs" -mindepth 1 -printf '%P\n' | sort)" \
-    "$(printf '%s\n' xgmobile-manager xgmobile-manager/boot_sync.log)"
+    "$(printf '%s\n' xgmobile-manager xgmobile-manager/activity xgmobile-manager/activity/boot_sync.log)"
 }
 
 # The nuke scripts are run by hand and never executed by the tests; check their log names.

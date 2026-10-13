@@ -15,9 +15,11 @@ Initialized = False
 T = TypeVar("T")
 PLUGIN_DIR = os.path.dirname(os.path.realpath(__file__))
 HOMEBREW_DIR = os.path.abspath(os.path.join(PLUGIN_DIR, "../../"))
-# Decky's per-plugin log folder (<homebrew>/logs/<plugin folder>), which also holds Decky's own
-# timestamped logs for this plugin.
-LOG_DIR = getattr(decky, "DECKY_PLUGIN_LOG_DIR", None) or os.path.join(HOMEBREW_DIR, "logs", os.path.basename(PLUGIN_DIR))
+# The activity/ subfolder of Decky's per-plugin log folder (<homebrew>/logs/<plugin folder>).
+# Decky keeps its own timestamped logs at the top level, and on every plugin load deletes all
+# but the newest 4 *.log files there; subfolders are left alone.
+DECKY_LOG_DIR = getattr(decky, "DECKY_PLUGIN_LOG_DIR", None) or os.path.join(HOMEBREW_DIR, "logs", os.path.basename(PLUGIN_DIR))
+LOG_DIR = os.path.join(DECKY_LOG_DIR, "activity")
 # Where older versions logged (and what their desktop shortcuts pass); bin/migrate-logs moves it.
 LEGACY_LOGS_ROOT = os.path.join(HOMEBREW_DIR, "logs")
 MIGRATE_LOGS_TIMEOUT = 30  # seconds

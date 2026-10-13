@@ -1,10 +1,10 @@
 #!/bin/bash
 # Moves the logs older versions wrote to <homebrew>/logs into the plugin's log folder
-# (<homebrew>/logs/xgmobile-manager), without the old prefixes. main.py runs it on every plugin
+# (<homebrew>/logs/xgmobile-manager/activity), without the old prefixes. main.py runs it on every plugin
 # load; it's idempotent, and changes and prints nothing when there's nothing to migrate.
 #   migrate-logs [LOGS_ROOT [LOG_DIR]]
 # LOGS_ROOT: where the old logs are, and the log dir old desktop shortcuts pass (default
-# <homebrew>/logs). LOG_DIR: the plugin's log folder (default LOGS_ROOT/<plugin folder>).
+# <homebrew>/logs). LOG_DIR: the plugin's log folder (default LOGS_ROOT/<plugin folder>/activity).
 #
 #   - LOGS_ROOT/xgmobile_manager_<name>.log and the legacy xgmobile_<name>.log -> LOG_DIR/<name>.log.
 #     If that exists, LOG_DIR/archive/<name>.log, then .<mtime>[.N]. Nothing is overwritten.
@@ -17,9 +17,10 @@ ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 DEFAULT_LOG_DIR=$(xgm_log_dir)
-LOGS_ROOT="${1:-$(dirname "$DEFAULT_LOG_DIR")}"
+DEFAULT_LOGS_ROOT=$(dirname "$(dirname "$DEFAULT_LOG_DIR")")
+LOGS_ROOT="${1:-$DEFAULT_LOGS_ROOT}"
 LOGS_ROOT="${LOGS_ROOT%/}"
-LOG_DIR="${2:-$LOGS_ROOT/$(basename "$DEFAULT_LOG_DIR")}"
+LOG_DIR="${2:-$LOGS_ROOT/${DEFAULT_LOG_DIR#"$DEFAULT_LOGS_ROOT"/}}"
 LOG_DIR="${LOG_DIR%/}"
 
 CHANGES=()

@@ -10,7 +10,8 @@ setup_file() {
 setup() {
   load helpers/sandbox
   make_root
-  LOGS_ROOT="$(dirname "$LOG_DIR")"
+  PLUGIN_LOGS="$(dirname "$LOG_DIR")"  # Decky's folder for the plugin; LOG_DIR is its activity/
+  LOGS_ROOT="$(dirname "$PLUGIN_LOGS")"
   SHORTCUT="$ROOT/home/xgmtest/Desktop/Enable XG Mobile.desktop"
   # main.py's arguments. LOG_DIR holds seeded files, so run_script mustn't empty it.
   export KEEP_LOG_DIR=1
@@ -187,7 +188,7 @@ EOF
 }
 
 @test "Decky's timestamped logs, other plugins' logs and unrelated files are untouched" {
-  echo "decky" > "$LOG_DIR/2026-10-12 21.04.33.log"
+  echo "decky" > "$PLUGIN_LOGS/2026-10-12 21.04.33.log"
   mkdir -p "$LOGS_ROOT/SimpleDeckyTDP"
   echo "tdp" > "$LOGS_ROOT/SimpleDeckyTDP/2026-10-12 21.04.33.log"
   echo "loader" > "$LOGS_ROOT/loader.log"
@@ -239,7 +240,7 @@ EOF
   assert [ ! -e "$BATS_TEST_TMPDIR/missing" ]
 }
 
-@test "no arguments: <homebrew>/logs into <homebrew>/logs/<plugin folder>, from the plugin's location" {
+@test "no arguments: <homebrew>/logs into <homebrew>/logs/<plugin folder>/activity, from the plugin's location" {
   local hb="$BATS_TEST_TMPDIR/hb" dir
   dir="$hb/plugins/xgmobile-manager/bin"
   mkdir -p "$dir" "$hb/logs"
@@ -247,6 +248,6 @@ EOF
   echo "old" > "$hb/logs/xgmobile_manager_install.log"
   XGM_BIN_DIR="$dir" run_script migrate-logs
   assert_success
-  assert_equal "$(cat "$hb/logs/xgmobile-manager/install.log")" "old"
-  assert [ -f "$hb/logs/xgmobile-manager/migrate.log" ]
+  assert_equal "$(cat "$hb/logs/xgmobile-manager/activity/install.log")" "old"
+  assert [ -f "$hb/logs/xgmobile-manager/activity/migrate.log" ]
 }
