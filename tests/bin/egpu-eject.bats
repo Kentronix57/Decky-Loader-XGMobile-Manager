@@ -264,16 +264,24 @@ assert_fuser_kill_before_unload() {
   [ "$kill" -lt "$unload" ] || fail "fuser -k (line $kill) must come before modprobe -r nvidia_drm (line $unload)"
 }
 
-# Every fuser call got the eGPU's nodes ($1 $2) and none of the iGPU's ($3 $4).
+# assert_fuser_only_egpu_nodes <eGPU card> <eGPU render> <iGPU card> <iGPU render> [<eGPU fb>
+# <iGPU fb>]: every fuser call got the eGPU's nodes and none of the iGPU's (fb1/fb0 by default).
 assert_fuser_only_egpu_nodes() {
-  local line
+  local line efb="${5:-fb1}" ifb="${6:-fb0}"
   [ -n "$(calls_matching 'fuser ')" ] || fail "fuser was never called"
   while IFS= read -r line; do
     line="$line "
     [[ "$line" == *"/dev/dri/$1 "* && "$line" == *"/dev/dri/$2 "* ]] || fail "eGPU nodes $1/$2 missing from: $line"
+    [[ "$line" == *"/dev/$efb "* ]] || fail "eGPU framebuffer $efb missing from: $line"
     [[ "$line" != *"/dev/dri/$3 "* ]] || fail "iGPU node $3 passed to fuser: $line"
     [[ "$line" != *"/dev/dri/$4 "* ]] || fail "iGPU node $4 passed to fuser: $line"
+    [[ "$line" != *"/dev/$ifb "* ]] || fail "iGPU framebuffer $ifb passed to fuser: $line"
   done < <(calls_matching 'fuser ')
+}
+
+# The NVIDIA power services were stopped and are running again.
+assert_nvidia_services_restored() {
+  assert_called_before "systemctl stop nvidia-powerd nvidia-persistenced" "systemctl start nvidia-persistenced nvidia-powerd"
 }
 
 # The eject was cancelled before anything was undone: XG Mobile still on, environment intact,
@@ -286,6 +294,9 @@ assert_cancelled() {
   cmp "$BATS_TEST_TMPDIR/environment.before" "$ROOT/etc/environment"
   refute_called "systemctl unset-environment"
   assert_called_before "systemctl stop $1" "systemctl start $1"
+  # The plugin shows the cancel after the restart from this marker.
+  [[ "$(cat "$DATA_DIR/last_eject_cancelled")" =~ ^[0-9]+$ ]] || fail "cancel marker missing or not a timestamp"
+  [[ "$LOG" == *"--- GPU diagnostics ---"* ]]
 }
 
 @test "release order: DM stopped, wait, SIGTERM, wait, SIGKILL, then the NVIDIA modules unloaded" {
@@ -320,7 +331,7 @@ assert_cancelled() {
   gpu_holders 100
   run_plugin_script egpu-eject nvidia
   assert_success
-  assert_called_before "fuser -k -TERM $ROOT/dev/dri/card1 $ROOT/dev/dri/renderD129 $ROOT/dev/nvidia-modeset $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl" "modprobe -r nvidia_drm"
+  assert_called_before "fuser -k -TERM $ROOT/dev/dri/card1 $ROOT/dev/dri/renderD129 $ROOT/dev/fb1 $ROOT/dev/nvidia-modeset $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl" "modprobe -r nvidia_drm"
   refute_called "fuser -k -KILL"
   assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
 }
@@ -343,19 +354,73 @@ assert_cancelled() {
   [[ "$LOG" == *"Success! eGPU 0000:01:00.0 dropped"* ]]
 }
 
-@test "safety stop: nvidia_drm can't be unloaded, eject cancelled with exit 7" {
+@test "nvidia_drm stays loaded but no process uses the eGPU: WARNING, diagnostics, powered off anyway" {
   set_os cachyos
   no_steamos_readonly
   egpu_present nvidia
+  # As captured on CachyOS: the DRM fbdev client holds nvidia_drm (refcnt 50, no holders).
   module_stuck nvidia_drm
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"WARNING: NVIDIA driver still loaded (in-kernel framebuffer reference); no processes use the eGPU, powering it off as before."* ]]
+  # Diagnostics: /proc/fb, consoles, fb -> device, module params, refcnt, lsmod.
+  [[ "$LOG" == *"1 nvidia-drmdrmfb"* ]]
+  [[ "$LOG" == *"vtcon0: (S) dummy device (bind 1)"* ]]
+  [[ "$LOG" == *"fb1 -> 0000:01:00.0"* ]]
+  [[ "$LOG" == *"fb0 -> 0000:08:00.0"* ]]
+  [[ "$LOG" == *"nvidia_drm modeset=Y fbdev=Y"* ]]
+  [[ "$LOG" == *"nvidia_drm refcnt before the release: 50, now: 50"* ]]
+  [ -n "$(calls_matching lsmod)" ] || fail "lsmod not called for the diagnostics"
+  [[ "$LOG" != *"nvidia_drm is held by modules"* ]]
+  # The modules under nvidia_drm can't go either, so they're left alone.
+  [[ "$LOG" == *"nvidia_drm couldn't be unloaded; leaving the other NVIDIA modules loaded."* ]]
+  refute_called "modprobe -r nvidia_uvm"
+  refute_called "modprobe -r nvidia_modeset"
+  assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
+  assert [ ! -e "$DATA_DIR/last_eject_cancelled" ]
+  [[ "$LOG" == *"Success! eGPU 0000:01:00.0 dropped"* ]]
+}
+
+@test "nvidia_drm held by other modules: logged, powered off anyway" {
+  egpu_present nvidia
+  module_stuck nvidia_drm
+  mkdir -p "$ROOT/sys/module/nvidia_drm/holders/some_module"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"nvidia_drm is held by modules (not processes): some_module"* ]]
+  assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
+}
+
+@test "safety stop: process still holds the eGPU after SIGKILL, cancelled with exit 7" {
+  set_os cachyos
+  no_steamos_readonly
+  egpu_present nvidia
+  gpu_holders unkillable
   echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
   cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
   run_plugin_script egpu-eject nvidia
   assert_cancelled plasmalogin.service
-  [[ "$LOG" == *"nvidia_drm is still loaded"* ]]
-  assert [ -e "$ROOT/sys/module/nvidia_drm" ]
+  assert_called "fuser -k -KILL $ROOT/dev/dri/card1 $ROOT/dev/dri/renderD129 $ROOT/dev/fb1 $ROOT/dev/nvidia-modeset $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl"
+  [[ "$LOG" == *"Processes still using the eGPU:"*"gamescope-wl"* ]]
   assert [ -e "$ROOT/sys/class/drm/card1" ]
   [[ "$LOG" != *"Success!"* ]]
+  assert_nvidia_services_restored
+  refute_called "systemctl enable nvidia-powerd nvidia-persistenced"
+}
+
+@test "safety stop: nvidia_drm busy and a process still holding: nothing past nvidia_drm unloaded" {
+  egpu_present nvidia
+  gpu_holders unkillable
+  module_stuck nvidia_drm
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  assert_called "modprobe -r nvidia_drm"
+  refute_called "modprobe -r nvidia_uvm"
+  refute_called "modprobe -r nvidia_modeset"
+  refute_called "modprobe -r nvidia"
+  assert [ -e "$ROOT/sys/module/nvidia" ]
+  assert_nvidia_services_restored
 }
 
 @test "safety stop: AMD eGPU still held after the kill, holders logged, exit 7" {
@@ -367,16 +432,27 @@ assert_cancelled() {
   [[ "$LOG" == *"Processes still using the eGPU:"* ]]
   [[ "$LOG" == *"card1:      xgmtest    4242 F.... gamescope-wl"* ]]
   refute_called "modprobe"
+  refute_called "systemctl start nvidia-persistenced nvidia-powerd"
 }
 
-@test "safety stop on bazzite: same cancel, overlay fixes not applied" {
+@test "safety stop on bazzite: same cancel, NVIDIA services re-enabled and started" {
   set_os bazzite-nvidia
   no_steamos_readonly
   egpu_present nvidia
-  module_stuck nvidia_drm
+  gpu_holders unkillable
   cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
   run_plugin_script egpu-eject nvidia
   assert_cancelled sddm.service
+  assert_called_before "systemctl disable nvidia-powerd nvidia-persistenced" "systemctl enable nvidia-powerd nvidia-persistenced"
+  assert_nvidia_services_restored
+}
+
+@test "a later successful eject clears an old cancel marker" {
+  date +%s > "$DATA_DIR/last_eject_cancelled"
+  egpu_present amd
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert [ ! -e "$DATA_DIR/last_eject_cancelled" ]
 }
 
 @test "egpu_enable already 0: no release or wait, environment still sanitized, DM restarted" {
@@ -393,14 +469,37 @@ assert_cancelled() {
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
 }
 
-@test "active but no eGPU DRM card: release and wait skipped, egpu_enable still cleared" {
+@test "amd, active but no eGPU found: release and wait skipped, egpu_enable still cleared" {
   echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
-  run_plugin_script egpu-eject nvidia
+  run_plugin_script egpu-eject amd
   assert_success
   [[ "$LOG" == *"No eGPU found. Skipping the GPU release."* ]]
   refute_called "fuser"
   refute_called "sleep"
   assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
+}
+
+@test "nvidia, active but no eGPU PCI device: /dev/nvidia* still released and the modules unloaded" {
+  echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  touch "$ROOT/dev/nvidiactl" "$ROOT/dev/nvidia0"
+  mkdir -p "$ROOT/sys/module/nvidia_drm" "$ROOT/sys/module/nvidia"
+  gpu_holders 100
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"No eGPU PCI device found. Releasing the NVIDIA device nodes and modules anyway."* ]]
+  assert_called "fuser -k -TERM $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl"
+  assert_fuser_kill_before_unload
+  assert_called "modprobe -r nvidia"
+  assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
+}
+
+@test "nvidia, no eGPU PCI device, /dev/nvidia* still held: device-scoped stop, exit 7" {
+  echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  touch "$ROOT/dev/nvidiactl" "$ROOT/dev/nvidia0"
+  gpu_holders unkillable
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
 }
 
 @test "AMD eGPU: identified by boot_vga even though both cards are 0x1002" {
@@ -410,23 +509,25 @@ assert_cancelled() {
   mkdir -p "$ROOT/sys/class/drm/card0-eDP-1/device"
   run_plugin_script egpu-eject amd
   assert_success
-  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129)"* ]]
+  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129 fb1)"* ]]
   assert_equal "$(grep -c '^eGPU: ' <<< "$LOG")" 1
   assert_fuser_only_egpu_nodes card1 renderD129 card0 renderD128
 }
 
 # Card numbers aren't stable across boots: the captured Ally had the eGPU as card0 with
-# renderD129, and the iGPU's renderD128 held by steamwebhelper. eject_with_numbering <eGPU card>
-# <eGPU render> <iGPU card> <iGPU render> <record|no-record>
+# renderD129, and the iGPU's renderD128 held by steamwebhelper. The framebuffers swap with the
+# cards. eject_with_numbering <eGPU card> <eGPU render> <iGPU card> <iGPU render> <record|no-record>
 eject_with_numbering() {
-  gpu_numbering "$3" "$4" "$1" "$2"
+  local efb=fb1 ifb=fb0
+  [ "$1" = "card0" ] && { efb=fb0; ifb=fb1; }
+  gpu_numbering "$3" "$4" "$1" "$2" "$ifb" "$efb"
   [ "$5" = "record" ] && record_egpu_pci
   egpu_present nvidia
   gpu_holders 100
   run_plugin_script egpu-eject nvidia
   assert_success
-  [[ "$LOG" == *"eGPU: 0000:01:00.0 ($1 $2)"* ]] || fail "eGPU nodes not resolved as $1 $2: $LOG"
-  assert_fuser_only_egpu_nodes "$1" "$2" "$3" "$4"
+  [[ "$LOG" == *"eGPU: 0000:01:00.0 ($1 $2 $efb)"* ]] || fail "eGPU nodes not resolved as $1 $2 $efb: $LOG"
+  assert_fuser_only_egpu_nodes "$1" "$2" "$3" "$4" "$efb" "$ifb"
   [[ "$LOG" == *"Success! eGPU 0000:01:00.0 dropped"* ]]
   assert [ -e "$ROOT/dev/dri/$3" ]
   assert [ -e "$ROOT/dev/dri/$4" ]
@@ -455,18 +556,31 @@ eject_with_numbering() {
   record_egpu_pci
   run_plugin_script egpu-eject nvidia
   assert_success
-  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129)"* ]]
+  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129 fb1)"* ]]
   assert_called "modprobe -r nvidia_drm"
 }
 
-@test "no record and no non-boot-VGA card: no eGPU found, release skipped" {
-  egpu_present nvidia
+@test "amd, no record and no non-boot-VGA device: no eGPU found, release skipped" {
+  egpu_present amd
   echo 1 > "$ROOT/sys/class/drm/card1/device/boot_vga"
-  run_plugin_script egpu-eject nvidia
+  run_plugin_script egpu-eject amd
   assert_success
   [[ "$LOG" == *"No eGPU found. Skipping the GPU release."* ]]
   refute_called "fuser"
-  refute_called "modprobe"
+}
+
+@test "recorded address that isn't a display controller: boot_vga fallback" {
+  # Something else (a USB controller, class 0x0c0330) now sits at the recorded address.
+  local dev="$ROOT/sys/devices/pci0000:00/0000:00:08.3/0000:09:00.0"
+  mkdir -p "$dev"
+  echo 0x0c0330 > "$dev/class"
+  ln -s "$dev" "$ROOT/sys/bus/pci/devices/0000:09:00.0"
+  record_egpu_pci 0000:09:00.0
+  egpu_present nvidia
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129 fb1)"* ]]
+  [[ "$LOG" != *"eGPU: 0000:09:00.0"* ]]
 }
 
 @test "recorded address that no longer exists: boot_vga fallback" {
@@ -474,7 +588,7 @@ eject_with_numbering() {
   egpu_present nvidia
   run_plugin_script egpu-eject nvidia
   assert_success
-  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129)"* ]]
+  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129 fb1)"* ]]
 }
 
 @test "malformed record is ignored: boot_vga fallback" {
@@ -482,7 +596,7 @@ eject_with_numbering() {
   egpu_present nvidia
   run_plugin_script egpu-eject nvidia
   assert_success
-  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129)"* ]]
+  [[ "$LOG" == *"eGPU: 0000:01:00.0 (card1 renderD129 fb1)"* ]]
 }
 
 @test "eject never disables the boot safety net" {
@@ -492,4 +606,22 @@ eject_with_numbering() {
   assert_success
   refute_called "systemctl disable xgmobile-boot-sync.service"
   assert [ -e "$SHIM_STATE/enabled/xgmobile-boot-sync.service" ]
+}
+
+@test "primary user: Steam not running, first regular user with a home dir" {
+  steam_not_running
+  mkdir -p "$ROOT/home/nohome/.config/plasma-workspace/env"
+  touch "$ROOT/home/nohome/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
+  egpu_present amd
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert [ ! -e "$ROOT/home/nohome/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
+}
+
+@test "primary user: Steam running as deck stays deck" {
+  steam_user deck
+  egpu_present amd
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
 }

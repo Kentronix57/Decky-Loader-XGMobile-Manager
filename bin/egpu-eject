@@ -7,10 +7,11 @@ ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 SUPERGFX_TRIG=0
-#PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
-PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
-[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
+PRIMARY_USER=$(xgm_primary_user)
 mkdir -p "$DATA_DIR/configs"
+# Written on exit 7 so the plugin can show the cancel after the display manager restart.
+CANCEL_MARKER="$DATA_DIR/last_eject_cancelled"
+rm -f "$CANCEL_MARKER"
 exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"
@@ -32,9 +33,10 @@ ENABLE_PATH="$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
 ACTIVE=$(cat "$ENABLE_PATH" 2>/dev/null || echo "0")
 
 # Identify the eGPU before touching any driver: by the PCI address egpu-enable recorded, else
-# the DRM card(s) that aren't the boot VGA device (works for NVIDIA and AMD XG Mobiles). Card and
-# render numbers change between boots, so the nodes are matched to the PCI device. The PCI paths
-# are what the drop wait watches, since an NVIDIA card node is gone once nvidia_drm is unloaded.
+# the display controller(s) that aren't the boot VGA device (works for NVIDIA and AMD XG Mobiles).
+# Card, render and fb numbers change between boots, so the nodes are matched to the PCI device.
+# The PCI paths are what the drop wait watches, since an NVIDIA card node is gone once nvidia_drm
+# is unloaded.
 EGPU_PCI=()
 EGPU_NODES=()
 if [ "$ACTIVE" = "1" ]; then
@@ -44,6 +46,11 @@ if [ "$ACTIVE" = "1" ]; then
     for node in "${names[@]}"; do
       EGPU_NODES+=("$ROOT/dev/dri/$node")
     done
+    mapfile -t fbs < <(xgm_fb_nodes "$pci")
+    for node in "${fbs[@]}"; do
+      EGPU_NODES+=("$ROOT/dev/$node")
+    done
+    names+=("${fbs[@]}")
     echo "eGPU: $(basename "$pci") (${names[*]:-no DRM nodes})"
   done
 fi
@@ -97,7 +104,44 @@ kill_holders() {
   fuser -k "-$1" "${nodes[@]}" >/dev/null 2>&1 || true
 }
 
+nvidia_drm_refcnt() { cat "$ROOT/sys/module/nvidia_drm/refcnt" 2>/dev/null || echo "not loaded"; }
+
+# What holds the GPU outside userspace, for the log: framebuffers, consoles, module state.
+gpu_diagnostics() {
+  local vt fb
+  echo "--- GPU diagnostics ---"
+  echo "/proc/fb:"
+  sed 's/^/  /' "$ROOT/proc/fb" 2>/dev/null
+  for vt in $ROOT/sys/class/vtconsole/vtcon*; do
+    [ -e "$vt" ] && echo "$(basename "$vt"): $(cat "$vt/name" 2>/dev/null) (bind $(cat "$vt/bind" 2>/dev/null))"
+  done
+  for fb in $ROOT/sys/class/graphics/fb*; do
+    [ -e "$fb/device" ] && echo "$(basename "$fb") -> $(basename "$(readlink -f "$fb/device")")"
+  done
+  echo "nvidia_drm modeset=$(cat "$ROOT/sys/module/nvidia_drm/parameters/modeset" 2>/dev/null || echo "?") fbdev=$(cat "$ROOT/sys/module/nvidia_drm/parameters/fbdev" 2>/dev/null || echo "?")"
+  echo "nvidia_drm refcnt before the release: $REFCNT_BEFORE, now: $(nvidia_drm_refcnt)"
+  echo "nvidia_drm holders: $(ls "$ROOT/sys/module/nvidia_drm/holders" 2>/dev/null | xargs)"
+  echo "lsmod:"
+  lsmod | grep -E 'nvidia|drm' | sed 's/^/  /'
+  echo "--- end of GPU diagnostics ---"
+}
+
+# NVIDIA always has /dev/nvidia* and its modules to release, even when no eGPU PCI device was
+# found; AMD with nothing found has nothing to release.
+RELEASE=0
 if [ "${#EGPU_PCI[@]}" -gt 0 ]; then
+  RELEASE=1
+elif [ "$ACTIVE" = "1" ] && [ "$VENDOR" == "nvidia" ]; then
+  echo "No eGPU PCI device found. Releasing the NVIDIA device nodes and modules anyway."
+  RELEASE=1
+elif [ "$ACTIVE" = "1" ]; then
+  echo "No eGPU found. Skipping the GPU release."
+else
+  echo "XG Mobile is already off. Skipping the GPU release."
+fi
+
+if [ "$RELEASE" -eq 1 ]; then
+  REFCNT_BEFORE=$(nvidia_drm_refcnt)
   # Release order: wait for the session to let go, ask what's left to exit, force it, then unload
   # the driver. Only the eGPU's own nodes: the iGPU's stay untouched.
   echo "Waiting for processes using the eGPU to exit..."
@@ -111,33 +155,44 @@ if [ "${#EGPU_PCI[@]}" -gt 0 ]; then
 
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Unloading NVIDIA modules..."
-    modprobe -r nvidia_drm || true
-    modprobe -r nvidia_modeset || true
-    modprobe -r nvidia_uvm || true
-    modprobe -r nvidia || true
+    # nvidia_drm first; if it can't go, the modules under it can't either, so stop there.
+    if modprobe -r nvidia_drm; then
+      modprobe -r nvidia_modeset || true
+      modprobe -r nvidia_uvm || true
+      modprobe -r nvidia || true
+    else
+      echo "nvidia_drm couldn't be unloaded; leaving the other NVIDIA modules loaded."
+    fi
   fi
 
-  # Safety stop: powering off a GPU that's still in use hangs the system, so cancel instead.
-  STILL_LOADED=0
-  [ "$VENDOR" == "nvidia" ] && [ -e "$ROOT/sys/module/nvidia_drm" ] && STILL_LOADED=1
-  if [ "$STILL_LOADED" -eq 1 ] || gpu_in_use; then
+  # Safety stop: powering off a GPU that a process still uses hangs the session, so cancel.
+  if gpu_in_use; then
     echo "ERROR: The eGPU is still in use. Eject cancelled; the XG Mobile stays powered on."
     mapfile -t NODES < <(gpu_nodes)
-    if [ "${#NODES[@]}" -gt 0 ]; then
-      echo "Processes still using the eGPU:"
-      fuser -v "${NODES[@]}" 2>&1 || true
+    echo "Processes still using the eGPU:"
+    fuser -v "${NODES[@]}" 2>&1 || true
+    gpu_diagnostics
+    if [ "$VENDOR" == "nvidia" ]; then
+      echo "Restoring NVIDIA power services..."
+      if [[ "$OS_TYPE" == *"bazzite"* ]]; then
+        systemctl enable nvidia-powerd nvidia-persistenced 2>/dev/null || true
+      fi
+      systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null || true
     fi
-    if [ "$STILL_LOADED" -eq 1 ]; then
-      echo "nvidia_drm is still loaded (refcnt: $(cat $ROOT/sys/module/nvidia_drm/refcnt 2>/dev/null || echo "?"), holders: $(ls $ROOT/sys/module/nvidia_drm/holders 2>/dev/null | xargs))"
-    fi
+    date +%s > "$CANCEL_MARKER"
     echo "Starting $DM_SERVICE..."
     systemctl start "$DM_SERVICE"
     exit 7
   fi
-elif [ "$ACTIVE" = "1" ]; then
-  echo "No eGPU found. Skipping the GPU release."
-else
-  echo "XG Mobile is already off. Skipping the GPU release."
+
+  # No process uses the eGPU, but the driver can still be held in the kernel (CachyOS: the DRM
+  # fbdev client). Powering off in that state is what eject always did, and it works.
+  if [ "$VENDOR" == "nvidia" ] && [ -e "$ROOT/sys/module/nvidia_drm" ]; then
+    echo "WARNING: NVIDIA driver still loaded (in-kernel framebuffer reference); no processes use the eGPU, powering it off as before."
+    HOLDERS=$(ls "$ROOT/sys/module/nvidia_drm/holders" 2>/dev/null | xargs)
+    [ -n "$HOLDERS" ] && echo "nvidia_drm is held by modules (not processes): $HOLDERS"
+    gpu_diagnostics
+  fi
 fi
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
