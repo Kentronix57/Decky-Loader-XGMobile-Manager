@@ -190,7 +190,7 @@ The exact model of your XG Mobile (4090, 3080, 6850M)
 The output of your corresponding logs. (IE. enable, eject, etc.)
 
 ### Where the logs are
-Every log is in the plugin's log folder, next to Decky's own logs for the plugin: `~/homebrew/logs/xgmobile-manager/`. Open them in **Activity Logs**, or attach them from that folder (on Bazzite, `~` is `/var/home/<user>`):
+Every log is in `~/homebrew/logs/xgmobile-manager/activity/`. Decky's own logs for the plugin stay one level up, in `~/homebrew/logs/xgmobile-manager/`; Decky deletes all but the newest 4 log files there every time the plugin loads, so ours are kept in the subfolder. Open them in **Activity Logs**, or attach them from that folder (on Bazzite, `~` is `/var/home/<user>`):
 
 | Log | File |
 |---|---|
@@ -203,8 +203,9 @@ Every log is in the plugin's log folder, next to Decky's own logs for the plugin
 | Desktop shortcuts | `create_shortcuts.log` |
 | Supergfx (Flow laptops) | `supergfxd_hybrid.log`, `supergfxd_integrated.log` |
 | Python critical errors / debug | `python_crash.log`, `debug.log` |
+| Emergency nuke scripts (run by hand) | `nuke.log`, `nuke_dry.log` |
 
-Older versions wrote these to `~/homebrew/logs/` as `xgmobile_manager_<name>.log`. The plugin moves them into the folder the first time it loads (without the prefix; a name that's already taken goes to `archive/`), updates an old "Enable XG Mobile" desktop shortcut, and records what it moved in `migrate.log`.
+Older versions wrote these to `~/homebrew/logs/` as `xgmobile_manager_<name>.log`. The plugin moves them into `activity/` the first time it loads (without the prefix; a name that's already taken goes to `activity/archive/`), updates an old "Enable XG Mobile" desktop shortcut, and records what it moved in `activity/migrate.log`.
 
 Please use GitHub Issues rather than Reddit DMs for technical support so the community can benefit from the solutions!
 
