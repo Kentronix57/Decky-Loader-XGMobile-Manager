@@ -83,6 +83,28 @@ def test_hang_is_stopped_and_loading_continues(loading, monkeypatch):
   assert "migrate-logs didn't finish within 0.2s" in crash_log(loading)
 
 
+def test_cancel_stops_the_script_and_reraises(loading):
+  pid_file = loading.tmp / "migrate.pid"
+  loading.stub("migrate-logs", f'echo $$ > "{pid_file}"\nexec sleep 30')
+
+  async def cancel_mid_run():
+    task = asyncio.ensure_future(loading.plugin._migrate_logs())
+    for _ in range(200):
+      if pid_file.exists() and pid_file.read_text().strip():
+        break
+      await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+      await task
+    return int(pid_file.read_text())
+
+  pid = loading.run(cancel_mid_run())
+  # Killed and reaped: the pid is gone.
+  with pytest.raises(ProcessLookupError):
+    os.kill(pid, 0)
+  assert crash_log(loading) == ""
+
+
 def test_real_script_migrates_on_load(loading):
   for name in ("migrate-logs", "xgm-common.sh"):
     shutil.copy2(REPO / "bin" / name, loading.bin / name)

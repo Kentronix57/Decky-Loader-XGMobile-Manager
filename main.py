@@ -468,7 +468,8 @@ class Plugin:
     """
     Runs bin/migrate-logs, which moves the logs older versions left in LEGACY_LOGS_ROOT into
     LOG_DIR and keeps its own summary (migrate.log). A failure or a hang only goes to the Python
-    Critical Error Log: it never stops the plugin from loading.
+    Critical Error Log: it never stops the plugin from loading. If the load is cancelled (plugin
+    unloaded), the script is stopped too.
     """
     script_path = os.path.join(self.get_plugin_dir(), "bin", "migrate-logs")
     try:
@@ -480,9 +481,14 @@ class Plugin:
       )
       try:
         out, _ = await asyncio.wait_for(process.communicate(), MIGRATE_LOGS_TIMEOUT)
-      except asyncio.TimeoutError:
-        process.kill()
+      except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+        try:
+          process.kill()
+        except ProcessLookupError:
+          pass
         await process.wait()
+        if isinstance(e, asyncio.CancelledError):
+          raise
         _log_python_error(f"migrate-logs didn't finish within {MIGRATE_LOGS_TIMEOUT}s and was stopped.")
         return
       if process.returncode != 0:
