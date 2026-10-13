@@ -35,6 +35,12 @@ OS_RELEASE_PATH = "/etc/os-release"
 DMI_PRODUCT_PATH = "/sys/class/dmi/id/product_name"
 ASUS_WMI_DIR = "/sys/devices/platform/asus-nb-wmi"
 DESKTOP_FLAG_PATH = "/var/tmp/xgmobile_desktop_trigger"
+# Enable/eject restart the display manager, which can kill the frontend before the result comes
+# back. The last failure is kept here and shown the next time the panel opens.
+PENDING_RESULT_PATH = os.path.join(DATA_DIR, "last_result.json")
+EJECT_CANCELLED_MARKER = os.path.join(DATA_DIR, "last_eject_cancelled")  # written by egpu-eject (exit 7)
+PENDING_RESULT_MAX_AGE = 600  # seconds
+PENDING_RESULT_SCRIPTS = ("egpu-enable", "egpu-eject")
 
 os.makedirs(os.path.join(DATA_DIR, "configs"), exist_ok=True)
 
@@ -234,6 +240,45 @@ def _short_exc(e, limit=120):
   text = (str(e).strip().splitlines() or [type(e).__name__])[0]
   return text[:limit]
 
+def _script_error_result(script_name, code):
+  """The failure ActionResult for a non-zero exit: the catalogued copy, or the generic fallback."""
+  meta = SCRIPT_META.get(script_name, {
+    "log_key": "", "title": script_name, "message": f"{script_name} finished.",
+    "fail_title": f"{script_name} Failed", "action": script_name,
+  })
+  log_key = meta["log_key"]
+  entry = SCRIPT_ERROR_CATALOG.get(script_name, {}).get(code)
+  if entry:
+    message, hint = entry
+  else:
+    log_label = LOG_MAP[log_key][1] if log_key in LOG_MAP else "the plugin logs"
+    message = f"{meta['action']} failed (exit code {code})."
+    hint = f"Open Activity Logs → {log_label} and check the last lines. If you can't tell what went wrong, share that log in a GitHub issue."
+  return _result(False, "error", meta["fail_title"], message, hint=hint,
+                 code=code, script=script_name, log_key=log_key)
+
+def _clear_pending_result():
+  for path in (PENDING_RESULT_PATH, EJECT_CANCELLED_MARKER):
+    try:
+      os.remove(path)
+    except FileNotFoundError:
+      pass
+    except Exception as e:
+      _log_python_error(f"Couldn't remove {path}: {e}")
+
+def _record_result(res):
+  """Keeps a failed enable/eject result for get_pending_result; a success clears the old one."""
+  if res.get("ok"):
+    _clear_pending_result()
+    return
+  try:
+    tmp = PENDING_RESULT_PATH + ".tmp"
+    with open(tmp, "w") as f:
+      json.dump({"timestamp": time.time(), "result": res}, f)
+    os.replace(tmp, PENDING_RESULT_PATH)
+  except Exception as e:
+    _log_python_error(f"Couldn't save the pending result: {e}")
+
 def log(txt):
   decky.logger.info(txt)
 
@@ -311,6 +356,44 @@ class Plugin:
     return await self._execute_script("create-shortcuts", SHORTCUTS_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
   async def _execute_script(self, script_name, log_path, *args):
+    """Runs bin/<script_name> (see _run_script); enable/eject failures are also kept for
+    get_pending_result, since the display manager restart can kill the frontend first."""
+    res = await self._run_script(script_name, log_path, *args)
+    if script_name in PENDING_RESULT_SCRIPTS:
+      _record_result(res)
+    return res
+
+  async def get_pending_result(self):
+    """
+    The last enable/eject failure the frontend may not have shown, once: the saved result, or
+    egpu-eject's cancel marker as the catalogued exit 7. None if there's nothing, or it's older
+    than PENDING_RESULT_MAX_AGE. Either way both files are removed.
+    """
+    now = time.time()
+    res = None
+    try:
+      with open(PENDING_RESULT_PATH) as f:
+        saved = json.load(f)
+      if now - float(saved["timestamp"]) <= PENDING_RESULT_MAX_AGE and isinstance(saved["result"], dict):
+        res = saved["result"]
+    except FileNotFoundError:
+      pass
+    except Exception as e:
+      _log_python_error(f"Ignoring an unreadable pending result: {e}")
+    if res is None:
+      try:
+        with open(EJECT_CANCELLED_MARKER) as f:
+          stamp = float(f.read().strip())
+        if now - stamp <= PENDING_RESULT_MAX_AGE:
+          res = _script_error_result("egpu-eject", 7)
+      except FileNotFoundError:
+        pass
+      except Exception as e:
+        _log_python_error(f"Ignoring an unreadable eject cancel marker: {e}")
+    _clear_pending_result()
+    return res
+
+  async def _run_script(self, script_name, log_path, *args):
     """
     Unified executor that redirects output to a specific log file.
     script_name: name of script in bin/
@@ -363,21 +446,12 @@ class Plugin:
       return _result(True, "success", meta["title"], meta["message"],
                      code=0, script=script_name, log_key=log_key)
 
-    entry = SCRIPT_ERROR_CATALOG.get(script_name, {}).get(code)
-
     if script_name in NVIDIA_INSTALLERS and code == 10:
-      message, hint = entry
+      message, hint = SCRIPT_ERROR_CATALOG[script_name][code]
       return _result(True, "already_installed", meta["title"], message, hint=hint,
                      code=code, script=script_name, log_key=log_key)
 
-    if entry:
-      message, hint = entry
-    else:
-      log_label = LOG_MAP[log_key][1] if log_key in LOG_MAP else "the plugin logs"
-      message = f"{meta['action']} failed (exit code {code})."
-      hint = f"Open Activity Logs → {log_label} and check the last lines. If you can't tell what went wrong, share that log in a GitHub issue."
-    return _result(False, "error", meta["fail_title"], message, hint=hint,
-                   code=code, script=script_name, log_key=log_key)
+    return _script_error_result(script_name, code)
 
   async def enable_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
@@ -393,6 +467,101 @@ class Plugin:
     
     return await self._execute_script("egpu-eject", EJECT_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
+  async def _handle_eject_request(self):
+    """Runs egpu-eject for the desktop Eject link, then switches back to Game Mode if it worked."""
+    # 2. Grab the variables directly from the backend, no JSON needed!
+    vendor = await self.get_setting("gpu_vendor", "nvidia")
+    os_type = self.get_os_type()
+
+    # 3. Safe dynamic user resolution
+    decky_user = os.environ.get("DECKY_USER")
+    target_user = None
+
+    if decky_user:
+      try: target_user = pwd.getpwnam(decky_user)
+      except KeyError: pass
+
+    if not target_user:
+      try:
+        res = subprocess.run(["pgrep", "-x", "steam"], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+          pid = res.stdout.strip().split()[0]
+          uid = os.stat(f"/proc/{pid}").st_uid
+          target_user = pwd.getpwuid(uid)
+      except Exception:
+        pass
+
+    if not target_user:
+      for p in pwd.getpwall():
+        if 1000 <= p.pw_uid < 65534 and p.pw_dir.startswith('/home/'):
+          target_user = p
+          break
+
+    if not target_user:
+      target_user = pwd.getpwnam("deck")
+
+    username = target_user.pw_name
+    home_dir = target_user.pw_dir
+    desktop_log_path = EJECTDESKTOP_LOG #f"{home_dir}/homebrew/logs/xgmobile_desktop_eject_request.log"
+
+    def write_log(message):
+      with open(desktop_log_path, "a") as f:
+        f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
+
+    write_log("-----------------------------------------")
+    write_log(f"Desktop Icon triggered Eject for user: {username} | Vendor: {vendor} | OS: {os_type}")
+
+    # 4. Use dynamic plugin paths instead of hardcoded strings
+    script_path = os.path.join(self.get_plugin_dir(), "bin", "egpu-eject")
+
+    sterile_env = {
+      "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
+      "USER": username,
+      "HOME": home_dir
+    }
+
+    result = subprocess.run([
+      script_path, 
+      vendor, os_type, LOG_DIR, DATA_DIR
+    ], capture_output=True, text=True, check=False, env=sterile_env)
+
+    if result.returncode != 0:
+      # The XG Mobile is still on (exit 7: something still uses it): switching to Game Mode would
+      # leave it on the wrong GPU. Stay here; the panel shows the failure the next time it opens.
+      write_log(f"Eject failed with exit code {result.returncode}. Staying in Desktop Mode; see the Eject Log.")
+      _record_result(_script_error_result("egpu-eject", result.returncode))
+      return
+    _clear_pending_result()
+
+    desktopdefault = await self.get_setting("desktop_default", "0")
+    #if desktopdefault == "1":
+    uid = target_user.pw_uid
+    write_log(f"Eject Desktop Link detected Desktop Default enabled for : {username}")
+    if os_type != "steamos":
+      write_log(f"Telling python to wait 5 seconds before sending gamescope command to switch back to GameMode")
+      await asyncio.sleep(5)
+    write_log(f"Running the command...")
+    safe_env = {
+      "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
+      "USER": username,
+      "HOME": home_dir,
+      "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+      "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
+    }
+    for session_args in _session_select_calls(os_type, desktopdefault, "gamescope"):
+      write_log(f"Running session select: {' '.join(session_args)}")
+      result = subprocess.run(
+        ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=safe_env
+      )
+
+      write_log(f"Command exited with code: {result.returncode}")
+      if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
+      if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
+
   async def watch_eject_request(self):
     request_file = "/tmp/xgmobile_eject_request"
     fallback_log = PYTHONERROR_LOG #"/tmp/xgmobile_python_crash.log"
@@ -403,91 +572,7 @@ class Plugin:
         os.remove(request_file)
         
         try:
-          # 2. Grab the variables directly from the backend, no JSON needed!
-          vendor = await self.get_setting("gpu_vendor", "nvidia")
-          os_type = self.get_os_type()
-
-          # 3. Safe dynamic user resolution
-          decky_user = os.environ.get("DECKY_USER")
-          target_user = None
-        
-          if decky_user:
-            try: target_user = pwd.getpwnam(decky_user)
-            except KeyError: pass
-        
-          if not target_user:
-            try:
-              res = subprocess.run(["pgrep", "-x", "steam"], capture_output=True, text=True)
-              if res.returncode == 0 and res.stdout.strip():
-                pid = res.stdout.strip().split()[0]
-                uid = os.stat(f"/proc/{pid}").st_uid
-                target_user = pwd.getpwuid(uid)
-            except Exception:
-              pass
-        
-          if not target_user:
-            for p in pwd.getpwall():
-              if 1000 <= p.pw_uid < 65534 and p.pw_dir.startswith('/home/'):
-                target_user = p
-                break
-        
-          if not target_user:
-            target_user = pwd.getpwnam("deck")
-            
-          username = target_user.pw_name
-          home_dir = target_user.pw_dir
-          desktop_log_path = EJECTDESKTOP_LOG #f"{home_dir}/homebrew/logs/xgmobile_desktop_eject_request.log"
-        
-          def write_log(message):
-            with open(desktop_log_path, "a") as f:
-              f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
-
-          write_log("-----------------------------------------")
-          write_log(f"Desktop Icon triggered Eject for user: {username} | Vendor: {vendor} | OS: {os_type}")
-        
-          # 4. Use dynamic plugin paths instead of hardcoded strings
-          script_path = os.path.join(self.get_plugin_dir(), "bin", "egpu-eject")
-          
-          sterile_env = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
-            "USER": username,
-            "HOME": home_dir
-          }
-
-          result = subprocess.run([
-            script_path, 
-            vendor, os_type, LOG_DIR, DATA_DIR
-          ], capture_output=True, text=True, check=False, env=sterile_env)
-
-          desktopdefault = await self.get_setting("desktop_default", "0")
-          #if desktopdefault == "1":
-          uid = target_user.pw_uid
-          write_log(f"Eject Desktop Link detected Desktop Default enabled for : {username}")
-          if os_type != "steamos":
-            write_log(f"Telling python to wait 5 seconds before sending gamescope command to switch back to GameMode")
-            await asyncio.sleep(5)
-          write_log(f"Running the command...")
-          safe_env = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
-            "USER": username,
-            "HOME": home_dir,
-            "XDG_RUNTIME_DIR": f"/run/user/{uid}",
-            "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
-          }
-          for session_args in _session_select_calls(os_type, desktopdefault, "gamescope"):
-            write_log(f"Running session select: {' '.join(session_args)}")
-            result = subprocess.run(
-              ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
-              capture_output=True,
-              text=True,
-              check=False,
-              env=safe_env
-            )
-
-            write_log(f"Command exited with code: {result.returncode}")
-            if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
-            if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
-        
+          await self._handle_eject_request()
         except Exception as e:
           # Bleed the error to the fallback log, but DO NOT return. Let the loop survive.
           with open(fallback_log, "a") as f:
