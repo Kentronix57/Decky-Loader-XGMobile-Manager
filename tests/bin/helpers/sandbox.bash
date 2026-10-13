@@ -86,8 +86,13 @@ make_root() {
     ln -s "$path" "$SYSBIN/$tool"
   done
 
-  # The iGPU is always present: card0/renderD128 unless gpu_numbering says otherwise.
+  # The iGPU is always present: card0/renderD128/fb0 unless gpu_numbering says otherwise.
   gpu_numbering card0 renderD128 card1 renderD129
+  # Framebuffers and consoles as captured on CachyOS: no fbcon attached, only the dummy console.
+  mkdir -p "$ROOT/proc" "$ROOT/sys/class/vtconsole/vtcon0"
+  printf '%s\n' '0 amdgpudrmfb' '1 nvidia-drmdrmfb' > "$ROOT/proc/fb"
+  echo "(S) dummy device" > "$ROOT/sys/class/vtconsole/vtcon0/name"
+  echo 1 > "$ROOT/sys/class/vtconsole/vtcon0/bind"
   printf '%s\n' 'root:x:0:0::/root:/bin/bash' 'nobody:x:65534:65534::/:/usr/bin/nologin' \
     'nohome:x:1000:1000::/home/nohome:/bin/bash' 'xgmtest:x:64999:64999::/home/xgmtest:/bin/bash' > "$ROOT/etc/passwd"
   echo 0 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
@@ -175,13 +180,14 @@ egpu_appears() {
   return 0
 }
 
-# gpu_numbering <iGPU card> <iGPU render> <eGPU card> <eGPU render>: the DRM node numbers, which
-# aren't stable across boots on real hardware (the XG Mobile shows up as card0 or card1). Rebuilds
-# the iGPU (always present); the eGPU gets its numbers when it appears (shims/sleep).
+# gpu_numbering <iGPU card> <iGPU render> <eGPU card> <eGPU render> [<iGPU fb> <eGPU fb>]: the
+# DRM and fb node numbers (fb0/fb1 by default), which aren't stable across boots on real hardware
+# (the XG Mobile shows up as card0 or card1). Rebuilds the iGPU (always present); the eGPU gets
+# its numbers when it appears (shims/sleep).
 gpu_numbering() {
   fake_gpu_remove "$FAKE_IGPU_PCI_ADDR"
-  fake_gpu_add "$FAKE_IGPU_PCI_ADDR" 0x1002 1 "$1" "$2"
-  echo "$3 $4" > "$SHIM_STATE/egpu_nodes"
+  fake_gpu_add "$FAKE_IGPU_PCI_ADDR" 0x1002 1 "$1" "$2" "${5:-fb0}"
+  echo "$3 $4 ${6:-fb1}" > "$SHIM_STATE/egpu_nodes"
 }
 
 # record_egpu_pci [address]: the eGPU PCI address egpu-enable records (default: the fake eGPU's).
@@ -255,9 +261,13 @@ module_stuck() { echo "$1" >> "$SHIM_STATE/module_stuck"; }
 steam_not_running() { touch "$SHIM_STATE/steam_not_running"; }
 no_user_session() { rm -rf "$ROOT/run/user/64999"; }
 
+# steam_user <name>: the user Steam runs as (shims/ps), instead of xgmtest.
+steam_user() { echo "$1" > "$SHIM_STATE/steam_user"; }
+
 # The boot service as egpu-enable installs it: unit file copied and enabled.
 sync_service_installed() {
   cp "$XGM_REPO/assets/services/xgmobile-boot-sync.service" "$ROOT/etc/systemd/system/"
+  ln -sfn "$(readlink -f "$XGM_REPO/bin/egpu-sync")" "$ROOT/usr/local/bin/egpu-sync"
   mkdir -p "$SHIM_STATE/enabled"
   touch "$SHIM_STATE/enabled/xgmobile-boot-sync.service"
 }

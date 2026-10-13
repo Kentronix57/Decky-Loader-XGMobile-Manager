@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # Fake GPUs in the sandbox sysfs, laid out like the real thing: a PCI device dir under
-# sys/devices, a sys/bus/pci/devices/<address> symlink to it, sys/class/drm/<cardN|renderDN>/device
-# symlinks to it, and the /dev/dri nodes. Sourced by helpers/sandbox.bash and shims/sleep;
+# sys/devices (class 0x030000), a sys/bus/pci/devices/<address> symlink to it,
+# sys/class/drm/<cardN|renderDN>/device and sys/class/graphics/fbN/device symlinks to it, and the
+# /dev/dri and /dev/fbN nodes. Sourced by helpers/sandbox.bash and shims/sleep;
 # needs $ROOT.
 
 # The PCI dirs of the two GPUs. The addresses are the Ally's (iGPU) and the XG Mobile's (eGPU).
@@ -14,13 +15,19 @@ fake_gpu_pci_dir() {
   esac
 }
 
-# fake_gpu_add <pci address> <vendor> <boot_vga> <cardN> <renderDN>
+# fake_gpu_add <pci address> <vendor> <boot_vga> <cardN> <renderDN> [fbN]
 fake_gpu_add() {
   local pci node
   pci=$(fake_gpu_pci_dir "$1")
   mkdir -p "$pci/drm/$4" "$pci/drm/$5" "$ROOT/sys/bus/pci/devices" "$ROOT/dev/dri"
   echo "$2" > "$pci/vendor"
+  echo "0x030000" > "$pci/class"
   echo "$3" > "$pci/boot_vga"
+  if [ -n "${6:-}" ]; then
+    mkdir -p "$ROOT/sys/class/graphics/$6"
+    ln -sfn "$pci" "$ROOT/sys/class/graphics/$6/device"
+    touch "$ROOT/dev/$6"
+  fi
   ln -sfn "$pci" "$ROOT/sys/bus/pci/devices/$1"
   for node in "$4" "$5"; do
     mkdir -p "$ROOT/sys/class/drm/$node"
@@ -37,6 +44,12 @@ fake_gpu_remove() {
     [ -L "$entry/device" ] || continue
     if [ "$(readlink "$entry/device")" = "$pci" ]; then
       rm -rf "$entry" "$ROOT/dev/dri/${entry##*/}"
+    fi
+  done
+  for entry in "$ROOT"/sys/class/graphics/*; do
+    [ -L "$entry/device" ] || continue
+    if [ "$(readlink "$entry/device")" = "$pci" ]; then
+      rm -rf "$entry" "$ROOT/dev/${entry##*/}"
     fi
   done
   rm -rf "$pci" "$ROOT/sys/bus/pci/devices/$1"

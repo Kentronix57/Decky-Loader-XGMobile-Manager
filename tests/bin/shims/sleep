@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Test shim: returns instantly and simulates XG Mobile hotplug. The fake eGPU follows the
 # egpu_enable flag: once it reads 1 (and $SHIM_STATE/egpu_appears is nvidia|amd) its PCI device
-# (0000:01:00.0, boot_vga 0) appears with the DRM nodes in $SHIM_STATE/egpu_nodes (card1
-# renderD129 by default; see gpu_numbering), and for nvidia /dev/nvidia* and the nvidia module
-# dirs, as udev would load them. Once it reads 0 (unless $SHIM_STATE/egpu_drops is "no") the PCI
+# (0000:01:00.0, boot_vga 0) appears with the DRM and fb nodes in $SHIM_STATE/egpu_nodes (card1
+# renderD129 fb1 by default; see gpu_numbering), and for nvidia /dev/nvidia* and the nvidia module
+# dirs (nvidia_drm with modeset/fbdev Y and a refcnt), as udev would load them. Once it reads 0 (unless $SHIM_STATE/egpu_drops is "no") the PCI
 # device and its nodes disappear.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 ROOT="$XGM_ROOT"
@@ -14,16 +14,20 @@ PCI=$(fake_gpu_pci_dir "$FAKE_EGPU_PCI_ADDR")
 enabled=$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable" 2>/dev/null)
 appears=$(cat "$SHIM_STATE/egpu_appears" 2>/dev/null)
 drops=$(cat "$SHIM_STATE/egpu_drops" 2>/dev/null)
-read -r card render < "$SHIM_STATE/egpu_nodes" 2>/dev/null || { card=card1; render=renderD129; }
+read -r card render fb < "$SHIM_STATE/egpu_nodes" 2>/dev/null || { card=card1; render=renderD129; fb=fb1; }
 if [ "$enabled" = "1" ] && [ ! -e "$PCI" ]; then
   case "$appears" in
     nvidia)
-      fake_gpu_add "$FAKE_EGPU_PCI_ADDR" 0x10de 0 "$card" "$render"
+      fake_gpu_add "$FAKE_EGPU_PCI_ADDR" 0x10de 0 "$card" "$render" "$fb"
       touch "$ROOT/dev/nvidiactl" "$ROOT/dev/nvidia0" "$ROOT/dev/nvidia-modeset"
-      mkdir -p "$ROOT/sys/module/nvidia" "$ROOT/sys/module/nvidia_modeset" "$ROOT/sys/module/nvidia_drm"
+      mkdir -p "$ROOT/sys/module/nvidia" "$ROOT/sys/module/nvidia_modeset" \
+        "$ROOT/sys/module/nvidia_drm/parameters" "$ROOT/sys/module/nvidia_drm/holders"
+      echo Y > "$ROOT/sys/module/nvidia_drm/parameters/modeset"
+      echo Y > "$ROOT/sys/module/nvidia_drm/parameters/fbdev"
+      echo 50 > "$ROOT/sys/module/nvidia_drm/refcnt"
       ;;
     amd)
-      fake_gpu_add "$FAKE_EGPU_PCI_ADDR" 0x1002 0 "$card" "$render"
+      fake_gpu_add "$FAKE_EGPU_PCI_ADDR" 0x1002 0 "$card" "$render" "$fb"
       ;;
   esac
 elif [ "$enabled" = "0" ] && [ -e "$PCI" ] && [ "$drops" != "no" ]; then
