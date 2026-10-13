@@ -31,9 +31,10 @@ echo "Primary user: $PRIMARY_USER"
 
 ACTIVE=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || echo "0")
 CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected 2>/dev/null || echo "1")
-# The eGPU: by the PCI address egpu-enable recorded, else the non-boot-VGA card. Card numbers
-# change between boots, so the nodes are matched to the PCI device.
-EGPU_PCI=$(xgm_egpu_pci_paths "$DATA_DIR" | head -n 1)
+# The eGPU: by the PCI address egpu-enable recorded (strict: a recorded device that's gone means
+# the eGPU is absent), else the non-boot-VGA card. Card numbers change between boots, so the nodes
+# are matched to the PCI device.
+EGPU_PCI=$(xgm_egpu_pci_paths "$DATA_DIR" strict | head -n 1)
 
 # Not active: egpu_enable off (or missing), the cable not locked, or "on" with no eGPU on the bus.
 REASON=""

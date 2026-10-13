@@ -100,20 +100,26 @@ xgm_sanitize_environment() {
   rm -f "$ROOT/etc/modprobe.d/nvidia-egpu.conf"
 }
 
-# The eGPU's PCI device dir(s) in sysfs, one per line, resolved in this order:
+# xgm_egpu_pci_paths <data_dir> [strict]: the eGPU's PCI device dir(s) in sysfs, one per line,
+# resolved in this order:
 #   1. the PCI address egpu-enable recorded in <data_dir>/egpu_pci_address, if that device exists
 #      and is a display controller (PCI class 0x03....)
 #   2. the display controller(s) that aren't the boot VGA device (boot_vga != 1); read from the PCI
 #      bus, not the DRM cards, so it works before a driver is bound (early boot)
 #   3. nothing
+# With "strict" (the boot safety net), a well-formed record is final: if its device is gone or
+# isn't a display controller, the eGPU is absent and step 2 is skipped. On a Flow laptop step 2
+# would find the internal dGPU instead.
 # DRM card numbers change between boots; the PCI address of the XG Mobile slot doesn't.
 xgm_egpu_pci_paths() {
   local addr dev
   addr=$(cat "$1/egpu_pci_address" 2>/dev/null)
-  if [[ "$addr" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] \
-    && [[ "$(cat "$ROOT/sys/bus/pci/devices/$addr/class" 2>/dev/null)" == 0x03* ]]; then
-    readlink -f "$ROOT/sys/bus/pci/devices/$addr"
-    return 0
+  if [[ "$addr" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]]; then
+    if [[ "$(cat "$ROOT/sys/bus/pci/devices/$addr/class" 2>/dev/null)" == 0x03* ]]; then
+      readlink -f "$ROOT/sys/bus/pci/devices/$addr"
+      return 0
+    fi
+    [ "${2:-}" = "strict" ] && return 0
   fi
   for dev in $ROOT/sys/bus/pci/devices/*; do
     [[ "$(cat "$dev/class" 2>/dev/null)" == 0x03* ]] || continue

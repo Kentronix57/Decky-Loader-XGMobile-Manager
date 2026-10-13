@@ -276,7 +276,8 @@ cold_boot_symmetry() {
 
 @test "active, NVIDIA driver not bound yet (no DRM card), no record: PCI fallback still finds the eGPU" {
   egpu_present nvidia
-  rm -rf "$ROOT/sys/class/drm/card1" "$ROOT/sys/class/drm/renderD129"
+  # Unbound, as in real sysfs: no class/drm entries and no drm/ dir under the PCI device.
+  rm -rf "$ROOT/sys/class/drm/card1" "$ROOT/sys/class/drm/renderD129" "$(fake_gpu_pci_dir "$FAKE_EGPU_PCI_ADDR")/drm"
   echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
   run_sync
   # Active, not sanitized: the eGPU is on the bus, only its card node is missing.
@@ -286,7 +287,9 @@ cold_boot_symmetry() {
   assert_output 1
 }
 
-@test "recorded address that isn't a display controller: ignored" {
+@test "recorded address that isn't a display controller: no fallback, sanitized" {
+  # Something else (a USB controller) now sits at the recorded address. The boot safety net
+  # trusts the record: a wrong sanitize is recoverable (Enable again), a wrong eGPU isn't.
   local dev="$ROOT/sys/devices/pci0000:00/0000:00:08.3/0000:09:00.0"
   mkdir -p "$dev"
   echo 0x0c0330 > "$dev/class"
@@ -294,11 +297,27 @@ cold_boot_symmetry() {
   record_egpu_pci 0000:09:00.0
   egpu_present nvidia
   echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"
-  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
   run_sync
   assert_success
-  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
-  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  [[ "$LOG" == *"no eGPU PCI device was found"* ]]
+  run grep -c WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output 0
+}
+
+@test "Flow laptop, XG Mobile absent but egpu_enable 1: the internal NVIDIA dGPU isn't taken for it" {
+  # The internal dGPU is a display controller that isn't the boot VGA device, like the eGPU.
+  fake_gpu_add 0000:02:00.0 0x10de 0 card2 renderD130
+  record_egpu_pci
+  echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+  touch "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
+  run_sync
+  assert_success
+  [[ "$LOG" == *"XG Mobile not active: egpu_enable is 1 but no eGPU PCI device was found."* ]]
+  run grep -c WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output 0
+  assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
 }
 
 @test "primary user: Steam running as deck stays deck" {
