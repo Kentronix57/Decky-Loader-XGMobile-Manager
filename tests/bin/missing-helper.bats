@@ -43,9 +43,7 @@ check_missing_helper() {
 
 @test "migrate-logs: helper missing, exit 9" { check_missing_helper migrate-logs "$(dirname "$LOG_DIR")" "$LOG_DIR"; }
 
-# Run by hand, never by the tests otherwise: only the exit 9 before anything runs is checked.
-@test "mega-nuke.sh: helper missing, exit 9" { check_missing_helper mega-nuke.sh "$LOG_DIR"; }
-@test "mega-nuke-dry.sh: helper missing, exit 9" { check_missing_helper mega-nuke-dry.sh "$LOG_DIR"; }
+# mega-nuke*.sh run without the helper on purpose (see log-folder.bats).
 
 @test "the real bin/xgm-common.sh is still there" {
   assert [ -f "$XGM_REPO/bin/xgm-common.sh" ]

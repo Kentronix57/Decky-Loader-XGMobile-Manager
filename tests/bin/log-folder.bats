@@ -84,12 +84,46 @@ fake_install() {
     "$(printf '%s\n' xgmobile-manager xgmobile-manager/activity xgmobile-manager/activity/boot_sync.log)"
 }
 
-# The nuke scripts are run by hand and never executed by the tests; check their log names.
-@test "mega-nuke.sh logs to nuke.log, the dry run to nuke_dry.log" {
-  run grep -F 'tee "$LOG_DIR/nuke.log"' "$XGM_REPO/bin/mega-nuke.sh"
+# nuke_header <script> [with-helper]: a copy of bin/<script> that stops right after its banner
+# (the first line after the log setup), in a fake plugin bin dir, with or without xgm-common.sh.
+# The nuke itself never runs. Prints the bin dir.
+nuke_header() {
+  local dir="$BATS_TEST_TMPDIR/hb/plugins/xgmobile-manager/bin"
+  mkdir -p "$dir"
+  sed '/^echo "--- TOTAL SYSTEM RESTORATION ---"$/q' "$XGM_REPO/bin/$1" > "$dir/$1"
+  grep -qx 'echo "--- TOTAL SYSTEM RESTORATION ---"' "$dir/$1" || fail "$1: banner line not found"
+  ! grep -qE 'steamos-readonly|pacman|rm ' "$dir/$1" || fail "$1: the header reaches the nuke"
+  echo 'exit 0' >> "$dir/$1"
+  [ "${2:-}" != "with-helper" ] || cp "$XGM_REPO/bin/xgm-common.sh" "$dir/"
+  echo "$dir"
+}
+
+@test "mega-nuke.sh logs to activity/nuke.log, the dry run to nuke_dry.log" {
+  local dir activity="$BATS_TEST_TMPDIR/hb/logs/xgmobile-manager/activity"
+  dir=$(nuke_header mega-nuke.sh with-helper)
+  XGM_BIN_DIR="$dir" run_script mega-nuke.sh
   assert_success
-  run grep -F 'tee "$LOG_DIR/nuke_dry.log"' "$XGM_REPO/bin/mega-nuke-dry.sh"
+  assert_output "--- TOTAL SYSTEM RESTORATION ---"
+  assert_equal "$(cat "$activity/nuke.log")" "--- TOTAL SYSTEM RESTORATION ---"
+
+  rm -rf "$BATS_TEST_TMPDIR/hb"
+  dir=$(nuke_header mega-nuke-dry.sh with-helper)
+  XGM_BIN_DIR="$dir" run_script mega-nuke-dry.sh
   assert_success
-  run grep -F 'nuke.log"' "$XGM_REPO/bin/mega-nuke-dry.sh"
-  assert_failure
+  assert_equal "$(cat "$activity/nuke_dry.log")" "--- TOTAL SYSTEM RESTORATION ---"
+  assert [ ! -e "$activity/nuke.log" ]
+}
+
+@test "mega-nuke*.sh without xgm-common.sh: still runs, output on the terminal only" {
+  local script dir
+  for script in mega-nuke.sh mega-nuke-dry.sh; do
+    rm -rf "$BATS_TEST_TMPDIR/hb"
+    dir=$(nuke_header "$script")
+    assert [ ! -e "$dir/xgm-common.sh" ]
+    XGM_BIN_DIR="$dir" run_script "$script"
+    assert_success
+    assert_line "xgm-common.sh not found: not keeping a log file, output is on this terminal only."
+    assert_line "--- TOTAL SYSTEM RESTORATION ---"
+    assert [ ! -e "$BATS_TEST_TMPDIR/hb/logs" ]
+  done
 }

@@ -1,11 +1,14 @@
 #!/bin/bash
-# shellcheck source=bin/xgm-common.sh
-. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 # Run by hand: show the output and keep a copy in the plugin's log folder (its own file, so a
-# dry run never overwrites a real run's nuke.log).
-LOG_DIR="${1:-$(xgm_log_dir)}"
-mkdir -p "$LOG_DIR"
-exec > >(tee "$LOG_DIR/nuke_dry.log") 2>&1
+# dry run never overwrites a real run's nuke.log). This is the emergency tool and may be downloaded
+# on its own: without xgm-common.sh it still runs, with the output on the terminal only.
+# shellcheck source=bin/xgm-common.sh
+if . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" 2>/dev/null; then
+  LOG_DIR="${1:-$(xgm_log_dir)}"
+  mkdir -p "$LOG_DIR" && exec > >(tee "$LOG_DIR/nuke_dry.log") 2>&1
+else
+  echo "xgm-common.sh not found: not keeping a log file, output is on this terminal only."
+fi
 echo "--- TOTAL SYSTEM RESTORATION ---"
 steamos-readonly disable
 
