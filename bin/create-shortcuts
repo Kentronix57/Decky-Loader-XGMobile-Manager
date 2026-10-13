@@ -6,8 +6,7 @@ DATA_DIR=$4
 ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
-PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
-[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
+PRIMARY_USER=$(xgm_primary_user)
 DESKTOP_DIR="$ROOT/home/$PRIMARY_USER/Desktop"
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then

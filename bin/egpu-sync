@@ -25,32 +25,34 @@ if [[ "$OS_TYPE" != "steamos" && "$OS_TYPE" != *"cachyos"* ]]; then
   exit 0
 fi
 
-# Steam usually isn't running yet at boot: fall back to the first regular user with a home dir.
-PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
-if [ -z "$PRIMARY_USER" ]; then
-  for candidate in $(awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }' "$ROOT/etc/passwd" 2>/dev/null); do
-    if [ -d "$ROOT/home/$candidate" ]; then
-      PRIMARY_USER="$candidate"
-      break
-    fi
-  done
-fi
-[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
+# Steam usually isn't running yet at boot: xgm_primary_user falls back to the first regular user.
+PRIMARY_USER=$(xgm_primary_user)
 echo "Primary user: $PRIMARY_USER"
 
 ACTIVE=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || echo "0")
+CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected 2>/dev/null || echo "1")
+# The eGPU: by the PCI address egpu-enable recorded, else the non-boot-VGA card. Card numbers
+# change between boots, so the nodes are matched to the PCI device.
+EGPU_PCI=$(xgm_egpu_pci_paths "$DATA_DIR" | head -n 1)
+
+# Not active: egpu_enable off (or missing), the cable not locked, or "on" with no eGPU on the bus.
+REASON=""
 if [ "$ACTIVE" != "1" ]; then
+  REASON="egpu_enable is ${ACTIVE:-missing}"
+elif [ "$CONNECTED" = "0" ]; then
+  REASON="egpu_enable is 1 but the XG Mobile isn't connected (egpu_connected=0)"
+elif [ -z "$EGPU_PCI" ]; then
+  REASON="egpu_enable is 1 but no eGPU PCI device was found"
+fi
+if [ -n "$REASON" ]; then
+  echo "XG Mobile not active: $REASON."
   xgm_sanitize_environment "$PRIMARY_USER"
   echo "Boot safety net: XG Mobile not active, cleaned eGPU environment"
   exit 0
 fi
 
-# The eGPU: by the PCI address egpu-enable recorded, else the non-boot-VGA card. Card numbers
-# change between boots, so the nodes are matched to the PCI device.
-EGPU_PCI=$(xgm_egpu_pci_paths "$DATA_DIR" | head -n 1)
-
 # Graceful exit for AMD users
-if [ -z "$EGPU_PCI" ] || [ "$(cat "$EGPU_PCI/vendor" 2>/dev/null)" != "0x10de" ]; then
+if [ "$(cat "$EGPU_PCI/vendor" 2>/dev/null)" != "0x10de" ]; then
   echo "No NVIDIA eGPU detected. Native amdgpu drivers do not require DRM environment sync."
   echo "Sync complete (Skipped cleanly)."
   exit 0

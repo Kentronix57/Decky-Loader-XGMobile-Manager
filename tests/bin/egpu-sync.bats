@@ -245,3 +245,65 @@ cold_boot_symmetry() {
     [[ "$LOG" == *"OS: $os"* ]] || fail "expected OS: $os, log was: $LOG"
   done
 }
+
+@test "egpu_enable 1 but no eGPU PCI device: sanitized, reason logged" {
+  echo 1 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
+  run_sync
+  assert_success
+  [[ "$LOG" == *"XG Mobile not active: egpu_enable is 1 but no eGPU PCI device was found."* ]]
+  [[ "$LOG" == *"Boot safety net: XG Mobile not active, cleaned eGPU environment"* ]]
+  run grep -c WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output 0
+}
+
+@test "egpu_enable 1 but egpu_connected 0: sanitized, reason logged" {
+  egpu_present nvidia
+  set_connected 0
+  echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
+  run_sync
+  assert_success
+  [[ "$LOG" == *"XG Mobile not active: egpu_enable is 1 but the XG Mobile isn't connected (egpu_connected=0)."* ]]
+  run grep -c WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output 0
+}
+
+@test "egpu_enable 0: reason logged" {
+  run_sync
+  assert_success
+  [[ "$LOG" == *"XG Mobile not active: egpu_enable is 0."* ]]
+}
+
+@test "active, NVIDIA driver not bound yet (no DRM card), no record: PCI fallback still finds the eGPU" {
+  egpu_present nvidia
+  rm -rf "$ROOT/sys/class/drm/card1" "$ROOT/sys/class/drm/renderD129"
+  echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
+  run_sync
+  # Active, not sanitized: the eGPU is on the bus, only its card node is missing.
+  assert_failure 1
+  [[ "$LOG" == *"Failed to detect both GPUs"* ]]
+  run grep -c WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output 1
+}
+
+@test "recorded address that isn't a display controller: ignored" {
+  local dev="$ROOT/sys/devices/pci0000:00/0000:00:08.3/0000:09:00.0"
+  mkdir -p "$dev"
+  echo 0x0c0330 > "$dev/class"
+  ln -s "$dev" "$ROOT/sys/bus/pci/devices/0000:09:00.0"
+  record_egpu_pci 0000:09:00.0
+  egpu_present nvidia
+  echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+  run_sync
+  assert_success
+  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+}
+
+@test "primary user: Steam running as deck stays deck" {
+  steam_user deck
+  run_sync
+  assert_success
+  [[ "$LOG" == *"Primary user: deck"* ]]
+}

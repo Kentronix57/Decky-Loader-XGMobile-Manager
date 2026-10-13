@@ -43,6 +43,22 @@ xgm_ro_enable() {
   fi
 }
 
+# The user whose session the plugin configures: the owner of the Steam process; when Steam isn't
+# running (e.g. at boot), the first regular user (uid 1000-65533) with a home dir; else "deck".
+xgm_primary_user() {
+  local user candidate
+  user=$(ps -o user= -C steam | head -n 1 | xargs)
+  if [ -z "$user" ]; then
+    for candidate in $(awk -F: '$3 >= 1000 && $3 < 65534 { print $1 }' "$ROOT/etc/passwd" 2>/dev/null); do
+      if [ -d "$ROOT/home/$candidate" ]; then
+        user="$candidate"
+        break
+      fi
+    done
+  fi
+  echo "${user:-deck}"
+}
+
 # The host OS, with the same rules as main.py get_os_type: steamos | cachyos | bazzite |
 # bazzite-nvidia | unsupported. For callers that don't get the OS as an argument (egpu-sync at boot).
 xgm_os_type() {
@@ -86,21 +102,23 @@ xgm_sanitize_environment() {
 
 # The eGPU's PCI device dir(s) in sysfs, one per line, resolved in this order:
 #   1. the PCI address egpu-enable recorded in <data_dir>/egpu_pci_address, if that device exists
-#   2. the DRM card(s) that aren't the boot VGA device (boot_vga != 1)
+#      and is a display controller (PCI class 0x03....)
+#   2. the display controller(s) that aren't the boot VGA device (boot_vga != 1); read from the PCI
+#      bus, not the DRM cards, so it works before a driver is bound (early boot)
 #   3. nothing
 # DRM card numbers change between boots; the PCI address of the XG Mobile slot doesn't.
 xgm_egpu_pci_paths() {
-  local addr card
+  local addr dev
   addr=$(cat "$1/egpu_pci_address" 2>/dev/null)
-  if [[ "$addr" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] && [ -e "$ROOT/sys/bus/pci/devices/$addr" ]; then
+  if [[ "$addr" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]] \
+    && [[ "$(cat "$ROOT/sys/bus/pci/devices/$addr/class" 2>/dev/null)" == 0x03* ]]; then
     readlink -f "$ROOT/sys/bus/pci/devices/$addr"
     return 0
   fi
-  for card in $ROOT/sys/class/drm/card*; do
-    [[ "$(basename "$card")" =~ ^card[0-9]+$ ]] || continue
-    [ -e "$card/device" ] || continue
-    [ "$(cat "$card/device/boot_vga" 2>/dev/null)" = "1" ] && continue
-    readlink -f "$card/device"
+  for dev in $ROOT/sys/bus/pci/devices/*; do
+    [[ "$(cat "$dev/class" 2>/dev/null)" == 0x03* ]] || continue
+    [ "$(cat "$dev/boot_vga" 2>/dev/null)" = "1" ] && continue
+    readlink -f "$dev"
   done
 }
 
@@ -112,5 +130,19 @@ xgm_drm_nodes() {
     name=$(basename "$entry")
     [[ "$name" =~ ^(card|renderD)[0-9]+$ ]] || continue
     [ "$(readlink -f "$entry/device" 2>/dev/null)" = "$1" ] && echo "$name"
+  done
+}
+
+# xgm_fb_nodes <pci dir>: the framebuffer devices (fb0, fb1...) that belong to that PCI device,
+# matched through each sys/class/graphics entry's device link.
+xgm_fb_nodes() {
+  local entry name target
+  for entry in $ROOT/sys/class/graphics/fb*; do
+    name=$(basename "$entry")
+    [[ "$name" =~ ^fb[0-9]+$ ]] || continue
+    target=$(readlink -f "$entry/device" 2>/dev/null)
+    if [ -n "$target" ] && { [ "$target" = "$1" ] || [[ "$target" == "$1"/* ]]; }; then
+      echo "$name"
+    fi
   done
 }
