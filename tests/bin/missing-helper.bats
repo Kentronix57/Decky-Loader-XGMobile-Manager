@@ -41,6 +41,8 @@ check_missing_helper() {
   check_missing_helper install-nvidia-cachyos.sh "$LOG_DIR" "$DATA_DIR"
 }
 
+@test "migrate-logs: helper missing, exit 9" { check_missing_helper migrate-logs "$(dirname "$LOG_DIR")" "$LOG_DIR"; }
+
 # Run by hand, never by the tests otherwise: only the exit 9 before anything runs is checked.
 @test "mega-nuke.sh: helper missing, exit 9" { check_missing_helper mega-nuke.sh "$LOG_DIR"; }
 @test "mega-nuke-dry.sh: helper missing, exit 9" { check_missing_helper mega-nuke-dry.sh "$LOG_DIR"; }
