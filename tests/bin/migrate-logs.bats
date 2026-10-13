@@ -115,6 +115,20 @@ EOF
   assert [ ! -e "$LOG_DIR/archive" ]
 }
 
+@test "links other than the old _latest ones are left alone" {
+  old xgmobile_manager_debug.log
+  echo "elsewhere" > "$BATS_TEST_TMPDIR/elsewhere.log"
+  ln -s "$BATS_TEST_TMPDIR/elsewhere.log" "$LOGS_ROOT/xgmobile_manager_notes.log"
+  ln -s "$LOGS_ROOT/xgmobile_manager_debug.log" "$LOGS_ROOT/xgmobile_debug.log"
+  run_migrate
+  assert_success
+  assert_equal "$(readlink "$LOGS_ROOT/xgmobile_manager_notes.log")" "$BATS_TEST_TMPDIR/elsewhere.log"
+  assert_equal "$(readlink "$LOGS_ROOT/xgmobile_debug.log")" "$LOGS_ROOT/xgmobile_manager_debug.log"
+  assert [ ! -e "$LOG_DIR/notes.log" ]
+  assert [ ! -e "$LOG_DIR/archive" ]
+  assert_equal "$(cat "$LOG_DIR/debug.log")" "old xgmobile_manager_debug.log"
+}
+
 @test "_latest links: an existing new link is kept" {
   old xgmobile_manager_enable_nvidia.log
   ln -s "$LOGS_ROOT/xgmobile_manager_enable_nvidia.log" "$LOGS_ROOT/xgmobile_manager_enable_latest.log"

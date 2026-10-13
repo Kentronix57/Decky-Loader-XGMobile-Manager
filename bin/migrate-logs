@@ -8,7 +8,8 @@
 #
 #   - LOGS_ROOT/xgmobile_manager_<name>.log and the legacy xgmobile_<name>.log -> LOG_DIR/<name>.log.
 #     If that exists, LOG_DIR/archive/<name>.log, then .<mtime>[.N]. Nothing is overwritten.
-#   - The old *_latest.log links are removed, and LOG_DIR/{enable,eject}_latest.log recreated.
+#   - The old *_latest.log links are removed (no other link), and LOG_DIR/{enable,eject}_latest.log
+#     recreated.
 #   - Failed DKMS builds (LOGS_ROOT/nvidia*/*/build/make.log) -> LOG_DIR/dkms/.
 #   - "Enable XG Mobile" desktop shortcuts: the old log dir argument -> LOG_DIR.
 # Anything else (Decky's logs, other plugins' logs) is left alone. What changed goes to
@@ -53,12 +54,13 @@ move() {
 
 [ -d "$LOGS_ROOT" ] || exit 0
 
-# 1. Log files. Links are handled after, once their targets have moved.
+# 1. Log files. The old *_latest.log links are handled after, once their targets have moved;
+# any other link is left alone.
 OLD_LINKS=()
 for old in "$LOGS_ROOT"/xgmobile_*.log; do
   name=$(basename "$old")
   if [ -L "$old" ]; then
-    OLD_LINKS+=("$old")
+    [[ "$name" == *_latest.log ]] && OLD_LINKS+=("$old")
     continue
   fi
   [ -f "$old" ] || continue
