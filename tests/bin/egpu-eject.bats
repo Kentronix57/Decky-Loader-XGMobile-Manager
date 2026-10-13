@@ -457,6 +457,26 @@ assert_cancelled() {
   assert [ ! -e "$DATA_DIR/last_result.json" ]
 }
 
+@test "safety stop with supergfxd running (Flow laptop): supergfxd started again" {
+  set_product "ROG Flow X13 GV301QH"
+  supergfxd_active
+  egpu_present nvidia
+  gpu_holders unkillable
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  assert_called_before "systemctl stop supergfxd.service" "systemctl start supergfxd.service"
+}
+
+@test "safety stop without supergfxd: supergfxd not started" {
+  egpu_present nvidia
+  gpu_holders unkillable
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  refute_called "systemctl start supergfxd.service"
+}
+
 @test "egpu_enable already 0: no release or wait, environment still sanitized, DM restarted" {
   echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
   run_plugin_script egpu-eject nvidia

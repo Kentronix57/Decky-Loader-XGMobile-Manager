@@ -180,6 +180,10 @@ if [ "$RELEASE" -eq 1 ]; then
       fi
       systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null || true
     fi
+    if [ "$SUPERGFX_TRIG" -eq 1 ]; then
+      echo "Restarting supergfxd..."
+      systemctl start supergfxd.service 2>/dev/null || true
+    fi
     date +%s > "$CANCEL_MARKER"
     echo "Starting $DM_SERVICE..."
     systemctl start "$DM_SERVICE"
