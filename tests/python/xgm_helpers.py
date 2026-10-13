@@ -14,7 +14,11 @@ FAKES = Path(__file__).resolve().parent / "fakes"
 if str(FAKES) not in sys.path:
   sys.path.insert(0, str(FAKES))
 
+import decky  # noqa: E402  (the fake, from FAKES)
+
 _counter = itertools.count()
+# The fake's own value (/home/deck/...), restored after every load so nothing imports it by accident.
+_FAKE_DECKY_LOG_DIR = decky.DECKY_PLUGIN_LOG_DIR
 
 # Representative /etc/os-release contents per OS.
 OS_RELEASES = {
@@ -26,24 +30,35 @@ OS_RELEASES = {
 }
 
 
-def load_main(plugin_dir):
+def load_main(plugin_dir, decky_log_dir=True):
   """
   Copies main.py and package.json into <tmp>/homebrew/plugins/xgmobile-manager and imports the copy.
-  main.py derives LOG_DIR/DATA_DIR from its own location and runs os.makedirs at import time,
-  so importing the repo copy would create directories outside the repo.
+  main.py derives DATA_DIR from its own location, takes LOG_DIR from decky.DECKY_PLUGIN_LOG_DIR,
+  and runs os.makedirs at import time, so importing the repo copy would create directories outside
+  the repo. The fake decky's DECKY_PLUGIN_LOG_DIR is pointed at the copy's homebrew, as Decky does;
+  decky_log_dir=None removes it (main.py's fallback).
   """
   plugin_dir = Path(plugin_dir)
   plugin_dir.mkdir(parents=True, exist_ok=True)
   (plugin_dir / "bin").mkdir(exist_ok=True)
   shutil.copy2(REPO / "main.py", plugin_dir / "main.py")
   shutil.copy2(REPO / "package.json", plugin_dir / "package.json")
+  homebrew = plugin_dir.parent.parent.resolve()
+
+  if decky_log_dir is None:
+    if hasattr(decky, "DECKY_PLUGIN_LOG_DIR"):
+      delattr(decky, "DECKY_PLUGIN_LOG_DIR")
+  else:
+    decky.DECKY_PLUGIN_LOG_DIR = str(homebrew / "logs" / plugin_dir.name)
 
   name = f"xgm_main_{next(_counter)}"
   spec = importlib.util.spec_from_file_location(name, plugin_dir / "main.py")
   mod = importlib.util.module_from_spec(spec)
-  spec.loader.exec_module(mod)
+  try:
+    spec.loader.exec_module(mod)
+  finally:
+    decky.DECKY_PLUGIN_LOG_DIR = _FAKE_DECKY_LOG_DIR
 
-  homebrew = plugin_dir.parent.parent.resolve()
   assert Path(mod.DATA_DIR).resolve().is_relative_to(homebrew), mod.DATA_DIR
   assert Path(mod.LOG_DIR).resolve().is_relative_to(homebrew), mod.LOG_DIR
   return mod

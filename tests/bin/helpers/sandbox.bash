@@ -61,7 +61,7 @@ make_root() {
   # Scripts use $ROOT unquoted, so the path must not contain spaces or glob characters.
   [[ "$ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "unsafe sandbox path for unquoted \$ROOT: $ROOT"
 
-  LOG_DIR="$BATS_TEST_TMPDIR/homebrew/logs"
+  LOG_DIR="$BATS_TEST_TMPDIR/homebrew/logs/xgmobile-manager"
   DATA_DIR="$BATS_TEST_TMPDIR/homebrew/data/xgmobile-manager"
   SHIM_LOG="$BATS_TEST_TMPDIR/shim.log"
   SHIM_STATE="$BATS_TEST_TMPDIR/shim-state"

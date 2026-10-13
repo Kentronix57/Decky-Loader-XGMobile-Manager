@@ -121,7 +121,7 @@ cold_boot_symmetry() {
   XGM_BIN_DIR="$dir" run_script egpu-sync
   assert_success
   assert_equal "$output" ""
-  run cat "$homebrew/logs/xgmobile_manager_boot_sync.log"
+  run cat "$homebrew/logs/xgmobile-manager/boot_sync.log"
   assert_line --partial "Boot safety net: XG Mobile not active"
 }
 

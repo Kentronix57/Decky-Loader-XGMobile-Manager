@@ -8,12 +8,13 @@
 ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
-# <homebrew>/plugins/xgmobile-manager/bin -> <homebrew>/logs and <homebrew>/data/xgmobile-manager
+# <homebrew>/plugins/xgmobile-manager/bin -> <homebrew>/logs/xgmobile-manager and
+# <homebrew>/data/xgmobile-manager
 HOMEBREW_DIR=$(readlink -m "$(dirname "$(readlink -f "$0")")/../../..")
-LOG_DIR="${1:-$HOMEBREW_DIR/logs}"
+LOG_DIR="${1:-$(xgm_log_dir)}"
 DATA_DIR="${2:-$HOMEBREW_DIR/data/xgmobile-manager}"
-if mkdir -p "$LOG_DIR" 2>/dev/null && : > "$LOG_DIR/xgmobile_manager_boot_sync.log" 2>/dev/null; then
-  exec > "$LOG_DIR/xgmobile_manager_boot_sync.log" 2>&1
+if mkdir -p "$LOG_DIR" 2>/dev/null && : > "$LOG_DIR/boot_sync.log" 2>/dev/null; then
+  exec > "$LOG_DIR/boot_sync.log" 2>&1
 fi
 
 echo "--- Boot DRM Sync Started at $(date) ---"

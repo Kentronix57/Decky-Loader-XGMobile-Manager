@@ -1,4 +1,10 @@
 #!/bin/bash
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
+# Run by hand: show the output and keep a copy in the plugin's log folder.
+LOG_DIR="${1:-$(xgm_log_dir)}"
+mkdir -p "$LOG_DIR"
+exec > >(tee "$LOG_DIR/nuke.log") 2>&1
 echo "--- TOTAL SYSTEM RESTORATION ---"
 steamos-readonly disable
 

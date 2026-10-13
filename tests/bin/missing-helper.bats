@@ -41,6 +41,10 @@ check_missing_helper() {
   check_missing_helper install-nvidia-cachyos.sh "$LOG_DIR" "$DATA_DIR"
 }
 
+# Run by hand, never by the tests otherwise: only the exit 9 before anything runs is checked.
+@test "mega-nuke.sh: helper missing, exit 9" { check_missing_helper mega-nuke.sh "$LOG_DIR"; }
+@test "mega-nuke-dry.sh: helper missing, exit 9" { check_missing_helper mega-nuke-dry.sh "$LOG_DIR"; }
+
 @test "the real bin/xgm-common.sh is still there" {
   assert [ -f "$XGM_REPO/bin/xgm-common.sh" ]
 }
