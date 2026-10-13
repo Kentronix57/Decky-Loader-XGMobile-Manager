@@ -447,12 +447,14 @@ assert_cancelled() {
   assert_nvidia_services_restored
 }
 
-@test "a later successful eject clears an old cancel marker" {
+@test "a later successful eject clears an old cancel marker and saved result" {
   date +%s > "$DATA_DIR/last_eject_cancelled"
+  echo '{"timestamp": 0, "result": {}}' > "$DATA_DIR/last_result.json"
   egpu_present amd
   run_plugin_script egpu-eject amd
   assert_success
   assert [ ! -e "$DATA_DIR/last_eject_cancelled" ]
+  assert [ ! -e "$DATA_DIR/last_result.json" ]
 }
 
 @test "egpu_enable already 0: no release or wait, environment still sanitized, DM restarted" {

@@ -37,6 +37,16 @@ nvidia_ready() {
   refute_called "systemctl start sddm.service"
 }
 
+@test "a saved result from an earlier run is dropped at the start, even when this run fails" {
+  echo '{"timestamp": 0, "result": {}}' > "$DATA_DIR/last_result.json"
+  date +%s > "$DATA_DIR/last_eject_cancelled"
+  set_connected 0
+  run_plugin_script egpu-enable nvidia
+  assert_failure 1
+  assert [ ! -e "$DATA_DIR/last_result.json" ]
+  assert [ ! -e "$DATA_DIR/last_eject_cancelled" ]
+}
+
 @test "egpu_connected missing: treated as not locked, exit 1" {
   rm "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected"
   run_plugin_script egpu-enable amd

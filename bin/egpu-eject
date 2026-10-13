@@ -11,7 +11,8 @@ PRIMARY_USER=$(xgm_primary_user)
 mkdir -p "$DATA_DIR/configs"
 # Written on exit 7 so the plugin can show the cancel after the display manager restart.
 CANCEL_MARKER="$DATA_DIR/last_eject_cancelled"
-rm -f "$CANCEL_MARKER"
+# A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
+rm -f "$CANCEL_MARKER" "$DATA_DIR/last_result.json"
 exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"

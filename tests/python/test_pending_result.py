@@ -142,3 +142,46 @@ def test_desktop_eject_success_switches_to_game_mode(xgm, desktop_eject):
   calls = desktop_eject(0)
   assert session_switches(calls), "expected steamos-session-select"
   assert pending(xgm) is None
+
+
+# The desktop Enable link runs egpu-enable itself (watch_enable_request -> _handle_enable_request).
+@pytest.fixture
+def desktop_enable(xgm, monkeypatch):
+  monkeypatch.setenv("DECKY_USER", pwd.getpwuid(os.getuid()).pw_name)
+  xgm.set_os("steamos")
+  calls = []
+  state = {"enable_rc": 0}
+
+  def fake_run(cmd, *args, **kwargs):
+    calls.append(cmd)
+    rc = state["enable_rc"] if cmd[0].endswith("/bin/egpu-enable") else 0
+    return subprocess.CompletedProcess(cmd, rc, stdout="", stderr="")
+
+  monkeypatch.setattr(xgm.mod.subprocess, "run", fake_run)
+
+  def run(rc):
+    state["enable_rc"] = rc
+    xgm.run(xgm.plugin._handle_enable_request())
+    return calls
+
+  return run
+
+
+def test_desktop_enable_failure_is_kept_and_skips_the_session_switch(xgm, desktop_enable):
+  calls = desktop_enable(5)
+  assert any(c[0].endswith("/bin/egpu-enable") for c in calls)
+  assert session_switches(calls) == []
+  res = pending(xgm)
+  assert res["code"] == 5
+  assert res["script"] == "egpu-enable"
+
+
+def test_desktop_enable_success_clears_an_older_eject_failure(xgm, desktop_enable):
+  xgm.stub("egpu-eject", "exit 97")
+  execute(xgm, "egpu-eject")
+  write_marker(xgm)
+  calls = desktop_enable(0)
+  assert session_switches(calls), "expected steamos-session-select"
+  assert not os.path.exists(xgm.mod.PENDING_RESULT_PATH)
+  assert not os.path.exists(xgm.mod.EJECT_CANCELLED_MARKER)
+  assert pending(xgm) is None

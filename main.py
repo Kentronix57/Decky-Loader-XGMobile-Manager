@@ -581,6 +581,105 @@ class Plugin:
       # Check every 2 seconds
       await asyncio.sleep(2)
 
+  async def _handle_enable_request(self):
+    """Runs egpu-enable for the desktop Enable link, then switches to Desktop Mode if it worked."""
+    # 2. Grab the variables directly from the backend, no JSON needed!
+    vendor = await self.get_setting("gpu_vendor", "nvidia")
+    os_type = self.get_os_type()
+
+    # 3. Safe dynamic user resolution
+    decky_user = os.environ.get("DECKY_USER")
+    target_user = None
+  
+    if decky_user:
+      try: target_user = pwd.getpwnam(decky_user)
+      except KeyError: pass
+  
+    if not target_user:
+      try:
+        res = subprocess.run(["pgrep", "-x", "steam"], capture_output=True, text=True)
+        if res.returncode == 0 and res.stdout.strip():
+          pid = res.stdout.strip().split()[0]
+          uid = os.stat(f"/proc/{pid}").st_uid
+          target_user = pwd.getpwuid(uid)
+      except Exception:
+        pass
+  
+    if not target_user:
+      for p in pwd.getpwall():
+        if 1000 <= p.pw_uid < 65534 and p.pw_dir.startswith('/home/'):
+          target_user = p
+          break
+  
+    if not target_user:
+      target_user = pwd.getpwnam("deck")
+      
+    username = target_user.pw_name
+    home_dir = target_user.pw_dir
+    desktop_log_path = ENABLEDESKTOP_LOG #f"{home_dir}/homebrew/logs/xgmobile_desktop_enable_request.log"
+  
+    def write_log(message):
+      with open(desktop_log_path, "a") as f:
+        f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
+
+    write_log("-----------------------------------------")
+    write_log(f"Desktop Icon triggered Enable for user: {username} | Vendor: {vendor} | OS: {os_type}")
+  
+    # 4. Use dynamic plugin paths instead of hardcoded strings
+    script_path = os.path.join(self.get_plugin_dir(), "bin", "egpu-enable")
+    
+    sterile_env = {
+      "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
+      "USER": username,
+      "HOME": home_dir
+    }
+
+    result = subprocess.run([
+      script_path, 
+      vendor, os_type, LOG_DIR, DATA_DIR
+    ], capture_output=True, text=True, check=False, env=sterile_env)
+  
+    write_log(f"Command exited with code: {result.returncode}")
+    if result.returncode != 0:
+      # Saved for the panel, which shows it the next time it opens.
+      _record_result(_script_error_result("egpu-enable", result.returncode))
+    else:
+      _clear_pending_result()
+    if result.returncode == 0: 
+      desktopmode = "1" #await self.get_setting("desktop_mode", "0")
+      if desktopmode == "1":
+        desktopdefault = "0" #await self.get_setting("desktop_default", "0")
+        uid = target_user.pw_uid
+        
+        if os_type != "steamos":
+          write_log(f"Desktop Link Enable detected Boot-To-Desktop. Waiting 5 seconds for Steam to stabilize...")
+          await asyncio.sleep(5)
+
+        write_log(f"Executing OS Desktop Transition...")
+        
+        safe_env = {
+          "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
+          "USER": username,
+          "HOME": home_dir,
+          "XDG_RUNTIME_DIR": f"/run/user/{uid}",
+          "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
+        }
+        
+        for session_args in _session_select_calls(os_type, desktopdefault, "desktop"):
+          write_log(f"Desktop {os_type} detected, running following session select: {' '.join(session_args)}")
+
+          transition_result = subprocess.run(
+            ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+            capture_output=True, text=True, check=False, env=safe_env
+          )
+
+          write_log(f"Transition Code: {transition_result.returncode}")
+          if transition_result.stdout: write_log("STDOUT:\n" + transition_result.stdout.strip())
+          if transition_result.stderr: write_log("STDERR:\n" + transition_result.stderr.strip())
+    if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
+    if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
+  
+
   async def watch_enable_request(self):
     request_file = "/tmp/xgmobile_enable_request"
     fallback_log = PYTHONERROR_LOG #"/tmp/xgmobile_python_crash.log"
@@ -591,97 +690,7 @@ class Plugin:
         os.remove(request_file)
         
         try:
-          # 2. Grab the variables directly from the backend, no JSON needed!
-          vendor = await self.get_setting("gpu_vendor", "nvidia")
-          os_type = self.get_os_type()
-
-          # 3. Safe dynamic user resolution
-          decky_user = os.environ.get("DECKY_USER")
-          target_user = None
-        
-          if decky_user:
-            try: target_user = pwd.getpwnam(decky_user)
-            except KeyError: pass
-        
-          if not target_user:
-            try:
-              res = subprocess.run(["pgrep", "-x", "steam"], capture_output=True, text=True)
-              if res.returncode == 0 and res.stdout.strip():
-                pid = res.stdout.strip().split()[0]
-                uid = os.stat(f"/proc/{pid}").st_uid
-                target_user = pwd.getpwuid(uid)
-            except Exception:
-              pass
-        
-          if not target_user:
-            for p in pwd.getpwall():
-              if 1000 <= p.pw_uid < 65534 and p.pw_dir.startswith('/home/'):
-                target_user = p
-                break
-        
-          if not target_user:
-            target_user = pwd.getpwnam("deck")
-            
-          username = target_user.pw_name
-          home_dir = target_user.pw_dir
-          desktop_log_path = ENABLEDESKTOP_LOG #f"{home_dir}/homebrew/logs/xgmobile_desktop_enable_request.log"
-        
-          def write_log(message):
-            with open(desktop_log_path, "a") as f:
-              f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {message}\n")
-
-          write_log("-----------------------------------------")
-          write_log(f"Desktop Icon triggered Enable for user: {username} | Vendor: {vendor} | OS: {os_type}")
-        
-          # 4. Use dynamic plugin paths instead of hardcoded strings
-          script_path = os.path.join(self.get_plugin_dir(), "bin", "egpu-enable")
-          
-          sterile_env = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
-            "USER": username,
-            "HOME": home_dir
-          }
-
-          result = subprocess.run([
-            script_path, 
-            vendor, os_type, LOG_DIR, DATA_DIR
-          ], capture_output=True, text=True, check=False, env=sterile_env)
-        
-          write_log(f"Command exited with code: {result.returncode}")
-          if result.returncode == 0: 
-            desktopmode = "1" #await self.get_setting("desktop_mode", "0")
-            if desktopmode == "1":
-              desktopdefault = "0" #await self.get_setting("desktop_default", "0")
-              uid = target_user.pw_uid
-              
-              if os_type != "steamos":
-                write_log(f"Desktop Link Enable detected Boot-To-Desktop. Waiting 5 seconds for Steam to stabilize...")
-                await asyncio.sleep(5)
-
-              write_log(f"Executing OS Desktop Transition...")
-              
-              safe_env = {
-                "PATH": "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin",
-                "USER": username,
-                "HOME": home_dir,
-                "XDG_RUNTIME_DIR": f"/run/user/{uid}",
-                "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
-              }
-              
-              for session_args in _session_select_calls(os_type, desktopdefault, "desktop"):
-                write_log(f"Desktop {os_type} detected, running following session select: {' '.join(session_args)}")
-
-                transition_result = subprocess.run(
-                  ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
-                  capture_output=True, text=True, check=False, env=safe_env
-                )
-
-                write_log(f"Transition Code: {transition_result.returncode}")
-                if transition_result.stdout: write_log("STDOUT:\n" + transition_result.stdout.strip())
-                if transition_result.stderr: write_log("STDERR:\n" + transition_result.stderr.strip())
-          if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
-          if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
-        
+          await self._handle_enable_request()
         except Exception as e:
           # Bleed the error to the fallback log, but DO NOT return. Let the loop survive.
           with open(fallback_log, "a") as f:
