@@ -76,6 +76,7 @@ for old in "$LOGS_ROOT"/xgmobile_*.log; do
   [ -f "$old" ] || continue
   case "$name" in
     xgmobile_manager_?*.log) name="${name#xgmobile_manager_}" ;;
+    xgmobile_manager_*) continue ;;  # nothing after the prefix
     xgmobile_?*.log) name="${name#xgmobile_}" ;;
     *) continue ;;
   esac

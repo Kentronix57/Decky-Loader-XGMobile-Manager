@@ -250,6 +250,7 @@ EOF
   echo "loader" > "$LOGS_ROOT/loader.log"
   echo "notes" > "$LOGS_ROOT/xgmobile_notes.txt"
   echo "empty name" > "$LOGS_ROOT/xgmobile_.log"
+  echo "empty name" > "$LOGS_ROOT/xgmobile_manager_.log"
   mkdir -p "$LOGS_ROOT/xgmobile_dir.log"
   mkdir -p "$LOGS_ROOT/sub"
   echo "nested" > "$LOGS_ROOT/sub/xgmobile_manager_enable_nvidia.log"
