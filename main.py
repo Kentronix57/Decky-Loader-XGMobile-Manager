@@ -18,6 +18,9 @@ HOMEBREW_DIR = os.path.abspath(os.path.join(PLUGIN_DIR, "../../"))
 # Decky's per-plugin log folder (<homebrew>/logs/<plugin folder>), which also holds Decky's own
 # timestamped logs for this plugin.
 LOG_DIR = getattr(decky, "DECKY_PLUGIN_LOG_DIR", None) or os.path.join(HOMEBREW_DIR, "logs", os.path.basename(PLUGIN_DIR))
+# Where older versions logged (and what their desktop shortcuts pass); bin/migrate-logs moves it.
+LEGACY_LOGS_ROOT = os.path.join(HOMEBREW_DIR, "logs")
+MIGRATE_LOGS_TIMEOUT = 30  # seconds
 DATA_DIR = os.path.join(HOMEBREW_DIR, "data", "xgmobile-manager")
 ENABLE_LOG = os.path.join(LOG_DIR, "enable_latest.log")
 ENABLEDESKTOP_LOG = os.path.join(LOG_DIR, "desktop_enable_request.log")
@@ -238,6 +241,13 @@ def _log_python_error(message):
   except Exception:
     pass
 
+def _script_env():
+  """The environment for bin/ scripts: Decky's, without its library path and proxies."""
+  env = os.environ.copy()
+  for key in ("LD_LIBRARY_PATH", "http_proxy", "https_proxy", "ALL_PROXY"):
+    env.pop(key, None)
+  return env
+
 def _short_exc(e, limit=120):
   """One-line, length-capped exception text for toasts and hints."""
   text = (str(e).strip().splitlines() or [type(e).__name__])[0]
@@ -419,11 +429,7 @@ class Plugin:
                      hint="The plugin installation looks incomplete. Reinstall it from the Decky store or the latest GitHub release.",
                      script=script_name, log_key="")
 
-    clean_env = os.environ.copy()
-    clean_env.pop("LD_LIBRARY_PATH", None)
-    clean_env.pop('http_proxy', None)
-    clean_env.pop('https_proxy', None)
-    clean_env.pop('ALL_PROXY', None)
+    clean_env = _script_env()
 
     try:
       with open(log_path, "w") as f:
@@ -455,6 +461,33 @@ class Plugin:
                      code=code, script=script_name, log_key=log_key)
 
     return _script_error_result(script_name, code)
+
+  async def _migrate_logs(self):
+    """
+    Runs bin/migrate-logs, which moves the logs older versions left in LEGACY_LOGS_ROOT into
+    LOG_DIR and keeps its own summary (migrate.log). A failure or a hang only goes to the Python
+    Critical Error Log: it never stops the plugin from loading.
+    """
+    script_path = os.path.join(self.get_plugin_dir(), "bin", "migrate-logs")
+    try:
+      process = await asyncio.create_subprocess_exec(
+        'bash', script_path, LEGACY_LOGS_ROOT, LOG_DIR,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env=_script_env()
+      )
+      try:
+        out, _ = await asyncio.wait_for(process.communicate(), MIGRATE_LOGS_TIMEOUT)
+      except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+        _log_python_error(f"migrate-logs didn't finish within {MIGRATE_LOGS_TIMEOUT}s and was stopped.")
+        return
+      if process.returncode != 0:
+        text = out.decode(errors="replace").strip()[-500:]
+        _log_python_error(f"migrate-logs failed (exit code {process.returncode}). See {os.path.join(LOG_DIR, 'migrate.log')}. {text}")
+    except Exception as e:
+      _log_python_error(f"migrate-logs couldn't run: {e}")
 
   async def enable_egpu(self):
     vendor = await self.get_setting("gpu_vendor", "nvidia")
@@ -1105,7 +1138,10 @@ class Plugin:
 
     Plugin.settings = SettingsManager(name="settings", settings_directory=os.environ["DECKY_PLUGIN_SETTINGS_DIR"])
     await Plugin.read(self)
-    
+
+    # Before the watchers, so a desktop-link request doesn't write a log mid-migration.
+    await self._migrate_logs()
+
     asyncio.create_task(self.watch_eject_request())
     asyncio.create_task(self.watch_enable_request())
 
