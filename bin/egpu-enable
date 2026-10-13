@@ -7,10 +7,10 @@ ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 SUPERGFX_TRIG=0
-#PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
-PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
-[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
+PRIMARY_USER=$(xgm_primary_user)
 mkdir -p "$DATA_DIR/configs"
+# A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
+rm -f "$DATA_DIR/last_result.json" "$DATA_DIR/last_eject_cancelled"
 exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
@@ -96,6 +96,24 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
     xgm_ro_enable
     echo "Self-repair complete."
   fi
+
+  # The boot safety net (egpu-sync) cleans up after a power-off without Eject, so it must be
+  # installed and enabled whenever the eGPU environment gets injected.
+  SYNC_UNIT="xgmobile-boot-sync.service"
+  # Its ExecStart is /usr/local/bin/egpu-sync: a symlink to the plugin's executable bin/egpu-sync.
+  SYNC_BIN="$REPO_ROOT/bin/egpu-sync"
+  if [ "$(cat "$REPO_ROOT/assets/services/$SYNC_UNIT" 2>/dev/null)" != "$(cat $ROOT/etc/systemd/system/$SYNC_UNIT 2>/dev/null)" ] \
+    || [ "$(readlink $ROOT/usr/local/bin/egpu-sync)" != "$SYNC_BIN" ] || [ ! -x "$SYNC_BIN" ] \
+    || ! systemctl is-enabled --quiet "$SYNC_UNIT"; then
+    echo "Installing and enabling the boot safety net ($SYNC_UNIT)..."
+    xgm_ro_disable
+    ln -sf "$SYNC_BIN" $ROOT/usr/local/bin/egpu-sync
+    [ -x "$SYNC_BIN" ] || chmod +x "$SYNC_BIN"
+    cp "$REPO_ROOT/assets/services/$SYNC_UNIT" $ROOT/etc/systemd/system/
+    systemctl daemon-reload
+    systemctl enable "$SYNC_UNIT"
+    xgm_ro_enable
+  fi
 fi
 
 if [ -L $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
@@ -132,7 +150,7 @@ if [[ "$OS_TYPE" == *"bazzite"* ]]; then
     systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null
     modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia 2>/dev/null || true
     modprobe nvidia_drm modeset=1 fbdev=1
-    modprobe nvidia_modeset nvidia_uvm nvidia
+    modprobe -a nvidia nvidia_modeset nvidia_uvm
   fi
 fi
 
@@ -158,6 +176,15 @@ if [ -z "$EGPU_CARD" ]; then
   exit 5
 fi
 echo "Success! eGPU dynamically detected as: $EGPU_CARD"
+# Card numbers change between boots; the PCI address of the XG Mobile slot doesn't. Eject and the
+# boot safety net find the eGPU by this address.
+EGPU_PCI_ADDR=$(basename "$(readlink -f "$ROOT/sys/class/drm/$(basename "$EGPU_CARD")/device")")
+if [[ "$EGPU_PCI_ADDR" =~ ^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$ ]]; then
+  echo "$EGPU_PCI_ADDR" > "$DATA_DIR/egpu_pci_address"
+  echo "eGPU PCI address: $EGPU_PCI_ADDR"
+else
+  echo "WARNING: Could not read the eGPU's PCI address."
+fi
 # Permissions (The ACL Hero)
 #echo "Setting user permissions for eGPU..."
 echo "Setting permissions for user: $PRIMARY_USER"
@@ -236,7 +263,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     echo "Loading NVIDIA modules..."
     modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia
     modprobe nvidia_drm modeset=1 fbdev=1
-    modprobe nvidia_modeset nvidia_uvm nvidia
+    modprobe -a nvidia nvidia_modeset nvidia_uvm
 
     # PERSISTENT DRIVER SETTINGS
     # We write the modeset to a config file so the kernel loads it at boot

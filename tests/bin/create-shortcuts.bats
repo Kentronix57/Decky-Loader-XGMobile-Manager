@@ -61,3 +61,24 @@ setup() {
   refute_called "steamos-readonly"
   assert [ -f "$DESKTOP/Enable XG Mobile.desktop" ]
 }
+
+@test "primary user: Steam not running, first regular user with a home dir" {
+  steam_not_running
+  mkdir -p "$ROOT/home/nohome"
+  nvidia_driver installed
+  run_plugin_script create-shortcuts nvidia
+  assert_success
+  assert [ -d "$ROOT/home/nohome/Desktop" ]
+  run cat "$ROOT/etc/sudoers.d/xgmobile-manager"
+  assert_output --partial "nohome ALL=(root)"
+}
+
+@test "primary user: Steam running as deck stays deck" {
+  steam_user deck
+  mkdir -p "$ROOT/home/deck"
+  nvidia_driver installed
+  run_plugin_script create-shortcuts nvidia
+  assert_success
+  run cat "$ROOT/etc/sudoers.d/xgmobile-manager"
+  assert_output --partial "deck ALL=(root)"
+}

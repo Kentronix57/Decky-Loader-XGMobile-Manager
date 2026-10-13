@@ -37,6 +37,16 @@ nvidia_ready() {
   refute_called "systemctl start sddm.service"
 }
 
+@test "a saved result from an earlier run is dropped at the start, even when this run fails" {
+  echo '{"timestamp": 0, "result": {}}' > "$DATA_DIR/last_result.json"
+  date +%s > "$DATA_DIR/last_eject_cancelled"
+  set_connected 0
+  run_plugin_script egpu-enable nvidia
+  assert_failure 1
+  assert [ ! -e "$DATA_DIR/last_result.json" ]
+  assert [ ! -e "$DATA_DIR/last_eject_cancelled" ]
+}
+
 @test "egpu_connected missing: treated as not locked, exit 1" {
   rm "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected"
   run_plugin_script egpu-enable amd
@@ -365,7 +375,7 @@ check_dm_fallback() {
   assert_success
 
   assert_called_before "modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia" "modprobe nvidia_drm modeset=1 fbdev=1"
-  assert_called "modprobe nvidia_modeset nvidia_uvm nvidia"
+  assert_called "modprobe -a nvidia nvidia_modeset nvidia_uvm"
   assert_called "systemctl start nvidia-persistenced nvidia-powerd"
   assert_equal "$(cat "$ROOT/etc/environment")" "$before"
   refute_called "systemctl set-environment"
@@ -405,4 +415,132 @@ check_dm_fallback() {
   run_plugin_script egpu-enable amd
   assert_success
   refute_called "systemctl disable supergfxd.service"
+}
+
+# The boot safety net is installed and enabled on every enable, not only during self-repair.
+SYNC_UNIT=xgmobile-boot-sync.service
+
+assert_sync_service_installed() {
+  cmp "$XGM_REPO/assets/services/$SYNC_UNIT" "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  assert_called "systemctl enable $SYNC_UNIT"
+  assert_called_before "systemctl daemon-reload" "systemctl enable $SYNC_UNIT"
+  assert [ -e "$SHIM_STATE/enabled/$SYNC_UNIT" ]
+}
+
+sync_service_missing() {
+  nvidia_ready "$1"
+  [ "$1" = "cachyos" ] && no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  [[ "$LOG" != *"Initiating self-repair"* ]]
+  [[ "$LOG" == *"Installing and enabling the boot safety net"* ]]
+  assert_sync_service_installed
+}
+
+@test "steamos: boot service missing (no self-repair needed): copied, daemon-reload, enabled" {
+  sync_service_missing steamos
+  assert_called_before "steamos-readonly disable" "systemctl enable $SYNC_UNIT"
+}
+
+@test "cachyos: boot service missing (no self-repair needed): copied, daemon-reload, enabled" {
+  sync_service_missing cachyos
+}
+
+@test "boot service installed but disabled (an older eject disabled it): enabled again" {
+  egpu_appears amd
+  sync_service_installed
+  rm -f "$SHIM_STATE/enabled/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+}
+
+@test "boot service unit outdated: replaced and re-enabled" {
+  egpu_appears amd
+  sync_service_installed
+  printf '%s\n' '[Service]' 'ExecStart=/usr/local/bin/egpu-sync nvidia steamos' > "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+}
+
+@test "boot service up to date and enabled: left alone" {
+  egpu_appears amd
+  sync_service_installed
+  run_plugin_script egpu-enable amd
+  assert_success
+  refute_called "systemctl enable $SYNC_UNIT"
+  refute_called "steamos-readonly"
+}
+
+@test "bazzite: boot service not installed (no environment injection there)" {
+  set_os bazzite-nvidia
+  egpu_appears nvidia
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  refute_called "systemctl enable $SYNC_UNIT"
+  assert [ ! -e "$ROOT/etc/systemd/system/$SYNC_UNIT" ]
+}
+
+@test "the eGPU's PCI address is recorded for eject and the boot safety net" {
+  nvidia_ready steamos
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+  [[ "$LOG" == *"eGPU PCI address: 0000:01:00.0"* ]]
+}
+
+@test "PCI address recorded whatever the card number (eGPU as card0, iGPU as card1)" {
+  gpu_numbering card1 renderD128 card0 renderD129
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  [[ "$LOG" == *"eGPU dynamically detected as: $ROOT/dev/dri/card0"* ]]
+  assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+}
+
+@test "bazzite: PCI address recorded too" {
+  set_os bazzite-nvidia
+  egpu_appears nvidia
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+}
+
+@test "boot service installed and enabled, but /usr/local/bin/egpu-sync missing: symlink created" {
+  egpu_appears amd
+  sync_service_installed
+  rm -f "$ROOT/usr/local/bin/egpu-sync"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_equal "$(readlink "$ROOT/usr/local/bin/egpu-sync")" "$(readlink -f "$XGM_REPO/bin/egpu-sync")"
+  assert [ -x "$ROOT/usr/local/bin/egpu-sync" ]
+  assert_sync_service_installed
+}
+
+@test "nvidia modules: nvidia_drm with its options, then the others with modprobe -a" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_called_before "modprobe nvidia_drm modeset=1 fbdev=1" "modprobe -a nvidia nvidia_modeset nvidia_uvm"
+  refute_called "modprobe nvidia_modeset"
+  assert [ -d "$ROOT/sys/module/nvidia_uvm" ]
+}
+
+@test "primary user: Steam not running, first regular user with a home dir" {
+  steam_not_running
+  mkdir -p "$ROOT/home/nohome"
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_called "sudo -u nohome XDG_RUNTIME_DIR=/run/user/64999 systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
+}
+
+@test "primary user: Steam running as deck stays deck" {
+  steam_user deck
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
 }

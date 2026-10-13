@@ -188,3 +188,11 @@ def test_every_executed_script_exists():
 def test_dead_repair_services_is_gone():
   assert not hasattr(STATIC.Plugin, "repair_services")
   assert "REPAIR_LOG" not in (REPO / "main.py").read_text()
+
+
+def test_nvidia_sleep_warning_is_bazzite_only():
+  # Sleep works with the NVIDIA eGPU on CachyOS and SteamOS; only Bazzite needs the warning.
+  src = (REPO / "src" / "components" / "QuickAccessContent.tsx").read_text()
+  expr = re.search(r"const showSleepWarning\s*=\s*(.*?);", src).group(1)
+  assert "osType.includes('bazzite')" in expr
+  assert "cachyos" not in expr and "steamos" not in expr

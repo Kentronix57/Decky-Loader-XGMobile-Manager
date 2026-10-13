@@ -1,69 +1,96 @@
 #!/bin/bash
-VENDOR=$1
-OS_TYPE=$2
+# Boot safety net, run by xgmobile-boot-sync.service before the display manager starts. Takes no
+# arguments (the optional ones, [log dir [data dir]], are for tests); the OS, user and eGPU are
+# detected.
+#   XG Mobile not active: undo everything egpu-enable injected, so a boot without the XG Mobile
+#     (powered off while enabled, never ejected) doesn't come up on a missing GPU.
+#   XG Mobile active with an NVIDIA eGPU: refresh the DRM node variables for this boot.
 ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
-PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
-[ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
-
-# Check if the ASUS WMI interface says the eGPU is actually connected
-ACTIVE=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || echo "0")
-
-if [ "$ACTIVE" -eq 0 ]; then
-    echo "Failsafe triggered: XG Mobile is not physically connected."
-    echo "Disabling sync service to clean up the environment."
-    systemctl disable xgmobile-boot-sync.service 2>/dev/null
-    
-    # Optionally: Clean up the kwin env file here just to be safe
-    rm -f "$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
-    
-    exit 0
+# <homebrew>/plugins/xgmobile-manager/bin -> <homebrew>/logs and <homebrew>/data/xgmobile-manager
+HOMEBREW_DIR=$(readlink -m "$(dirname "$(readlink -f "$0")")/../../..")
+LOG_DIR="${1:-$HOMEBREW_DIR/logs}"
+DATA_DIR="${2:-$HOMEBREW_DIR/data/xgmobile-manager}"
+if mkdir -p "$LOG_DIR" 2>/dev/null && : > "$LOG_DIR/xgmobile_manager_boot_sync.log" 2>/dev/null; then
+  exec > "$LOG_DIR/xgmobile_manager_boot_sync.log" 2>&1
 fi
 
 echo "--- Boot DRM Sync Started at $(date) ---"
+OS_TYPE=$(xgm_os_type)
+echo "OS: $OS_TYPE"
+
+if [[ "$OS_TYPE" != "steamos" && "$OS_TYPE" != *"cachyos"* ]]; then
+  echo "$OS_TYPE: egpu-enable doesn't inject the eGPU environment here. Skipping."
+  exit 0
+fi
+
+# Steam usually isn't running yet at boot: xgm_primary_user falls back to the first regular user.
+PRIMARY_USER=$(xgm_primary_user)
+echo "Primary user: $PRIMARY_USER"
+
+ACTIVE=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || echo "0")
+CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected 2>/dev/null || echo "1")
+# The eGPU: by the PCI address egpu-enable recorded (strict: a recorded device that's gone means
+# the eGPU is absent), else the non-boot-VGA card. Card numbers change between boots, so the nodes
+# are matched to the PCI device.
+EGPU_PCI=$(xgm_egpu_pci_paths "$DATA_DIR" strict | head -n 1)
+
+# Not active: egpu_enable off (or missing), the cable not locked, or "on" with no eGPU on the bus.
+REASON=""
+if [ "$ACTIVE" != "1" ]; then
+  REASON="egpu_enable is ${ACTIVE:-missing}"
+elif [ "$CONNECTED" = "0" ]; then
+  REASON="egpu_enable is 1 but the XG Mobile isn't connected (egpu_connected=0)"
+elif [ -z "$EGPU_PCI" ]; then
+  REASON="egpu_enable is 1 but no eGPU PCI device was found"
+fi
+if [ -n "$REASON" ]; then
+  echo "XG Mobile not active: $REASON."
+  xgm_sanitize_environment "$PRIMARY_USER"
+  echo "Boot safety net: XG Mobile not active, cleaned eGPU environment"
+  exit 0
+fi
 
 # Graceful exit for AMD users
-if [ "$VENDOR" == "amd" ]; then
-  echo "AMD eGPU detected. Native amdgpu drivers do not require DRM environment sync."
+if [ "$(cat "$EGPU_PCI/vendor" 2>/dev/null)" != "0x10de" ]; then
+  echo "No NVIDIA eGPU detected. Native amdgpu drivers do not require DRM environment sync."
   echo "Sync complete (Skipped cleanly)."
   exit 0
 fi
 
-if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
-  # Foolproof detection of exact DRM nodes based on hardware vendor ID
-  for card in $ROOT/sys/class/drm/card*; do
-    HW_VENDOR=$(cat $card/device/vendor 2>/dev/null)
-    if [ "$HW_VENDOR" == "0x10de" ]; then # NVIDIA ID
-      EGPU_CARD="/dev/dri/$(basename $card)"
-    elif [ "$HW_VENDOR" == "0x1002" ] || [ "$HW_VENDOR" == "0x1022" ]; then # AMD IDs
-      IGPU_CARD="/dev/dri/$(basename $card)"
-    fi
-  done
-
-  if [ -z "$EGPU_CARD" ] || [ -z "$IGPU_CARD" ]; then
-    echo "WARNING: Failed to detect both GPUs on the PCIe bus. Sync aborted."
-    exit 1
+# The eGPU's card node, and the iGPU's: any other card, the boot VGA device preferred.
+EGPU_CARD=""
+IGPU_CARD=""
+for card in $ROOT/sys/class/drm/card*; do
+  [[ "$(basename $card)" =~ ^card[0-9]+$ ]] || continue
+  [ -e "$card/device" ] || continue
+  if [ "$(readlink -f $card/device)" = "$EGPU_PCI" ]; then
+    EGPU_CARD="/dev/dri/$(basename $card)"
+  elif [ -z "$IGPU_CARD" ] || [ "$(cat $card/device/boot_vga 2>/dev/null)" = "1" ]; then
+    IGPU_CARD="/dev/dri/$(basename $card)"
   fi
+done
 
-  echo "Updating environment variables with fresh boot nodes: $EGPU_CARD (NVIDIA) : $IGPU_CARD (AMD)"
+if [ -z "$EGPU_CARD" ] || [ -z "$IGPU_CARD" ]; then
+  echo "WARNING: Failed to detect both GPUs on the PCIe bus. Sync aborted."
+  exit 1
+fi
 
-  # 1. Update the System-Wide Environment
-  xgm_ro_disable 2>/dev/null || true
-  sed -i 's|WLR_DRM_DEVICES=.*|WLR_DRM_DEVICES='$EGPU_CARD':'$IGPU_CARD'|' $ROOT/etc/environment
-  xgm_ro_enable 2>/dev/null || true
+echo "Updating environment variables with fresh boot nodes: $EGPU_CARD (NVIDIA) : $IGPU_CARD (AMD)"
 
-  # 2. Update the Isolated Plasma Environment
-  PLASMA_ENV_DIR="$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env"
-  sudo -u $PRIMARY_USER bash -c "cat > '$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh' << EOF
+# 1. Update the System-Wide Environment
+xgm_ro_disable 2>/dev/null || true
+sed -i 's|WLR_DRM_DEVICES=.*|WLR_DRM_DEVICES='$EGPU_CARD':'$IGPU_CARD'|' $ROOT/etc/environment
+xgm_ro_enable 2>/dev/null || true
+
+# 2. Update the Isolated Plasma Environment
+PLASMA_ENV_DIR="$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env"
+sudo -u $PRIMARY_USER bash -c "cat > '$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh' << EOF
 #!/bin/bash
 export KWIN_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD
 export GBM_BACKEND=nvidia-drm
 export __GLX_VENDOR_LIBRARY_NAME=nvidia
 EOF"
-  echo "SteamOS/CachyOS specific DRM environment sync complete."
-else
-  echo "Bazzite OS detected. Skipping."
-fi
-
+echo "SteamOS/CachyOS specific DRM environment sync complete."
 echo "Sync complete. Ready for Desktop Mode."
