@@ -365,7 +365,7 @@ check_dm_fallback() {
   assert_success
 
   assert_called_before "modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia" "modprobe nvidia_drm modeset=1 fbdev=1"
-  assert_called "modprobe nvidia_modeset nvidia_uvm nvidia"
+  assert_called "modprobe -a nvidia nvidia_modeset nvidia_uvm"
   assert_called "systemctl start nvidia-persistenced nvidia-powerd"
   assert_equal "$(cat "$ROOT/etc/environment")" "$before"
   refute_called "systemctl set-environment"
@@ -495,4 +495,42 @@ sync_service_missing() {
   run_plugin_script egpu-enable nvidia
   assert_success
   assert_equal "$(cat "$DATA_DIR/egpu_pci_address")" "0000:01:00.0"
+}
+
+@test "boot service installed and enabled, but /usr/local/bin/egpu-sync missing: symlink created" {
+  egpu_appears amd
+  sync_service_installed
+  rm -f "$ROOT/usr/local/bin/egpu-sync"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_equal "$(readlink "$ROOT/usr/local/bin/egpu-sync")" "$(readlink -f "$XGM_REPO/bin/egpu-sync")"
+  assert [ -x "$ROOT/usr/local/bin/egpu-sync" ]
+  assert_sync_service_installed
+}
+
+@test "nvidia modules: nvidia_drm with its options, then the others with modprobe -a" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_called_before "modprobe nvidia_drm modeset=1 fbdev=1" "modprobe -a nvidia nvidia_modeset nvidia_uvm"
+  refute_called "modprobe nvidia_modeset"
+  assert [ -d "$ROOT/sys/module/nvidia_uvm" ]
+}
+
+@test "primary user: Steam not running, first regular user with a home dir" {
+  steam_not_running
+  mkdir -p "$ROOT/home/nohome"
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_called "sudo -u nohome XDG_RUNTIME_DIR=/run/user/64999 systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
+}
+
+@test "primary user: Steam running as deck stays deck" {
+  steam_user deck
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
 }
