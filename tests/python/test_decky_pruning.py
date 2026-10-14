@@ -5,6 +5,7 @@ keep every one of them, and the _latest links.
 """
 import importlib
 import os
+import tempfile
 import time
 
 import decky
@@ -23,7 +24,7 @@ def monkeypatch(monkeypatch):
 
 def plugin_load(monkeypatch, plugin_dir, decky_dir):
   """What Decky does on a plugin load: a fresh `decky` import (which prunes), then main.py."""
-  monkeypatch.setenv("DECKY_PLUGIN_LOG_DIR", str(decky_dir))
+  monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(decky_dir))
   importlib.reload(decky)
   return load_main(plugin_dir)
 
@@ -60,3 +61,32 @@ def test_reload_keeps_every_activity_log(tmp_path, monkeypatch):
     assert open(path).read() == os.path.basename(path), path
   assert os.readlink(mod.ENABLE_LOG) == os.path.join(mod.LOG_DIR, "enable_nvidia.log")
   assert os.readlink(mod.EJECT_LOG) == os.path.join(mod.LOG_DIR, "eject_amd.log")
+
+
+def seven_logs(path):
+  path.mkdir(parents=True)
+  for i in range(7):
+    (path / f"2026-10-1{i} 21.04.33.log").write_text("keep\n")
+  return sorted(p.name for p in path.iterdir())
+
+
+def test_inherited_decky_plugin_log_dir_is_never_pruned(tmp_path, monkeypatch):
+  # A shell started from the plugin has Decky's real DECKY_PLUGIN_LOG_DIR.
+  real = tmp_path / "real-logs"
+  names = seven_logs(real)
+  monkeypatch.delenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", raising=False)
+  monkeypatch.setenv("DECKY_PLUGIN_LOG_DIR", str(real))
+  importlib.reload(decky)
+  assert sorted(p.name for p in real.iterdir()) == names
+
+
+def test_never_prunes_outside_the_temp_dir(tmp_path, monkeypatch):
+  logs = tmp_path / "logs"
+  names = seven_logs(logs)
+  # As if tmp_path weren't under the temp dir.
+  other = tmp_path / "other-tmp"
+  other.mkdir()
+  monkeypatch.setattr(tempfile, "tempdir", str(other))
+  monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(logs))
+  importlib.reload(decky)
+  assert sorted(p.name for p in logs.iterdir()) == names
