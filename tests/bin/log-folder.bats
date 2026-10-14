@@ -84,43 +84,60 @@ fake_install() {
     "$(printf '%s\n' xgmobile-manager xgmobile-manager/activity xgmobile-manager/activity/boot_sync.log)"
 }
 
-# nuke_header <script> [with-helper]: a copy of bin/<script> that stops right after its banner
-# (the first line after the log setup), in a fake plugin bin dir, with or without xgm-common.sh.
-# The nuke itself never runs. Prints the bin dir.
+NUKE_BANNER='echo "--- TOTAL SYSTEM RESTORATION ---"'
+
+# nuke_header <script> [with-helper]: copies bin/<script> up to its banner (the first line after
+# the log setup), then `exit 0`, into a fake plugin bin dir, with or without xgm-common.sh, and
+# sets NUKE_DIR to that dir. Call it directly, never in $(...): a failed guard must stop the test.
 nuke_header() {
-  local dir="$BATS_TEST_TMPDIR/hb/plugins/xgmobile-manager/bin"
-  mkdir -p "$dir"
-  sed '/^echo "--- TOTAL SYSTEM RESTORATION ---"$/q' "$XGM_REPO/bin/$1" > "$dir/$1"
-  grep -qx 'echo "--- TOTAL SYSTEM RESTORATION ---"' "$dir/$1" || fail "$1: banner line not found"
-  ! grep -qE 'steamos-readonly|pacman|rm ' "$dir/$1" || fail "$1: the header reaches the nuke"
-  echo 'exit 0' >> "$dir/$1"
-  [ "${2:-}" != "with-helper" ] || cp "$XGM_REPO/bin/xgm-common.sh" "$dir/"
-  echo "$dir"
+  NUKE_DIR="$BATS_TEST_TMPDIR/hb/plugins/xgmobile-manager/bin"
+  mkdir -p "$NUKE_DIR"
+  sed "/^$NUKE_BANNER\$/q" "$XGM_REPO/bin/$1" > "$NUKE_DIR/$1"
+  echo 'exit 0' >> "$NUKE_DIR/$1"
+  if [ "${2:-}" = "with-helper" ]; then
+    cp "$XGM_REPO/bin/xgm-common.sh" "$NUKE_DIR/"
+  fi
+  assert_safe_nuke_copy "$NUKE_DIR/$1"
+}
+
+# assert_safe_nuke_copy <file>: the copy ends with the banner and `exit 0`, and nothing before
+# that removes, moves, unlocks or (un)installs anything. Fails the test before anything runs.
+assert_safe_nuke_copy() {
+  local tail2
+  tail2=$(tail -n 2 "$1")
+  [ "$tail2" = "$NUKE_BANNER"$'\n''exit 0' ] || { fail "$1 doesn't end with the banner and exit 0"; return 1; }
+  if grep -nE '(^|[^A-Za-z_-])(rm |mv |pacman|steamos-readonly|systemctl)' "$1"; then
+    fail "$1 reaches the nuke (lines above)"
+    return 1
+  fi
 }
 
 @test "mega-nuke.sh logs to activity/nuke.log, the dry run to nuke_dry.log" {
-  local dir activity="$BATS_TEST_TMPDIR/hb/logs/xgmobile-manager/activity"
-  dir=$(nuke_header mega-nuke.sh with-helper)
-  XGM_BIN_DIR="$dir" run_script mega-nuke.sh
+  local activity="$BATS_TEST_TMPDIR/hb/logs/xgmobile-manager/activity"
+  nuke_header mega-nuke.sh with-helper
+  assert_safe_nuke_copy "$NUKE_DIR/mega-nuke.sh"
+  XGM_BIN_DIR="$NUKE_DIR" run_script mega-nuke.sh
   assert_success
   assert_output "--- TOTAL SYSTEM RESTORATION ---"
   assert_equal "$(cat "$activity/nuke.log")" "--- TOTAL SYSTEM RESTORATION ---"
 
   rm -rf "$BATS_TEST_TMPDIR/hb"
-  dir=$(nuke_header mega-nuke-dry.sh with-helper)
-  XGM_BIN_DIR="$dir" run_script mega-nuke-dry.sh
+  nuke_header mega-nuke-dry.sh with-helper
+  assert_safe_nuke_copy "$NUKE_DIR/mega-nuke-dry.sh"
+  XGM_BIN_DIR="$NUKE_DIR" run_script mega-nuke-dry.sh
   assert_success
   assert_equal "$(cat "$activity/nuke_dry.log")" "--- TOTAL SYSTEM RESTORATION ---"
   assert [ ! -e "$activity/nuke.log" ]
 }
 
 @test "mega-nuke*.sh without xgm-common.sh: still runs, output on the terminal only" {
-  local script dir
+  local script
   for script in mega-nuke.sh mega-nuke-dry.sh; do
     rm -rf "$BATS_TEST_TMPDIR/hb"
-    dir=$(nuke_header "$script")
-    assert [ ! -e "$dir/xgm-common.sh" ]
-    XGM_BIN_DIR="$dir" run_script "$script"
+    nuke_header "$script"
+    assert [ ! -e "$NUKE_DIR/xgm-common.sh" ]
+    assert_safe_nuke_copy "$NUKE_DIR/$script"
+    XGM_BIN_DIR="$NUKE_DIR" run_script "$script"
     assert_success
     assert_line "xgm-common.sh not found: not keeping a log file, output is on this terminal only."
     assert_line "--- TOTAL SYSTEM RESTORATION ---"
