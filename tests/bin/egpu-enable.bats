@@ -376,7 +376,7 @@ check_dm_fallback() {
 
   assert_called_before "modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia" "modprobe nvidia_drm modeset=1 fbdev=1"
   assert_called "modprobe -a nvidia nvidia_modeset nvidia_uvm"
-  assert_called "systemctl start nvidia-persistenced nvidia-powerd"
+  assert_nvidia_services_after_modules
   assert_equal "$(cat "$ROOT/etc/environment")" "$before"
   refute_called "systemctl set-environment"
   refute_called "steamos-readonly"
@@ -516,6 +516,60 @@ sync_service_missing() {
   assert_equal "$(readlink "$ROOT/usr/local/bin/egpu-sync")" "$(readlink -f "$XGM_REPO/bin/egpu-sync")"
   assert [ -x "$ROOT/usr/local/bin/egpu-sync" ]
   assert_sync_service_installed
+}
+
+# nvidia-persistenced and nvidia-powerd (Dynamic Boost) need the eGPU and its modules: stopped
+# before the modules reload, and started only once they're loaded. Before this, SteamOS/CachyOS
+# started them ahead of the eGPU, where they exit, which left the XG Mobile at its default power
+# limit (115 W instead of 150 W on the 4090).
+assert_nvidia_services_after_modules() {
+  local start first_start reload
+  start="systemctl start nvidia-persistenced nvidia-powerd"
+  assert_called_before "systemctl stop nvidia-powerd nvidia-persistenced" "modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia"
+  assert_called_before "modprobe -a nvidia nvidia_modeset nvidia_uvm" "$start"
+  assert_called "systemctl enable nvidia-persistenced nvidia-powerd"
+  # No NVIDIA service is started anywhere before the modules are loaded.
+  first_start=$(grep -nE '^systemctl (re)?start nvidia-(persistenced|powerd)' "$SHIM_LOG" | head -n 1 | cut -d: -f1)
+  reload=$(grep -Fxn -- "modprobe -a nvidia nvidia_modeset nvidia_uvm" "$SHIM_LOG" | head -n 1 | cut -d: -f1)
+  [ "$first_start" -gt "$reload" ] || fail "an NVIDIA service was started (line $first_start) before the modules loaded (line $reload)"
+}
+
+@test "steamos + nvidia: NVIDIA services start after the modules load, not before the eGPU is on" {
+  nvidia_ready steamos
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_nvidia_services_after_modules
+  [[ "$LOG" == *"Starting NVIDIA services (persistence, Dynamic Boost)..."* ]]
+}
+
+@test "steamos + nvidia with self-repair (as on real installs): no NVIDIA service started early" {
+  nvidia_ready steamos
+  rm "$ROOT/etc/systemd/system/nvidia-suspend.service"
+  # Self-repair chmods and links the plugin's own files, so run a copy inside the sandbox.
+  local plugin="$BATS_TEST_TMPDIR/plugin"
+  mkdir -p "$plugin"
+  cp -r "$XGM_REPO/bin" "$XGM_REPO/assets" "$plugin/"
+  XGM_BIN_DIR="$plugin/bin" ALLOW_SELF_REPAIR=1 run_script egpu-enable nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"
+  assert_success
+  [[ "$LOG" == *"Initiating self-repair"* ]]
+  assert_nvidia_services_after_modules
+}
+
+@test "cachyos + nvidia: NVIDIA services start after the modules load, not before the eGPU is on" {
+  nvidia_ready cachyos
+  no_steamos_readonly
+  run_plugin_script egpu-enable nvidia
+  assert_success
+  assert_nvidia_services_after_modules
+}
+
+@test "amd: NVIDIA services are left alone" {
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  if grep -nE 'nvidia-(powerd|persistenced)' "$SHIM_LOG"; then
+    fail "AMD enable touched an NVIDIA service"
+  fi
 }
 
 @test "nvidia modules: nvidia_drm with its options, then the others with modprobe -a" {
