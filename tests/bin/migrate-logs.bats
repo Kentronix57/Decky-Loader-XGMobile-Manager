@@ -159,6 +159,22 @@ EOF
   assert_equal "$(ls -A "$LOGS_ROOT")" "xgmobile-manager"
 }
 
+@test "stale shortcut: a failed archive move is reported as an error, not as archived" {
+  echo "stale eject" > "$LOGS_ROOT/eject_amd.log"
+  echo "newer amd" > "$LOG_DIR/eject_amd.log"
+  mkdir -p "$LOG_DIR/archive"
+  chmod 555 "$LOG_DIR/archive"
+  run_migrate
+  chmod 755 "$LOG_DIR/archive"
+  assert_failure 1
+  assert_equal "$(cat "$LOGS_ROOT/eject_amd.log")" "stale eject"
+  assert_equal "$(cat "$LOG_DIR/eject_amd.log")" "newer amd"
+  assert [ ! -e "$LOG_DIR/archive/eject_amd.log" ]
+  run cat "$LOG_DIR/migrate.log"
+  assert_line "ERROR: couldn't move $LOGS_ROOT/eject_amd.log to $LOG_DIR/archive/eject_amd.log"
+  refute_line --partial "Newer stale-shortcut log archived as"
+}
+
 @test "stale shortcut: only those exact names; other plugins' files and links stay" {
   echo "foo" > "$LOGS_ROOT/foo.log"
   echo "other" > "$LOGS_ROOT/enable_other.log"

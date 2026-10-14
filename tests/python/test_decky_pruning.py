@@ -5,13 +5,15 @@ keep every one of them, and the _latest links.
 """
 import importlib
 import os
+import shutil
 import tempfile
 import time
+from pathlib import Path
 
 import decky
 import pytest
 
-from xgm_helpers import load_main
+from xgm_helpers import REPO, load_main
 
 
 @pytest.fixture
@@ -90,3 +92,20 @@ def test_never_prunes_outside_the_temp_dir(tmp_path, monkeypatch):
   monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(logs))
   importlib.reload(decky)
   assert sorted(p.name for p in logs.iterdir()) == names
+
+
+def test_never_prunes_through_a_symlink_out_of_the_temp_dir(tmp_path, monkeypatch):
+  # The link is inside the temp dir, its target isn't: the check must resolve it.
+  outside = tempfile.mkdtemp(prefix=".xgm-outside-tmp-", dir=REPO / "tests" / "python")
+  try:
+    if os.path.realpath(outside).startswith(os.path.realpath(tempfile.gettempdir()) + os.sep):
+      pytest.skip("the repo is inside the temp dir")
+    target = tempfile.mkdtemp(dir=outside)
+    names = seven_logs(Path(target) / "logs")
+    link = tmp_path / "logs-link"
+    link.symlink_to(Path(target) / "logs")
+    monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(link))
+    importlib.reload(decky)
+    assert sorted(p.name for p in (Path(target) / "logs").iterdir()) == names
+  finally:
+    shutil.rmtree(outside)
