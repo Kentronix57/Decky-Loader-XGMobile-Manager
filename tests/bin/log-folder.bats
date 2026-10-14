@@ -100,14 +100,57 @@ nuke_header() {
   assert_safe_nuke_copy "$NUKE_DIR/$1"
 }
 
-# assert_safe_nuke_copy <file>: the copy ends with the banner and `exit 0`, and nothing before
-# that removes, moves, unlocks or (un)installs anything. Fails the test before anything runs.
+# The reviewed nuke headers: every line of bin/<script> up to and including the banner, exactly.
+# Only these lines (plus `exit 0`) are ever run by the tests. If the header of mega-nuke.sh or
+# mega-nuke-dry.sh changes, review the new lines and update this deliberately: nothing in them may
+# remove, move or overwrite anything outside the log folder.
+reviewed_nuke_header() {
+  case "$1" in
+    mega-nuke.sh) cat <<'EOF'
+#!/bin/bash
+# Run by hand: show the output and keep a copy in the plugin's log folder. This is the emergency
+# tool and may be downloaded on its own: without xgm-common.sh it still runs, with the output on
+# the terminal only.
+# shellcheck source=bin/xgm-common.sh
+if . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" 2>/dev/null; then
+  LOG_DIR="${1:-$(xgm_log_dir)}"
+  mkdir -p "$LOG_DIR" && exec > >(tee "$LOG_DIR/nuke.log") 2>&1
+else
+  echo "xgm-common.sh not found: not keeping a log file, output is on this terminal only."
+fi
+echo "--- TOTAL SYSTEM RESTORATION ---"
+EOF
+      ;;
+    mega-nuke-dry.sh) cat <<'EOF'
+#!/bin/bash
+# Run by hand: show the output and keep a copy in the plugin's log folder (its own file, so a
+# dry run never overwrites a real run's nuke.log). This is the emergency tool and may be downloaded
+# on its own: without xgm-common.sh it still runs, with the output on the terminal only.
+# shellcheck source=bin/xgm-common.sh
+if . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" 2>/dev/null; then
+  LOG_DIR="${1:-$(xgm_log_dir)}"
+  mkdir -p "$LOG_DIR" && exec > >(tee "$LOG_DIR/nuke_dry.log") 2>&1
+else
+  echo "xgm-common.sh not found: not keeping a log file, output is on this terminal only."
+fi
+echo "--- TOTAL SYSTEM RESTORATION ---"
+EOF
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# assert_safe_nuke_copy <file>: the copy is byte for byte the reviewed header plus `exit 0` (an
+# allowlist, so no tab, find or redirect can slip in). Fails the test before anything runs.
 assert_safe_nuke_copy() {
-  local tail2
-  tail2=$(tail -n 2 "$1")
-  [ "$tail2" = "$NUKE_BANNER"$'\n''exit 0' ] || { fail "$1 doesn't end with the banner and exit 0"; return 1; }
-  if grep -nE '(^|[^A-Za-z_-])(rm |mv |pacman|steamos-readonly|systemctl)' "$1"; then
-    fail "$1 reaches the nuke (lines above)"
+  local expected="$BATS_TEST_TMPDIR/reviewed-$(basename "$1")"
+  { reviewed_nuke_header "$(basename "$1")" && echo 'exit 0'; } > "$expected" || {
+    fail "no reviewed nuke header for $(basename "$1")"
+    return 1
+  }
+  if ! cmp -s "$expected" "$1"; then
+    fail "$(printf '%s is not the reviewed nuke header plus exit 0 (update reviewed_nuke_header deliberately):\n%s' \
+      "$1" "$(diff "$expected" "$1")")"
     return 1
   fi
 }
