@@ -13,7 +13,7 @@ mkdir -p "$DATA_DIR/configs"
 CANCEL_MARKER="$DATA_DIR/last_eject_cancelled"
 # A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
 rm -f "$CANCEL_MARKER" "$DATA_DIR/last_result.json"
-exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
+exec > "$LOG_DIR/eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"
 DM_SERVICE=$(xgm_dm_service)
@@ -298,4 +298,4 @@ if command -v supergfxctl >/dev/null 2>&1; then
 fi
 
 echo "--- Eject Finished: Back to Handheld Mode ---"
-ln -sf "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" $LOG_DIR/xgmobile_manager_eject_latest.log
+ln -sf "$LOG_DIR/eject_${VENDOR}.log" "$LOG_DIR/eject_latest.log"

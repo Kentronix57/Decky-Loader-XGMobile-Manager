@@ -1,0 +1,111 @@
+"""
+Decky deletes all but the newest 4 *.log files at the top of DECKY_PLUGIN_LOG_DIR on every plugin
+load (fakes/decky.py runs its exact loop at import). Our logs live in activity/, so a reload must
+keep every one of them, and the _latest links.
+"""
+import importlib
+import os
+import shutil
+import tempfile
+import time
+from pathlib import Path
+
+import decky
+import pytest
+
+from xgm_helpers import REPO, load_main
+
+
+@pytest.fixture
+def monkeypatch(monkeypatch):
+  """Re-imports the fake decky once the environment is restored, so later tests get its defaults."""
+  yield monkeypatch
+  monkeypatch.undo()
+  importlib.reload(decky)
+
+
+def plugin_load(monkeypatch, plugin_dir, decky_dir):
+  """What Decky does on a plugin load: a fresh `decky` import (which prunes), then main.py."""
+  monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(decky_dir))
+  importlib.reload(decky)
+  return load_main(plugin_dir)
+
+
+def test_reload_keeps_every_activity_log(tmp_path, monkeypatch):
+  plugin_dir = tmp_path / "homebrew" / "plugins" / "xgmobile-manager"
+  decky_dir = tmp_path / "homebrew" / "logs" / "xgmobile-manager"
+  mod = plugin_load(monkeypatch, plugin_dir, decky_dir)
+
+  # Every log the plugin and its scripts write, as they write them, and the _latest links.
+  ours = [path for path, _label in mod.LOG_MAP.values() if not path.endswith("_latest.log")]
+  ours += [os.path.join(mod.LOG_DIR, f"{kind}_{vendor}.log")
+           for kind in ("enable", "eject") for vendor in ("nvidia", "amd")]
+  ours += [os.path.join(mod.LOG_DIR, name) for name in ("migrate.log", "nuke.log", "nuke_dry.log")]
+  for path in ours:
+    with open(path, "w") as f:
+      f.write(os.path.basename(path))
+  os.symlink(os.path.join(mod.LOG_DIR, "enable_nvidia.log"), mod.ENABLE_LOG)
+  os.symlink(os.path.join(mod.LOG_DIR, "eject_amd.log"), mod.EJECT_LOG)
+
+  # Decky's own timestamped logs, newer than ours.
+  now = time.time()
+  decky_logs = [f"2026-10-1{i} 21.04.33.log" for i in range(6)]
+  for i, name in enumerate(decky_logs):
+    path = decky_dir / name
+    path.write_text("decky\n")
+    os.utime(path, (now + 60 + i, now + 60 + i))
+
+  mod = plugin_load(monkeypatch, plugin_dir, decky_dir)
+
+  # The pruning ran: only Decky's newest 4 are left at the top level.
+  assert sorted(p.name for p in decky_dir.glob("*.log")) == sorted(decky_logs[2:])
+  for path in ours:
+    assert open(path).read() == os.path.basename(path), path
+  assert os.readlink(mod.ENABLE_LOG) == os.path.join(mod.LOG_DIR, "enable_nvidia.log")
+  assert os.readlink(mod.EJECT_LOG) == os.path.join(mod.LOG_DIR, "eject_amd.log")
+
+
+def seven_logs(path):
+  path.mkdir(parents=True)
+  for i in range(7):
+    (path / f"2026-10-1{i} 21.04.33.log").write_text("keep\n")
+  return sorted(p.name for p in path.iterdir())
+
+
+def test_inherited_decky_plugin_log_dir_is_never_pruned(tmp_path, monkeypatch):
+  # A shell started from the plugin has Decky's real DECKY_PLUGIN_LOG_DIR.
+  real = tmp_path / "real-logs"
+  names = seven_logs(real)
+  monkeypatch.delenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", raising=False)
+  monkeypatch.setenv("DECKY_PLUGIN_LOG_DIR", str(real))
+  importlib.reload(decky)
+  assert sorted(p.name for p in real.iterdir()) == names
+
+
+def test_never_prunes_outside_the_temp_dir(tmp_path, monkeypatch):
+  logs = tmp_path / "logs"
+  names = seven_logs(logs)
+  # As if tmp_path weren't under the temp dir.
+  other = tmp_path / "other-tmp"
+  other.mkdir()
+  monkeypatch.setattr(tempfile, "tempdir", str(other))
+  monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(logs))
+  importlib.reload(decky)
+  assert sorted(p.name for p in logs.iterdir()) == names
+
+
+def test_never_prunes_through_a_symlink_out_of_the_temp_dir(tmp_path, monkeypatch):
+  # The link is inside the temp dir, its target isn't: the check must resolve it.
+  outside = tempfile.mkdtemp(prefix=".xgm-outside-tmp-", dir=REPO / "tests" / "python")
+  try:
+    if os.path.realpath(outside).startswith(os.path.realpath(tempfile.gettempdir()) + os.sep):
+      pytest.skip("the repo is inside the temp dir")
+    target = tempfile.mkdtemp(dir=outside)
+    names = seven_logs(Path(target) / "logs")
+    link = tmp_path / "logs-link"
+    link.symlink_to(Path(target) / "logs")
+    monkeypatch.setenv("XGM_FAKE_DECKY_PLUGIN_LOG_DIR", str(link))
+    importlib.reload(decky)
+    assert sorted(p.name for p in (Path(target) / "logs").iterdir()) == names
+  finally:
+    shutil.rmtree(outside)

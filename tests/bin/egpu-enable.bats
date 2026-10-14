@@ -203,7 +203,7 @@ nvidia_ready() {
   assert_line "export KWIN_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
   assert_line "export GBM_BACKEND=nvidia-drm"
 
-  assert_equal "$(readlink "$LOG_DIR/xgmobile_manager_enable_latest.log")" "$LOG_DIR/xgmobile_manager_enable_nvidia.log"
+  assert_equal "$(readlink "$LOG_DIR/enable_latest.log")" "$LOG_DIR/enable_nvidia.log"
   refute_called "systemctl stop supergfxd.service"
 }
 
@@ -362,7 +362,7 @@ check_dm_fallback() {
   refute_called "lspci"
   assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
-  assert_equal "$(readlink "$LOG_DIR/xgmobile_manager_enable_latest.log")" "$LOG_DIR/xgmobile_manager_enable_amd.log"
+  assert_equal "$(readlink "$LOG_DIR/enable_latest.log")" "$LOG_DIR/enable_amd.log"
 }
 
 @test "bazzite + nvidia: modprobe sequence runs, /etc/environment untouched" {

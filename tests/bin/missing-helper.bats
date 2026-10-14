@@ -41,6 +41,10 @@ check_missing_helper() {
   check_missing_helper install-nvidia-cachyos.sh "$LOG_DIR" "$DATA_DIR"
 }
 
+@test "migrate-logs: helper missing, exit 9" { check_missing_helper migrate-logs "$(dirname "$LOG_DIR")" "$LOG_DIR"; }
+
+# mega-nuke*.sh run without the helper on purpose (see log-folder.bats).
+
 @test "the real bin/xgm-common.sh is still there" {
   assert [ -f "$XGM_REPO/bin/xgm-common.sh" ]
 }

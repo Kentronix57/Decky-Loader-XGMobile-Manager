@@ -1,0 +1,161 @@
+#!/bin/bash
+# Moves the logs older versions wrote to <homebrew>/logs into the plugin's log folder
+# (<homebrew>/logs/xgmobile-manager/activity), without the old prefixes. main.py runs it on every plugin
+# load; it's idempotent, and changes and prints nothing when there's nothing to migrate.
+#   migrate-logs [LOGS_ROOT [LOG_DIR]]
+# LOGS_ROOT: where the old logs are, and the log dir old desktop shortcuts pass (default
+# <homebrew>/logs). LOG_DIR: the plugin's log folder (default LOGS_ROOT/<plugin folder>/activity).
+#
+#   - LOGS_ROOT/xgmobile_manager_<name>.log and the legacy xgmobile_<name>.log -> LOG_DIR/<name>.log.
+#     If that exists, LOG_DIR/archive/<name>.log, then .<mtime>[.N]. Nothing is overwritten.
+#   - LOGS_ROOT/{enable,eject}_{nvidia,amd}.log (exactly these: other plugins log there too), which
+#     the scripts write when a stale shortcut passes the old log dir -> LOG_DIR, the same way.
+#   - The old *_latest.log links are removed (no other link; a stale shortcut's
+#     LOGS_ROOT/{enable,eject}_latest.log only if it points at one of the files above), and
+#     LOG_DIR/{enable,eject}_latest.log recreated.
+#   - Failed DKMS builds (LOGS_ROOT/nvidia*/*/build/make.log) -> LOG_DIR/dkms/.
+#   - "Enable XG Mobile" desktop shortcuts: the old log dir argument -> LOG_DIR.
+# Anything else (Decky's logs, other plugins' logs) is left alone. What changed goes to
+# LOG_DIR/migrate.log.
+ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
+DEFAULT_LOG_DIR=$(xgm_log_dir)
+DEFAULT_LOGS_ROOT=$(dirname "$(dirname "$DEFAULT_LOG_DIR")")
+LOGS_ROOT="${1:-$DEFAULT_LOGS_ROOT}"
+LOGS_ROOT="${LOGS_ROOT%/}"
+LOG_DIR="${2:-$LOGS_ROOT/${DEFAULT_LOG_DIR#"$DEFAULT_LOGS_ROOT"/}}"
+LOG_DIR="${LOG_DIR%/}"
+
+CHANGES=()
+FAILED=0
+
+note() { CHANGES+=("$*"); }
+
+exists() { [ -e "$1" ] || [ -L "$1" ]; }
+
+# free_path <path> <src>: <path> if nothing is there, else <path>.<mtime of src>, then
+# <path>.<mtime>.N.
+free_path() {
+  local path="$1" stamp n=1
+  exists "$path" || { echo "$path"; return 0; }
+  stamp=$(date -r "$2" +%s 2>/dev/null || echo 0)
+  exists "$path.$stamp" || { echo "$path.$stamp"; return 0; }
+  while exists "$path.$stamp.$n"; do n=$((n + 1)); done
+  echo "$path.$stamp.$n"
+}
+
+# migrate_file <src> <new name>: to LOG_DIR/<new name>, or archive/ if that's taken.
+migrate_file() {
+  local dest="$LOG_DIR/$2"
+  exists "$dest" && dest=$(free_path "$LOG_DIR/archive/$2" "$1")
+  move "$1" "$dest"
+}
+
+# move <src> <dest>: mkdir + mv, recorded in the summary.
+move() {
+  if mkdir -p "$(dirname "$2")" && mv -T "$1" "$2"; then
+    note "Moved $1 -> $2"
+  else
+    note "ERROR: couldn't move $1 to $2"
+    FAILED=1
+    return 1
+  fi
+}
+
+[ -d "$LOGS_ROOT" ] || exit 0
+
+# 1. Log files. The old *_latest.log links are handled after, once their targets have moved;
+# any other link is left alone.
+OLD_LINKS=()
+for old in "$LOGS_ROOT"/xgmobile_*.log; do
+  name=$(basename "$old")
+  if [ -L "$old" ]; then
+    [[ "$name" == *_latest.log ]] && OLD_LINKS+=("$old")
+    continue
+  fi
+  [ -f "$old" ] || continue
+  case "$name" in
+    xgmobile_manager_?*.log) name="${name#xgmobile_manager_}" ;;
+    xgmobile_manager_*) continue ;;  # nothing after the prefix
+    xgmobile_?*.log) name="${name#xgmobile_}" ;;
+    *) continue ;;
+  esac
+  migrate_file "$old" "$name"
+done
+
+# The unprefixed logs a stale shortcut made the scripts write to LOGS_ROOT, and their links.
+for kind in enable eject; do
+  for vendor in nvidia amd; do
+    old="$LOGS_ROOT/${kind}_${vendor}.log"
+    [ -f "$old" ] && [ ! -L "$old" ] || continue
+    dest="$LOG_DIR/${kind}_${vendor}.log"
+    if exists "$dest"; then
+      # Likely the newer log: written by a stale shortcut after the update. Say where it went.
+      archived=$(free_path "$LOG_DIR/archive/${kind}_${vendor}.log" "$old")
+      move "$old" "$archived" &&
+        note "Newer stale-shortcut log archived as $archived ($dest already existed): check both."
+    else
+      move "$old" "$dest"
+    fi
+  done
+  old="$LOGS_ROOT/${kind}_latest.log"
+  [ -L "$old" ] || continue
+  case "$(readlink "$old")" in
+    "$LOGS_ROOT/${kind}_nvidia.log"|"$LOGS_ROOT/${kind}_amd.log") OLD_LINKS+=("$old") ;;
+  esac
+done
+
+# 2. The old *_latest.log links: removed, and the new one recreated if it doesn't exist yet,
+# pointing at the vendor log (nvidia preferred).
+for old in "${OLD_LINKS[@]}"; do
+  if rm -f "$old"; then
+    note "Removed old link $old"
+  else
+    note "ERROR: couldn't remove $old"
+    FAILED=1
+    continue
+  fi
+  case "$(basename "$old")" in
+    *enable_latest.log) kind=enable ;;
+    *eject_latest.log) kind=eject ;;
+    *) continue ;;
+  esac
+  link="$LOG_DIR/${kind}_latest.log"
+  exists "$link" && continue
+  for vendor in nvidia amd; do
+    if [ -f "$LOG_DIR/${kind}_${vendor}.log" ]; then
+      ln -s "$LOG_DIR/${kind}_${vendor}.log" "$link" && note "Linked $link -> ${kind}_${vendor}.log"
+      break
+    fi
+  done
+done
+
+# 3. Failed DKMS builds that install-nvidia.sh saved next to the logs.
+for dir in "$LOGS_ROOT"/nvidia*; do
+  [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+  compgen -G "$dir/*/build/make.log" > /dev/null || continue
+  move "$dir" "$(free_path "$LOG_DIR/dkms/$(basename "$dir")" "$dir")"
+done
+
+# 4. Desktop shortcuts from older versions pass the old log dir to egpu-enable.
+for shortcut in $ROOT/home/*/Desktop/"Enable XG Mobile.desktop"; do
+  [ -f "$shortcut" ] || continue
+  content=$(cat "$shortcut"; printf x)
+  content="${content%x}"
+  updated="${content//" $LOGS_ROOT "/" $LOG_DIR "}"
+  [ "$updated" = "$content" ] && continue
+  if printf '%s' "$updated" > "$shortcut"; then
+    note "Updated the log dir in $shortcut"
+  else
+    note "ERROR: couldn't update $shortcut"
+    FAILED=1
+  fi
+done
+
+[ "${#CHANGES[@]}" -eq 0 ] && exit 0
+mkdir -p "$LOG_DIR" && {
+  echo "--- Log migration at $(date) ---"
+  printf '%s\n' "${CHANGES[@]}"
+} >> "$LOG_DIR/migrate.log"
+exit "$FAILED"

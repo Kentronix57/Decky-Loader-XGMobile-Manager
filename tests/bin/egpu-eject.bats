@@ -141,7 +141,7 @@ symmetry_amd() {
   assert_equal "$(grep -c '^sleep 1$' "$SHIM_LOG")" 1
   assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
   assert_called_before "systemctl stop sddm.service" "systemctl start sddm.service"
-  assert_equal "$(readlink "$LOG_DIR/xgmobile_manager_eject_latest.log")" "$LOG_DIR/xgmobile_manager_eject_amd.log"
+  assert_equal "$(readlink "$LOG_DIR/eject_latest.log")" "$LOG_DIR/eject_amd.log"
 }
 
 @test "cachyos + plasmalogin: plasmalogin stopped then started, sddm never touched" {

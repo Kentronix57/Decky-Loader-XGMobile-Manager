@@ -11,7 +11,7 @@ PRIMARY_USER=$(xgm_primary_user)
 mkdir -p "$DATA_DIR/configs"
 # A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
 rm -f "$DATA_DIR/last_result.json" "$DATA_DIR/last_eject_cancelled"
-exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
+exec > "$LOG_DIR/enable_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
 DM_SERVICE=$(xgm_dm_service)
@@ -371,4 +371,4 @@ if command -v supergfxctl >/dev/null 2>&1; then
 fi
 
 echo "--- Enable Finished at $(date): Time for God Mode ---"
-sudo ln -sf "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" $LOG_DIR/xgmobile_manager_enable_latest.log
+sudo ln -sf "$LOG_DIR/enable_${VENDOR}.log" "$LOG_DIR/enable_latest.log"
