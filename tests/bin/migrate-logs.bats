@@ -160,6 +160,9 @@ EOF
   echo "foo" > "$LOGS_ROOT/foo.log"
   echo "other" > "$LOGS_ROOT/enable_other.log"
   echo "theirs" > "$LOGS_ROOT/install.log"
+  # Same pattern, but not a vendor our scripts write.
+  echo "intel" > "$LOGS_ROOT/enable_intel.log"
+  echo "intel" > "$LOGS_ROOT/eject_intel.log"
   # Another plugin's enable_latest.log link, and an eject_latest.log that isn't a link.
   ln -s "$LOGS_ROOT/enable_other.log" "$LOGS_ROOT/enable_latest.log"
   echo "not a link" > "$LOGS_ROOT/eject_latest.log"
