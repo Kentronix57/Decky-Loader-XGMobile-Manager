@@ -59,6 +59,7 @@ move() {
   else
     note "ERROR: couldn't move $1 to $2"
     FAILED=1
+    return 1
   fi
 }
 
@@ -87,7 +88,16 @@ done
 for kind in enable eject; do
   for vendor in nvidia amd; do
     old="$LOGS_ROOT/${kind}_${vendor}.log"
-    [ -f "$old" ] && [ ! -L "$old" ] && migrate_file "$old" "${kind}_${vendor}.log"
+    [ -f "$old" ] && [ ! -L "$old" ] || continue
+    dest="$LOG_DIR/${kind}_${vendor}.log"
+    if exists "$dest"; then
+      # Likely the newer log: written by a stale shortcut after the update. Say where it went.
+      archived=$(free_path "$LOG_DIR/archive/${kind}_${vendor}.log" "$old")
+      move "$old" "$archived" &&
+        note "Newer stale-shortcut log archived as $archived ($dest already existed): check both."
+    else
+      move "$old" "$dest"
+    fi
   done
   old="$LOGS_ROOT/${kind}_latest.log"
   [ -L "$old" ] || continue

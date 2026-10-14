@@ -152,6 +152,9 @@ EOF
   assert_equal "$(readlink "$LOG_DIR/enable_latest.log")" "$LOG_DIR/enable_nvidia.log"
   assert_equal "$(cat "$LOG_DIR/eject_amd.log")" "newer amd"
   assert_equal "$(cat "$LOG_DIR/archive/eject_amd.log")" "stale eject"
+  run cat "$LOG_DIR/migrate.log"
+  assert_line "Newer stale-shortcut log archived as $LOG_DIR/archive/eject_amd.log ($LOG_DIR/eject_amd.log already existed): check both."
+  refute_line --partial "stale-shortcut log archived as $LOG_DIR/archive/enable_nvidia.log"
   assert_equal "$(readlink "$LOG_DIR/eject_latest.log")" "$LOG_DIR/eject_amd.log"
   assert_equal "$(ls -A "$LOGS_ROOT")" "xgmobile-manager"
 }

@@ -205,7 +205,7 @@ Every log is in `~/homebrew/logs/xgmobile-manager/activity/`. Decky's own logs f
 | Python critical errors / debug | `python_crash.log`, `debug.log` |
 | Emergency nuke scripts (run by hand) | `nuke.log`, `nuke_dry.log` |
 
-Older versions wrote these to `~/homebrew/logs/` as `xgmobile_manager_<name>.log`. The plugin moves them into `activity/` the first time it loads (without the prefix; a name that's already taken goes to `activity/archive/`), updates an old "Enable XG Mobile" desktop shortcut, and records what it moved in `activity/migrate.log`.
+Older versions wrote these to `~/homebrew/logs/` as `xgmobile_manager_<name>.log`. The plugin moves them into `activity/` the first time it loads (without the prefix; a name that's already taken goes to `activity/archive/`), updates an old "Enable XG Mobile" desktop shortcut, and records what it moved in `activity/migrate.log`. If an old shortcut was used after the update, its Enable/Eject log may be the newer one: `migrate.log` then says which file in `activity/archive/` to check.
 
 Please use GitHub Issues rather than Reddit DMs for technical support so the community can benefit from the solutions!
 
