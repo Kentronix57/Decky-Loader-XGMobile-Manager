@@ -11,6 +11,8 @@ PRIMARY_USER=$(xgm_primary_user)
 mkdir -p "$DATA_DIR/configs"
 # A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
 rm -f "$DATA_DIR/last_result.json" "$DATA_DIR/last_eject_cancelled"
+# The previous run's log is kept as enable_<vendor>.prev.log (replacing an older one).
+[ -f "$LOG_DIR/enable_${VENDOR}.log" ] && mv -f "$LOG_DIR/enable_${VENDOR}.log" "$LOG_DIR/enable_${VENDOR}.prev.log"
 exec > "$LOG_DIR/enable_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"

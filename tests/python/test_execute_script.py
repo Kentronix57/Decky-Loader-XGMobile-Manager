@@ -1,4 +1,6 @@
 """_execute_script: exit code -> ActionResult mapping, run against stub scripts in a temp plugin dir."""
+import os
+
 import pytest
 
 from xgm_helpers import STATIC, catalog_cases
@@ -93,6 +95,33 @@ def test_script_output_lands_in_its_log(xgm):
   log = open(xgm.mod.ENABLE_LOG).read()
   assert "--- Script Started: egpu-enable" in log
   assert "hello from stub" in log
+
+
+@pytest.mark.parametrize("script,kind", [("egpu-enable", "enable"), ("egpu-eject", "eject")])
+def test_previous_run_log_behind_latest_link_is_not_truncated(xgm, script, kind):
+  # enable_latest.log / eject_latest.log link to the last run's log, which the script keeps as
+  # .prev.log before writing its own; opening the link with "w" would empty it first.
+  log_dir = xgm.mod.LOG_DIR
+  previous = f"{log_dir}/{kind}_nvidia.log"
+  with open(previous, "w") as f:
+    f.write("previous run\n")
+  latest = xgm.mod.LOG_MAP[kind][0]
+  os.symlink(previous, latest)
+  seen = xgm.tmp / "seen.txt"
+  xgm.stub(script, f'cp "{previous}" "{seen}"\necho "this run"')
+  xgm.run(xgm.plugin._execute_script(script, latest, "nvidia", "steamos", log_dir, "/d"))
+  assert seen.read_text().startswith("previous run\n")
+  assert "this run" in open(latest).read()
+
+
+def test_regular_log_file_is_still_truncated(xgm):
+  with open(xgm.mod.INSTALL_LOG, "w") as f:
+    f.write("old install\n")
+  xgm.stub("install-nvidia.sh", 'echo "new install"')
+  execute(xgm, "install-nvidia.sh")
+  log = open(xgm.mod.INSTALL_LOG).read()
+  assert "old install" not in log
+  assert "new install" in log
 
 
 @pytest.mark.parametrize("script", ["install-nvidia.sh", "install-nvidia-cachyos.sh"])

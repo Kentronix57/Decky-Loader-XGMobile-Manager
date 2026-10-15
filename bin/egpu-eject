@@ -13,6 +13,8 @@ mkdir -p "$DATA_DIR/configs"
 CANCEL_MARKER="$DATA_DIR/last_eject_cancelled"
 # A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
 rm -f "$CANCEL_MARKER" "$DATA_DIR/last_result.json"
+# The previous run's log is kept as eject_<vendor>.prev.log (replacing an older one).
+[ -f "$LOG_DIR/eject_${VENDOR}.log" ] && mv -f "$LOG_DIR/eject_${VENDOR}.log" "$LOG_DIR/eject_${VENDOR}.prev.log"
 exec > "$LOG_DIR/eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"

@@ -442,9 +442,12 @@ class Plugin:
                      script=script_name, log_key="")
 
     clean_env = _script_env()
+    # The enable/eject logs are *_latest.log links to the previous run's log, which the script
+    # keeps as .prev.log before starting its own: appending instead of truncating keeps it whole.
+    mode = "a" if os.path.islink(log_path) else "w"
 
     try:
-      with open(log_path, "w") as f:
+      with open(log_path, mode) as f:
         f.write(f"--- Script Started: {script_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
         
         process = await asyncio.create_subprocess_exec(
