@@ -74,9 +74,11 @@ EOF
   assert [ ! -e "$LOGS_ROOT/xgmobile_transition.log" ]
 }
 
-@test "collision: the old file goes to archive/, then archive/<name>.<mtime>; nothing is overwritten" {
+@test "collision with a newer existing file: the old files go to archive/, then archive/<name>.<mtime>; nothing is overwritten" {
   echo "new enable" > "$LOG_DIR/enable_nvidia.log"
+  touch -d @1700000300 "$LOG_DIR/enable_nvidia.log"
   old xgmobile_manager_enable_nvidia.log "prefixed enable"
+  touch -d @1700000200 "$LOGS_ROOT/xgmobile_manager_enable_nvidia.log"
   old xgmobile_enable_nvidia.log "legacy enable"
   touch -d @1700000000 "$LOGS_ROOT/xgmobile_enable_nvidia.log"
   mkdir -p "$LOG_DIR/archive"
@@ -89,14 +91,72 @@ EOF
   run_migrate
   assert_success
   assert_equal "$(cat "$LOG_DIR/enable_nvidia.log")" "new enable"
-  # The legacy and prefixed files both collide; the glob sorts xgmobile_enable_ first.
+  # Both older sources collide; the glob sorts xgmobile_enable_ first.
   assert_equal "$(cat "$LOG_DIR/archive/enable_nvidia.log")" "legacy enable"
-  assert_equal "$(cat "$LOG_DIR/archive/enable_nvidia.log."*)" "prefixed enable"
+  assert_equal "$(cat "$LOG_DIR/archive/enable_nvidia.log.1700000200")" "prefixed enable"
   assert_equal "$(cat "$LOG_DIR/transition.log")" "new transition"
   assert_equal "$(cat "$LOG_DIR/archive/transition.log")" "archived"
   assert_equal "$(cat "$LOG_DIR/archive/transition.log.1700000001")" "archived 2"
   assert_equal "$(cat "$LOG_DIR/archive/transition.log.1700000001.1")" "old transition"
   assert_equal "$(compgen -G "$LOGS_ROOT/xgmobile_*")" ""
+  run cat "$LOG_DIR/migrate.log"
+  assert_line "Archived the older $LOGS_ROOT/xgmobile_enable_nvidia.log as $LOG_DIR/archive/enable_nvidia.log: $LOG_DIR/enable_nvidia.log is newer"
+  assert_line "Archived the older $LOGS_ROOT/xgmobile_manager_enable_nvidia.log as $LOG_DIR/archive/enable_nvidia.log.1700000200: $LOG_DIR/enable_nvidia.log is newer"
+  assert_line "Archived the older $LOGS_ROOT/xgmobile_manager_transition.log as $LOG_DIR/archive/transition.log.1700000001.1: $LOG_DIR/transition.log is newer"
+}
+
+# As seen on SteamOS: the legacy name and the prefixed one both map to desktop_eject_request.log.
+@test "legacy older + prefixed newer: the prefixed log gets the name, the legacy one is archived" {
+  old xgmobile_desktop_eject_request.log "legacy eject request"
+  touch -d @1700000000 "$LOGS_ROOT/xgmobile_desktop_eject_request.log"
+  old xgmobile_manager_desktop_eject_request.log "prefixed eject request"
+  touch -d @1700000500 "$LOGS_ROOT/xgmobile_manager_desktop_eject_request.log"
+  run_migrate
+  assert_success
+  assert_equal "$(cat "$LOG_DIR/desktop_eject_request.log")" "prefixed eject request"
+  assert_equal "$(cat "$LOG_DIR/archive/desktop_eject_request.log")" "legacy eject request"
+  assert_equal "$(find "$LOG_DIR/archive" -type f | wc -l)" 1
+  assert_equal "$(compgen -G "$LOGS_ROOT/xgmobile_*")" ""
+  run cat "$LOG_DIR/migrate.log"
+  assert_line "Archived the older $LOG_DIR/desktop_eject_request.log as $LOG_DIR/archive/desktop_eject_request.log: $LOGS_ROOT/xgmobile_manager_desktop_eject_request.log is newer"
+}
+
+@test "legacy newer + prefixed older: the legacy log gets the name, the prefixed one is archived" {
+  old xgmobile_desktop_eject_request.log "legacy eject request"
+  touch -d @1700000500 "$LOGS_ROOT/xgmobile_desktop_eject_request.log"
+  old xgmobile_manager_desktop_eject_request.log "prefixed eject request"
+  touch -d @1700000000 "$LOGS_ROOT/xgmobile_manager_desktop_eject_request.log"
+  run_migrate
+  assert_success
+  assert_equal "$(cat "$LOG_DIR/desktop_eject_request.log")" "legacy eject request"
+  assert_equal "$(cat "$LOG_DIR/archive/desktop_eject_request.log")" "prefixed eject request"
+  assert_equal "$(find "$LOG_DIR/archive" -type f | wc -l)" 1
+  run cat "$LOG_DIR/migrate.log"
+  assert_line "Archived the older $LOGS_ROOT/xgmobile_manager_desktop_eject_request.log as $LOG_DIR/archive/desktop_eject_request.log: $LOG_DIR/desktop_eject_request.log is newer"
+}
+
+@test "collision with an older existing file: the source gets the name, the existing one goes to archive/<name>.<its mtime>" {
+  echo "older activity" > "$LOG_DIR/transition.log"
+  touch -d @1700000000 "$LOG_DIR/transition.log"
+  mkdir -p "$LOG_DIR/archive"
+  echo "archived" > "$LOG_DIR/archive/transition.log"
+  old xgmobile_manager_transition.log "newer transition"
+  touch -d @1700000500 "$LOGS_ROOT/xgmobile_manager_transition.log"
+  run_migrate
+  assert_success
+  assert_equal "$(cat "$LOG_DIR/transition.log")" "newer transition"
+  assert_equal "$(cat "$LOG_DIR/archive/transition.log")" "archived"
+  assert_equal "$(cat "$LOG_DIR/archive/transition.log.1700000000")" "older activity"
+  run cat "$LOG_DIR/migrate.log"
+  assert_line "Archived the older $LOG_DIR/transition.log as $LOG_DIR/archive/transition.log.1700000000: $LOGS_ROOT/xgmobile_manager_transition.log is newer"
+  assert_line "Moved $LOGS_ROOT/xgmobile_manager_transition.log -> $LOG_DIR/transition.log"
+
+  local before
+  before=$(snapshot)
+  run_migrate
+  assert_success
+  assert_output ""
+  assert_equal "$(snapshot)" "$before"
 }
 
 @test "_latest links: old ones removed, new ones point at the migrated vendor log (nvidia first)" {
