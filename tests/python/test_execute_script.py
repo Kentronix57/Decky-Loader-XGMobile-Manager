@@ -124,6 +124,57 @@ def test_regular_log_file_is_still_truncated(xgm):
   assert "new install" in log
 
 
+def rotating_stub(xgm, script, kind):
+  """A stub that logs like egpu-enable/egpu-eject: keeps the last run's <kind>_<vendor>.log as
+  .prev.log, writes its own, and points <kind>_latest.log at it."""
+  xgm.stub(script, "\n".join([
+    f'log="$3/{kind}_$1.log"',
+    f'[ -f "$log" ] && mv -f "$log" "$3/{kind}_$1.prev.log"',
+    'exec > "$log" 2>&1',
+    'echo "run 2 ($1)"',
+    f'ln -sf "$log" "$3/{kind}_latest.log"',
+  ]))
+
+
+@pytest.mark.parametrize("script,kind", [("egpu-enable", "enable"), ("egpu-eject", "eject")])
+def test_prev_log_holds_only_the_previous_run(xgm, script, kind):
+  log_dir = xgm.mod.LOG_DIR
+  with open(f"{log_dir}/{kind}_nvidia.log", "w") as f:
+    f.write("run 1\n")
+  latest = xgm.mod.LOG_MAP[kind][0]
+  os.symlink(f"{log_dir}/{kind}_nvidia.log", latest)
+  rotating_stub(xgm, script, kind)
+  res = xgm.run(xgm.plugin._execute_script(script, latest, "nvidia", "steamos", log_dir, "/d"))
+  assert res["ok"] is True
+  assert open(f"{log_dir}/{kind}_nvidia.prev.log").read() == "run 1\n"
+  assert open(f"{log_dir}/{kind}_nvidia.log").read() == "run 2 (nvidia)\n"
+  assert os.readlink(latest) == f"{log_dir}/{kind}_nvidia.log"
+
+
+@pytest.mark.parametrize("script,kind", [("egpu-enable", "enable"), ("egpu-eject", "eject")])
+def test_vendor_switch_leaves_the_other_vendors_log_alone(xgm, script, kind):
+  log_dir = xgm.mod.LOG_DIR
+  with open(f"{log_dir}/{kind}_nvidia.log", "w") as f:
+    f.write("nvidia run\n")
+  latest = xgm.mod.LOG_MAP[kind][0]
+  os.symlink(f"{log_dir}/{kind}_nvidia.log", latest)
+  rotating_stub(xgm, script, kind)
+  xgm.run(xgm.plugin._execute_script(script, latest, "amd", "steamos", log_dir, "/d"))
+  assert open(f"{log_dir}/{kind}_nvidia.log").read() == "nvidia run\n"
+  assert open(f"{log_dir}/{kind}_amd.log").read() == "run 2 (amd)\n"
+  assert not os.path.exists(f"{log_dir}/{kind}_amd.prev.log")
+  assert os.readlink(latest) == f"{log_dir}/{kind}_amd.log"
+
+
+def test_header_is_the_first_line_of_a_regular_log(xgm):
+  xgm.stub("install-nvidia.sh", 'echo "line 1 from the script"\necho "line 2 from the script"')
+  execute(xgm, "install-nvidia.sh")
+  lines = open(xgm.mod.INSTALL_LOG).read().splitlines()
+  assert lines[0].startswith("--- Script Started: install-nvidia.sh at ")
+  assert lines[0].endswith(" ---")
+  assert lines[1:] == ["line 1 from the script", "line 2 from the script"]
+
+
 @pytest.mark.parametrize("script", ["install-nvidia.sh", "install-nvidia-cachyos.sh"])
 def test_install_exit_10_is_already_installed(xgm, script):
   xgm.stub(script, "exit 10")

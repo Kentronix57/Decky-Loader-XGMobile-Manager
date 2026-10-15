@@ -443,13 +443,17 @@ class Plugin:
 
     clean_env = _script_env()
     # The enable/eject logs are *_latest.log links to the previous run's log, which the script
-    # keeps as .prev.log before starting its own: appending instead of truncating keeps it whole.
-    mode = "a" if os.path.islink(log_path) else "w"
+    # keeps as .prev.log before writing its own (with its own "Started at" line). So a link is
+    # appended to, not truncated, and gets no header: it would land in the previous run's log.
+    is_link = os.path.islink(log_path)
 
     try:
-      with open(log_path, mode) as f:
-        f.write(f"--- Script Started: {script_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
-        
+      with open(log_path, "a" if is_link else "w") as f:
+        if not is_link:
+          f.write(f"--- Script Started: {script_name} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+          # Flushed now, or it lands after the script's output when the file closes.
+          f.flush()
+
         process = await asyncio.create_subprocess_exec(
           'bash', script_path, *args,
           stdout=f, 
