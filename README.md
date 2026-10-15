@@ -138,6 +138,20 @@ Measured on SteamOS with the RTX 4090: switching the plugin's profile between Pe
 
 Other TDP tools that manage the ASUS platform profile (e.g. Handheld Daemon on Bazzite/CachyOS) may have the same coupling. That's not verified yet; if yours has a platform-profile option, turn it off for separate control.
 
+#### What each profile allows the CPU
+Without a TDP tool, the ASUS profile also sets the Ally CPU's firmware power limits. Measured by @tanayabhay-creator in #25 (ROG Ally + RTX 3080 XG Mobile on Bazzite, read with `ryzenadj`, no TDP tool running):
+
+| Profile | Sustained | Slow boost | Fast boost |
+|---|---|---|---|
+| Quiet | 10 W | 14 W | 17 W |
+| Balanced | 15 W | 20 W | 25 W |
+| Performance | 30 W | 43 W | 53 W |
+
+So Performance on its own lets the CPU boost briefly up to about 53 W, which makes it run hot. For full XG Mobile power with a cooler CPU, pair Performance with a TDP tool that caps the CPU (see above).
+
+#### CPU boost and temperatures
+The CPU's frequency boost is on by default. On the same tester's Ally, turning it off lowered the CPU temperature on the internal screen from about 86 °C to 68–70 °C, at the cost of some single-core speed. TDP tools often have a CPU boost toggle.
+
 ### 🛑 The "SteamOS Update Tax" SteamOS Users only
 Because the NVIDIA drivers are compiled explicitly for the kernel version running at the time of installation, **a SteamOS System Update will break your drivers.**
 
