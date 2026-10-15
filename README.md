@@ -125,16 +125,16 @@ If the installer reports pending updates, update the system (in Game Mode: Setti
 ### Power
 The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit: on the RTX 4090, Balanced is 120 W and Performance is 150 W. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
 
-**Recommended:** for full XG Mobile power with a cool CPU, pick **Performance** and cap the CPU with Steam's TDP slider or a TDP plugin. Measured on SteamOS with the RTX 4090: Performance plus a 15 W CPU cap in SimpleDeckyTDP kept the XG Mobile at ~149 W while the Ally's CPU drew 11–15 W.
+**Recommended:** for full XG Mobile power with a cool CPU, pick **Performance** and cap the CPU with Steam's TDP slider or a TDP plugin. Measured on SteamOS with the RTX 4090: Performance plus SimpleDeckyTDP's slider at **15 W** kept the XG Mobile at ~149 W while the Ally's CPU drew 11–15 W.
 
 #### Using SimpleDeckyTDP
 To control the XG Mobile's power and the Ally's CPU separately, in SimpleDeckyTDP turn **off** "Enable Asus Platform Profile Management" and keep "Use Asus WMI for TDP" **on**. Then:
 * this plugin's dropdown alone sets the ASUS profile, and through it the XG Mobile's power limit (Balanced ≈ 120 W, Performance ≈ 150 W on the RTX 4090)
-* SimpleDeckyTDP's slider alone sets the CPU limits (asus-armoury `ppt_pl1_spl` / `ppt_pl2_sppt` / `ppt_pl3_fppt`)
+* SimpleDeckyTDP's slider alone sets the CPU limits (asus-armoury `ppt_pl1_spl` / `ppt_pl2_sppt` / `ppt_pl3_fppt`; at a lower setting, for example, it writes 7/15/15)
 
 Why: with "Platform Profile Management" on, SimpleDeckyTDP picks the ASUS profile itself from its TDP slider, so moving the CPU slider also changes the XG Mobile's power and overrides the dropdown.
 
-Measured on SteamOS with the RTX 4090: switching the plugin's profile between Performance and Balanced left `ppt_*` at 30/30/30, changing SimpleDeckyTDP's slider to 7/15/15 left the profile on Performance, and the eGPU pulled 150 W on Performance.
+Measured on SteamOS with the RTX 4090: switching the plugin's profile between Performance and Balanced left `ppt_*` at 30/30/30, moving SimpleDeckyTDP's slider down (it wrote 7/15/15 to `ppt_pl1_spl` / `ppt_pl2_sppt` / `ppt_pl3_fppt`) left the profile on Performance, and the eGPU pulled 150 W on Performance.
 
 Other TDP tools that manage the ASUS platform profile (e.g. Handheld Daemon on Bazzite/CachyOS) may have the same coupling. That's not verified yet; if yours has a platform-profile option, turn it off for separate control.
 
