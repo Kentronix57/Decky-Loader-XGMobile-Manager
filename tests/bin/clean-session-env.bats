@@ -109,6 +109,8 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   run cat "$LOG_DIR/desktop_eject_request.log"
   assert_line "eGPU variables found in user manager: unknown (couldn't read it: Failed to connect to bus: No such file or directory)"
   assert_line "eGPU variables left in user manager: unknown (couldn't read it: Failed to connect to bus: No such file or directory)"
+  # The unsets that are tried anyway don't add their own errors.
+  assert_equal "$(grep -c "Failed to connect to bus" "$LOG_DIR/desktop_eject_request.log")" 2
 }
 
 @test "appends to desktop_eject_request.log" {

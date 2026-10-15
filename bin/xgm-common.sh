@@ -143,7 +143,12 @@ _xgm_clean_manager() {
   found=$(_xgm_manager_egpu_vars "$@")
   echo "eGPU variables found in $1 manager: $found"
   for var in "${XGM_ENV_VARS[@]}" KWIN_DRM_DEVICES; do
-    _xgm_manager "$@" unset-environment "$var"
+    if [[ "$found" == unknown* ]]; then
+      # The manager doesn't answer; the line above already says so, once.
+      _xgm_manager "$@" unset-environment "$var" 2>/dev/null
+    else
+      _xgm_manager "$@" unset-environment "$var"
+    fi
   done
   for var in GBM_BACKEND __GLX_VENDOR_LIBRARY_NAME; do
     [[ " $found " == *" $var "* ]] && _xgm_manager "$@" unset-environment "$var"
