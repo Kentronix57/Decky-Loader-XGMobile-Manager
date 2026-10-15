@@ -244,7 +244,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 fi
 
 # Hardware Deactivation
-echo 0 > "$ENABLE_PATH" || true
+xgm_write_egpu_enable 0 "$ENABLE_PATH"
 echo 1 > $ROOT/sys/bus/pci/rescan
 
 # Wait for the eGPU's PCI device to go away (none recorded: nothing to wait for).

@@ -680,3 +680,14 @@ eject_with_numbering() {
   assert_success
   assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
 }
+
+@test "egpu_enable write fails: friendly line, no shell error in the log, the drop wait decides" {
+  egpu_present amd
+  record_egpu_pci
+  chmod 444 "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  run_plugin_script egpu-eject amd
+  assert_success
+  [[ "$LOG" == *"asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..."* ]]
+  [[ "$LOG" == *"WARNING: Hardware did not seem to drop from the PCIe bus."* ]]
+  [[ "$LOG" != *"write error"* && "$LOG" != *"Permission denied"* ]]
+}

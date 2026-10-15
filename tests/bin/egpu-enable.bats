@@ -638,3 +638,46 @@ assert_nvidia_services_after_modules() {
   assert_success
   assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
 }
+
+# write_probe <code>: runs <code> in a script that sources bin/xgm-common.sh, on the sandbox PATH.
+write_probe() {
+  printf '%s\n' '#!/bin/bash' ". '$XGM_REPO/bin/xgm-common.sh'" "$1" > "$BATS_TEST_TMPDIR/probe"
+  run env -i PATH="$SYSBIN" "$SYSBIN/bash" "$BATS_TEST_TMPDIR/probe"
+}
+
+# asus-nb-wmi's egpu_enable often fails the write with "echo: write error: Input/output error"
+# even though the switch works (issue #18). /dev/full fails every write the same way (ENOSPC).
+@test "xgm_write_egpu_enable: a failed write logs one friendly line, no shell write error, returns 0" {
+  [ -w /dev/full ] || skip "no /dev/full"
+  write_probe 'xgm_write_egpu_enable 1 /dev/full; echo "rc=$?"; xgm_write_egpu_enable 0 /dev/full; echo "rc=$?"'
+  assert_success
+  assert_output "$(printf '%s\n' \
+    "asus-nb-wmi reported an error switching the eGPU on (usually harmless); checking for the eGPU..." "rc=0" \
+    "asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..." "rc=0")"
+}
+
+@test "xgm_write_egpu_enable: a write that works is silent" {
+  local f="$BATS_TEST_TMPDIR/egpu_enable"
+  : > "$f"
+  write_probe "xgm_write_egpu_enable 1 '$f'"
+  assert_success
+  assert_output ""
+  assert_equal "$(cat "$f")" 1
+}
+
+@test "egpu_enable write fails: friendly line, no shell error in the log, the detection loop decides (exit 5)" {
+  egpu_appears amd
+  chmod 444 "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  run_plugin_script egpu-enable amd
+  assert_failure 5
+  [[ "$LOG" == *"asus-nb-wmi reported an error switching the eGPU on (usually harmless); checking for the eGPU..."* ]]
+  [[ "$LOG" == *"Waiting for eGPU card... (14)"* ]]
+  [[ "$LOG" != *"write error"* && "$LOG" != *"Permission denied"* ]]
+}
+
+@test "egpu_enable write works: no friendly error line, no write error" {
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  [[ "$LOG" != *"asus-nb-wmi reported an error"* && "$LOG" != *"write error"* ]]
+}

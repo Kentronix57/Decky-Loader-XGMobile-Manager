@@ -184,6 +184,19 @@ xgm_sanitize_environment() {
   rm -f "$ROOT/etc/modprobe.d/nvidia-egpu.conf"
 }
 
+# xgm_write_egpu_enable <0|1> <path>: switches the eGPU off/on through asus-nb-wmi's egpu_enable.
+# The write often fails with "Input/output error" even when the switch works, so the shell's
+# error is dropped and one friendly line logged instead; the caller's bus check decides success.
+xgm_write_egpu_enable() {
+  { echo "$1" > "$2"; } 2>/dev/null && return 0
+  if [ "$1" = "1" ]; then
+    echo "asus-nb-wmi reported an error switching the eGPU on (usually harmless); checking for the eGPU..."
+  else
+    echo "asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..."
+  fi
+  return 0
+}
+
 # xgm_egpu_pci_paths <data_dir> [strict]: the eGPU's PCI device dir(s) in sysfs, one per line,
 # resolved in this order:
 #   1. the PCI address egpu-enable recorded in <data_dir>/egpu_pci_address, if that device exists

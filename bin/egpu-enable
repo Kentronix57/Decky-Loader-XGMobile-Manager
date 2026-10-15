@@ -154,7 +154,7 @@ EXISTING_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
 IGPU_CARD=$(echo "$EXISTING_CARDS" | head -n 1)
 ENABLE_PATH="$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
 if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
-  echo 1 > "$ENABLE_PATH" || true
+  xgm_write_egpu_enable 1 "$ENABLE_PATH"
 fi
 echo 1 > $ROOT/sys/bus/pci/rescan
 
