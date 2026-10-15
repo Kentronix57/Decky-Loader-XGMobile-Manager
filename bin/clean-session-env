@@ -20,5 +20,9 @@ if [[ "$OS_TYPE" != "steamos" && "$OS_TYPE" != *"cachyos"* ]]; then
   echo "$OS_TYPE: egpu-enable doesn't inject the eGPU environment here. Skipping."
   exit 0
 fi
+# Eject restarted the display manager, and the session it started (the persistent Plasma desktop,
+# if that's the default) can import its environment into the user manager a moment later. On
+# SteamOS there's no wait before this runs, so wait for the session first.
+xgm_wait_for_user_session "$TARGET_USER"
 xgm_clean_session_env "$TARGET_USER"
 exit 0

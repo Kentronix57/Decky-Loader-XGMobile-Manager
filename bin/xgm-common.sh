@@ -151,6 +151,33 @@ _xgm_clean_manager() {
   echo "eGPU variables left in $1 manager: $(_xgm_manager_egpu_vars "$@")"
 }
 
+# xgm_wait_for_user_session <user>: waits up to 10 s (checking every 0.5 s) for the user's
+# graphical session to be up (graphical-session.target active), so that a Plasma session that
+# imports its environment into the user manager has done it before the cleanup. Logs how long it
+# took, or that it gave up. Returns at once when the user manager isn't running or doesn't
+# answer (xgm_clean_session_env logs that).
+xgm_wait_for_user_session() {
+  local user="$1" uid state i=0
+  uid=$(id -u "$user" 2>/dev/null)
+  [ -n "$uid" ] && [ -d "$ROOT/run/user/$uid" ] || return 0
+  while :; do
+    if state=$(_xgm_manager user "$user" "$uid" is-active graphical-session.target 2>&1); then
+      echo "user session ready after $((i / 2))$([ $((i % 2)) -eq 1 ] && echo .5)s"
+      return 0
+    fi
+    case "$state" in
+      inactive|activating|deactivating|failed|reloading|unknown) ;;
+      *) echo "user manager not answering; not waiting for the user session"; return 0 ;;
+    esac
+    if [ "$i" -ge 20 ]; then
+      echo "user session not ready after 10s, cleaning anyway"
+      return 0
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+}
+
 # xgm_clean_session_env <user>: unsets the eGPU variables in the system manager and in that user's
 # manager (no files), logging what each held before and after. A user manager that isn't running
 # (no runtime dir: no session yet, or the display manager is stopped) is logged, not skipped silently.

@@ -276,6 +276,10 @@ manager_env_of() { cat "$SHIM_STATE/env/$1" 2>/dev/null || true; }
 # The primary user has a runtime dir, but its user manager doesn't answer (every --user call fails).
 user_manager_down() { touch "$SHIM_STATE/user_manager_down"; }
 
+# session_ready now|never|<n>: when the user's graphical-session.target is active (shims/systemctl):
+# right away (the default), never, or after <n> inactive checks.
+session_ready() { echo "$1" > "$SHIM_STATE/session_ready"; }
+
 # steam_user <name>: the user Steam runs as (shims/ps), instead of xgmtest.
 steam_user() { echo "$1" > "$SHIM_STATE/steam_user"; }
 

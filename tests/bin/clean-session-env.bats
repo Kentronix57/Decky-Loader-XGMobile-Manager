@@ -117,3 +117,59 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_equal "$(manager_env_of user)" "$(printf '%s\n' "GBM_BACKEND=nvidia-drm" "__GLX_VENDOR_LIBRARY_NAME=nvidia")"
   [[ "$LOG" == *"bazzite-nvidia: egpu-enable doesn't inject the eGPU environment here. Skipping."* ]]
 }
+
+# The wait for the user's graphical session (graphical-session.target), before anything is read.
+@test "user session ready right away: no wait, logged as 0s, then cleaned" {
+  set_os steamos
+  manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  run_clean
+  assert_success
+  refute_called "sleep"
+  assert_called_before "systemctl --user is-active graphical-session.target" "systemctl --user show-environment"
+  [[ "$LOG" == *"user session ready after 0s"* ]]
+  assert_equal "$(manager_env_of user)" ""
+}
+
+@test "user session ready after 3 checks: waits 1.5s, then cleans what the session imported" {
+  set_os steamos
+  session_ready 3
+  manager_env user "GBM_BACKEND=nvidia-drm"
+  run_clean
+  assert_success
+  assert_equal "$(calls_matching "sleep 0.5" | wc -l)" 3
+  assert_equal "$(grep -cFx "systemctl --user is-active graphical-session.target" "$SHIM_LOG")" 4
+  assert_called_before "sleep 0.5" "systemctl --user show-environment"
+  [[ "$LOG" == *"user session ready after 1.5s"* ]]
+  assert_equal "$(manager_env_of user)" ""
+}
+
+@test "user session never ready: gives up after 10s and cleans anyway" {
+  set_os cachyos
+  session_ready never
+  manager_env user "MESA_VK_DEVICE_SELECT=10de:2717"
+  run_clean
+  assert_success
+  assert_equal "$(calls_matching "sleep 0.5" | wc -l)" 20
+  [[ "$LOG" == *"user session not ready after 10s, cleaning anyway"* ]]
+  [[ "$LOG" == *"eGPU variables left in user manager: none"* ]]
+  assert_equal "$(manager_env_of user)" ""
+}
+
+@test "user manager not running or not answering: no wait" {
+  set_os cachyos
+  user_manager_down
+  run_clean
+  assert_success
+  refute_called "sleep"
+  [[ "$LOG" == *"user manager not answering; not waiting for the user session"* ]]
+
+  : > "$SHIM_LOG"
+  rm -f "$SHIM_STATE/user_manager_down"
+  no_user_session
+  run_clean
+  assert_success
+  refute_called "sleep"
+  refute_called "systemctl --user"
+  [[ "$LOG" != *"user session"* ]]
+  [[ "$LOG" == *"eGPU variables left in user manager: not checked (the user manager for xgmtest isn't running: no $ROOT/run/user/64999)"* ]]
+}
