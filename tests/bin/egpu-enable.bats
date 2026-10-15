@@ -464,6 +464,36 @@ sync_service_missing() {
   assert_sync_service_installed
 }
 
+# As seen on SteamOS: "Configuration file .../xgmobile-boot-sync.service is marked executable".
+# cp kept the existing file's mode.
+@test "boot service unit up to date but executable (755): reinstalled as 644" {
+  egpu_appears amd
+  sync_service_installed
+  chmod 755 "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+  assert_equal "$(stat -c %a "$ROOT/etc/systemd/system/$SYNC_UNIT")" 644
+}
+
+@test "boot service unit outdated and executable (755): replaced as 644" {
+  egpu_appears amd
+  sync_service_installed
+  printf '%s\n' '[Service]' 'ExecStart=/usr/local/bin/egpu-sync nvidia steamos' > "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  chmod 755 "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+  assert_equal "$(stat -c %a "$ROOT/etc/systemd/system/$SYNC_UNIT")" 644
+}
+
+@test "service files are never copied with cp (it keeps an executable destination's mode)" {
+  run grep -nE '\bcp\b.*assets/services' "$XGM_REPO/bin/egpu-enable" "$XGM_REPO/bin/install-nvidia.sh"
+  assert_output ""
+  run grep -c 'install -m 644 "$REPO_ROOT/assets/services/' "$XGM_REPO/bin/install-nvidia.sh"
+  assert_output 1
+}
+
 @test "boot service up to date and enabled: left alone" {
   egpu_appears amd
   sync_service_installed
@@ -542,17 +572,27 @@ assert_nvidia_services_after_modules() {
   [[ "$LOG" == *"Starting NVIDIA services (persistence, Dynamic Boost)..."* ]]
 }
 
-@test "steamos + nvidia with self-repair (as on real installs): no NVIDIA service started early" {
+@test "steamos + nvidia with self-repair (as on real installs): no NVIDIA service started early, unit files installed as 644" {
   nvidia_ready steamos
   rm "$ROOT/etc/systemd/system/nvidia-suspend.service"
   # Self-repair chmods and links the plugin's own files, so run a copy inside the sandbox.
   local plugin="$BATS_TEST_TMPDIR/plugin"
   mkdir -p "$plugin"
   cp -r "$XGM_REPO/bin" "$XGM_REPO/assets" "$plugin/"
+  # Unit files an older version left executable.
+  local unit
+  for unit in egpu-enable.service egpu-eject.service xgmobile-boot-sync.service; do
+    cp "$XGM_REPO/assets/services/$unit" "$ROOT/etc/systemd/system/$unit"
+    chmod 755 "$ROOT/etc/systemd/system/$unit"
+  done
   XGM_BIN_DIR="$plugin/bin" ALLOW_SELF_REPAIR=1 run_script egpu-enable nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"
   assert_success
   [[ "$LOG" == *"Initiating self-repair"* ]]
   assert_nvidia_services_after_modules
+  for unit in egpu-enable.service egpu-eject.service xgmobile-boot-sync.service; do
+    cmp "$XGM_REPO/assets/services/$unit" "$ROOT/etc/systemd/system/$unit"
+    assert_equal "$unit $(stat -c %a "$ROOT/etc/systemd/system/$unit")" "$unit 644"
+  done
 }
 
 @test "cachyos + nvidia: NVIDIA services start after the modules load, not before the eGPU is on" {

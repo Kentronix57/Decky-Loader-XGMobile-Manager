@@ -19,7 +19,7 @@ source "$XGM_REPO/tests/audit/audit.bash"
 source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
-SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee)
+SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install)
 
 refuse_root() {
   if [ "$EUID" -eq 0 ]; then
