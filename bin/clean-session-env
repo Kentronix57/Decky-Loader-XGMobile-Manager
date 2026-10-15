@@ -1,0 +1,24 @@
+#!/bin/bash
+# Unsets the eGPU variables in the system manager and the user's systemd manager, right before the
+# desktop Eject link switches back to Game Mode (main.py), so the Game Mode session doesn't start
+# on the GPU that was just ejected. A Plasma session can put them back after egpu-eject cleaned up.
+#   clean-session-env <user> <log dir>
+# Appends to <log dir>/desktop_eject_request.log. Only SteamOS and CachyOS: egpu-enable doesn't
+# inject the eGPU environment elsewhere, and on Bazzite GBM_BACKEND/__GLX_VENDOR_LIBRARY_NAME
+# belong to the image.
+ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
+TARGET_USER="${1:-$(xgm_primary_user)}"
+LOG_DIR="${2:-$(xgm_log_dir)}"
+mkdir -p "$LOG_DIR"
+exec >> "$LOG_DIR/desktop_eject_request.log" 2>&1
+
+echo "--- Session environment cleanup for $TARGET_USER at $(date) ---"
+OS_TYPE=$(xgm_os_type)
+if [[ "$OS_TYPE" != "steamos" && "$OS_TYPE" != *"cachyos"* ]]; then
+  echo "$OS_TYPE: egpu-enable doesn't inject the eGPU environment here. Skipping."
+  exit 0
+fi
+xgm_clean_session_env "$TARGET_USER"
+exit 0

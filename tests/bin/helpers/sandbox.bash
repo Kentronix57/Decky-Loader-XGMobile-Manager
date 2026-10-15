@@ -261,6 +261,21 @@ module_stuck() { echo "$1" >> "$SHIM_STATE/module_stuck"; }
 steam_not_running() { touch "$SHIM_STATE/steam_not_running"; }
 no_user_session() { rm -rf "$ROOT/run/user/64999"; }
 
+# manager_env <system|user> NAME=value...: variables already in that systemd manager's environment
+# (shims/systemctl), e.g. what a Plasma session imported.
+manager_env() {
+  local scope="$1"
+  shift
+  mkdir -p "$SHIM_STATE/env"
+  printf '%s\n' "$@" >> "$SHIM_STATE/env/$scope"
+}
+
+# manager_env_of <system|user>: that manager's environment now, one NAME=value per line.
+manager_env_of() { cat "$SHIM_STATE/env/$1" 2>/dev/null || true; }
+
+# The primary user has a runtime dir, but its user manager doesn't answer (every --user call fails).
+user_manager_down() { touch "$SHIM_STATE/user_manager_down"; }
+
 # steam_user <name>: the user Steam runs as (shims/ps), instead of xgmtest.
 steam_user() { echo "$1" > "$SHIM_STATE/steam_user"; }
 

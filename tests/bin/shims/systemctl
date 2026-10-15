@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Test shim: records the call. `is-active <unit>` succeeds only if $SHIM_STATE/active/<unit> exists.
 # `enable`/`disable` (system manager) add/remove $SHIM_STATE/enabled/<unit>, and `is-enabled <unit>`
-# succeeds only if it exists.
+# succeeds only if it exists. `set-environment`/`unset-environment`/`show-environment` keep each
+# manager's environment in $SHIM_STATE/env/system or env/user (one NAME=value per line); with
+# $SHIM_STATE/user_manager_down every --user call fails as if the user manager isn't running.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 user=0 verb="" units=()
 for arg in "$@"; do
@@ -11,7 +13,26 @@ for arg in "$@"; do
     *) if [ -z "$verb" ]; then verb="$arg"; else units+=("$arg"); fi ;;
   esac
 done
+scope=system
+[ "$user" -eq 1 ] && scope=user
+if [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/user_manager_down" ]; then
+  echo "Failed to connect to bus: No such file or directory" >&2
+  exit 1
+fi
+envfile="$SHIM_STATE/env/$scope"
 case "$verb" in
+  show-environment)
+    cat "$envfile" 2>/dev/null
+    exit 0 ;;
+  set-environment|unset-environment)
+    mkdir -p "$SHIM_STATE/env"
+    touch "$envfile"
+    for unit in "${units[@]}"; do
+      grep -v "^${unit%%=*}=" "$envfile" > "$envfile.new"
+      [ "$verb" = "set-environment" ] && printf '%s\n' "$unit" >> "$envfile.new"
+      mv "$envfile.new" "$envfile"
+    done
+    exit 0 ;;
   is-active)
     [ -e "$SHIM_STATE/active/${units[-1]}" ] && exit 0
     exit 3 ;;

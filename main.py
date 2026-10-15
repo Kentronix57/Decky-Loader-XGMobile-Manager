@@ -120,6 +120,13 @@ SCRIPT_META = {
     "fail_title": "NVIDIA Install Failed",
     "action": "The NVIDIA driver install",
   },
+  "clean-session-env": {
+    "log_key": "ejectdesktop",
+    "title": "XG Mobile",
+    "message": "eGPU variables cleared from the session.",
+    "fail_title": "Session Cleanup Failed",
+    "action": "Clearing the eGPU session variables",
+  },
   "uninstall.sh": {
     "log_key": "uninstall",
     "title": "Reset Driver Environment",
@@ -193,6 +200,9 @@ SCRIPT_ERROR_CATALOG = {
   "create-shortcuts": {
     2: ("NVIDIA driver isn't installed, so shortcuts weren't created.",
         "Run Advanced → Install NVIDIA Drivers first, or turn off NVIDIA Mode if your XG Mobile is AMD."),
+    9: _MISSING_HELPER,
+  },
+  "clean-session-env": {
     9: _MISSING_HELPER,
   },
   "uninstall.sh": {
@@ -592,7 +602,26 @@ class Plugin:
       "XDG_RUNTIME_DIR": f"/run/user/{uid}",
       "DBUS_SESSION_BUS_ADDRESS": f"unix:path=/run/user/{uid}/bus"
     }
+    clean_script = os.path.join(self.get_plugin_dir(), "bin", "clean-session-env")
+
+    def clean_session_env():
+      # The Plasma session that ran until now can have put the eGPU variables back into the user
+      # manager after egpu-eject cleaned it, and Game Mode would start on the ejected GPU. A failure
+      # is only logged: a black screen is worse than a possibly stale variable.
+      write_log(f"Clearing the eGPU variables from the session managers for {username}...")
+      try:
+        res = subprocess.run([clean_script, username, LOG_DIR],
+                             capture_output=True, text=True, check=False, env=sterile_env)
+      except Exception as e:
+        write_log(f"clean-session-env couldn't run: {e}. Switching anyway.")
+        return
+      if res.stdout: write_log("STDOUT:\n" + res.stdout.strip())
+      if res.stderr: write_log("STDERR:\n" + res.stderr.strip())
+      if res.returncode != 0:
+        write_log(f"clean-session-env failed with exit code {res.returncode}. Switching anyway.")
+
     for session_args in _session_select_calls(os_type, desktopdefault, "gamescope"):
+      clean_session_env()
       write_log(f"Running session select: {' '.join(session_args)}")
       result = subprocess.run(
         ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],

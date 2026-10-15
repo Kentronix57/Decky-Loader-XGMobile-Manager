@@ -69,7 +69,7 @@ cold_boot_symmetry() {
   cold_boot_symmetry cachyos
 }
 
-@test "inactive at early boot (no user session yet): user manager skipped silently" {
+@test "inactive at early boot (no user session yet): user manager skipped, and the skip logged" {
   steam_not_running
   no_user_session
   echo "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json" >> "$ROOT/etc/environment"
@@ -78,6 +78,8 @@ cold_boot_symmetry() {
   assert_called "systemctl unset-environment VK_ICD_FILENAMES"
   refute_called "sudo"
   refute_called "systemctl --user"
+  [[ "$LOG" == *"eGPU variables left in user manager: not checked (the user manager for xgmtest isn't running: no $ROOT/run/user/64999)"* ]]
+  [[ "$LOG" == *"eGPU variables left in /etc/environment: none"* ]]
   run grep -c VK_ICD_FILENAMES "$ROOT/etc/environment"
   assert_output 0
 }
