@@ -175,6 +175,7 @@ If you wish to contribute or build the plugin from your own development environm
 * **Boot Loop after SteamOS Update:** If you update SteamOS *without* running the Reset script first, the system may try to load orphaned kernel modules. Run the Reset script from recovery or TTY to fix.
 * **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesn't affect performance, but is actively being investigated.
 * **Power Profile overwritten by other TDP controllers:** Other TDP controls (like SimpleDeckyTDP and HHD) will override the setting of the Power Profile. Use the dropdown in this app to monitor what the current power profile is (this plugin pings the xg mobile every 3 seconds to determine the current Power Profile setting).
+* **Steam's performance overlay shows 0 °C / 0 MHz for the XG Mobile on SteamOS:** On SteamOS, Steam's performance overlay shows 0 °C and 0 MHz for the XG Mobile (its load and power are correct). Use the plugin's panel for the XG Mobile's temperature.
 * **Set Desktop to Default on BazziteOS:** Setting desktop mode to persistent is not currently possible on BazziteOS. With the deck image of bazzite, they have made it over-write the desktop persistence on a reboot. This is still under investigation
 
 ---
