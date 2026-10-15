@@ -119,8 +119,11 @@ If the installer reports pending updates, update the system (in Game Mode: Setti
 > * **[Set Desktop to Default]:** Enable this toggle to set Desktop Mode to persistent when Enabling the XG Mobile. Run the Eject XG Mobile Desktop Link to eject the XG Mobile and revert to GameMode.
 
 * **To Play:** Plug in the XG Mobile, lock it, and click **Enable XG Mobile**. The light on the XG Mobile connector will turn red. The screen will then briefly go black as `gamescope` restarts on the external GPU, please be patient. Some external monitors alternate On/Off during this process.
-* **Power Profiles:** Once active, use the **ASUS Hardware Controls** dropdown to toggle between Quiet, Balanced, and Performance thermal limits for the eGPU.
+* **Power Profiles:** Once active, use the **ASUS Power Profile (Ally + XG Mobile)** dropdown to switch between Quiet, Balanced, and Performance (see [Power](#power)).
 * **To Disconnect:** Click **Eject XG Mobile**. Wait for the UI to restart and return to the handheld screen and the light on the XG Mobile connector is white before unlocking the cable.
+
+### Power
+The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit: on the RTX 4090, Balanced is 120 W and Performance is 150 W. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
 
 ### 🛑 The "SteamOS Update Tax" SteamOS Users only
 Because the NVIDIA drivers are compiled explicitly for the kernel version running at the time of installation, **a SteamOS System Update will break your drivers.**
