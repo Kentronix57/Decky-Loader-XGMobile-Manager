@@ -204,7 +204,8 @@ def test_power_profile_label_is_honest_and_dropdown_unchanged():
   assert "Active Power Profile" not in src
   assert ("Sets the Ally's ASUS profile, which also sets the XG Mobile's power limit (on the RTX 4090: "
           "Balanced 120 W, Performance 150 W). Steam's performance setting changes the same profile. "
-          "Use Steam's TDP slider to limit the Ally CPU.") in src
+          "Use Steam's TDP slider to limit the Ally CPU. For full XG Mobile power with a cool CPU, pick "
+          "Performance and cap the CPU with Steam's TDP slider or a TDP plugin.") in src
   # Text only: the dropdown still writes the same three profiles through set_power_profile.
   assert re.findall(r'\{ data: "(\w+)", label: "\w+" \}', src) == ["Quiet", "Balanced", "Performance"]
   assert 'call("set_power_profile", { profile: newProfile })' in src

@@ -125,6 +125,8 @@ If the installer reports pending updates, update the system (in Game Mode: Setti
 ### Power
 The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit: on the RTX 4090, Balanced is 120 W and Performance is 150 W. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
 
+**Recommended:** for full XG Mobile power with a cool CPU, pick **Performance** and cap the CPU with Steam's TDP slider or a TDP plugin. Measured on SteamOS with the RTX 4090: Performance plus a 15 W CPU cap in SimpleDeckyTDP kept the XG Mobile at ~149 W while the Ally's CPU drew 11–15 W.
+
 ### 🛑 The "SteamOS Update Tax" SteamOS Users only
 Because the NVIDIA drivers are compiled explicitly for the kernel version running at the time of installation, **a SteamOS System Update will break your drivers.**
 
