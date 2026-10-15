@@ -11,6 +11,8 @@ PRIMARY_USER=$(xgm_primary_user)
 mkdir -p "$DATA_DIR/configs"
 # A result saved by an earlier enable/eject is stale now; the plugin saves this run's on failure.
 rm -f "$DATA_DIR/last_result.json" "$DATA_DIR/last_eject_cancelled"
+# The previous run's log is kept as enable_<vendor>.prev.log (replacing an older one).
+[ -f "$LOG_DIR/enable_${VENDOR}.log" ] && mv -f "$LOG_DIR/enable_${VENDOR}.log" "$LOG_DIR/enable_${VENDOR}.prev.log"
 exec > "$LOG_DIR/enable_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
@@ -81,8 +83,9 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
     ln -sf "$REPO_ROOT/bin/egpu-sync" $ROOT/usr/local/bin/egpu-sync
     chmod +x "$REPO_ROOT/bin/egpu-enable" "$REPO_ROOT/bin/egpu-eject" "$REPO_ROOT/bin/egpu-sync"
   
-    # Copy background services
-    cp "$REPO_ROOT/assets/services/"*.service $ROOT/etc/systemd/system/ 2>/dev/null || true
+    # Copy background services (mode 644: systemd warns about executable unit files, and cp
+    # would keep an existing file's mode)
+    install -m 644 "$REPO_ROOT/assets/services/"*.service $ROOT/etc/systemd/system/ 2>/dev/null || true
     systemctl enable xgmobile-boot-sync.service
 
     if [ "$VENDOR" == "nvidia" ]; then
@@ -100,15 +103,17 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
   # installed and enabled whenever the eGPU environment gets injected.
   SYNC_UNIT="xgmobile-boot-sync.service"
   # Its ExecStart is /usr/local/bin/egpu-sync: a symlink to the plugin's executable bin/egpu-sync.
+  # An executable unit file (older versions' cp kept the mode) makes systemd warn on every load.
   SYNC_BIN="$REPO_ROOT/bin/egpu-sync"
   if [ "$(cat "$REPO_ROOT/assets/services/$SYNC_UNIT" 2>/dev/null)" != "$(cat $ROOT/etc/systemd/system/$SYNC_UNIT 2>/dev/null)" ] \
+    || [ -x $ROOT/etc/systemd/system/$SYNC_UNIT ] \
     || [ "$(readlink $ROOT/usr/local/bin/egpu-sync)" != "$SYNC_BIN" ] || [ ! -x "$SYNC_BIN" ] \
     || ! systemctl is-enabled --quiet "$SYNC_UNIT"; then
     echo "Installing and enabling the boot safety net ($SYNC_UNIT)..."
     xgm_ro_disable
     ln -sf "$SYNC_BIN" $ROOT/usr/local/bin/egpu-sync
     [ -x "$SYNC_BIN" ] || chmod +x "$SYNC_BIN"
-    cp "$REPO_ROOT/assets/services/$SYNC_UNIT" $ROOT/etc/systemd/system/
+    install -m 644 "$REPO_ROOT/assets/services/$SYNC_UNIT" $ROOT/etc/systemd/system/
     systemctl daemon-reload
     systemctl enable "$SYNC_UNIT"
     xgm_ro_enable
@@ -149,7 +154,7 @@ EXISTING_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
 IGPU_CARD=$(echo "$EXISTING_CARDS" | head -n 1)
 ENABLE_PATH="$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
 if [ "$(cat $ENABLE_PATH)" -eq 0 ]; then
-  echo 1 > "$ENABLE_PATH" || true
+  xgm_write_egpu_enable 1 "$ENABLE_PATH"
 fi
 echo 1 > $ROOT/sys/bus/pci/rescan
 

@@ -110,7 +110,7 @@ CachyOS only installs NVIDIA drivers when it detects an NVIDIA GPU, and the XG M
 2. Open the plugin → Advanced → **Install NVIDIA Drivers**. This needs an internet connection. It installs CachyOS's own packages with pacman: the prebuilt NVIDIA module for your kernel (e.g. `linux-cachyos-deckify-nvidia-open`) when the repo has one, `nvidia-open-dkms` otherwise, plus the NVIDIA userspace.
 3. Reboot when prompted.
 
-If the installer reports pending updates, run `sudo pacman -Syu` in a terminal, reboot, then run it again. After that, the drivers update with the rest of the system through `sudo pacman -Syu`, not through the plugin. There is no "Update Tax" and no Reset Driver Environment on CachyOS.
+If the installer reports pending updates, update the system (in Game Mode: Settings → System → Check for Updates; or `sudo pacman -Syu` in a terminal), reboot, then run it again. After that, the drivers update with the rest of the system through `sudo pacman -Syu`, not through the plugin. There is no "Update Tax" and no Reset Driver Environment on CachyOS.
 
 ### Daily Use
 
@@ -119,8 +119,38 @@ If the installer reports pending updates, run `sudo pacman -Syu` in a terminal, 
 > * **[Set Desktop to Default]:** Enable this toggle to set Desktop Mode to persistent when Enabling the XG Mobile. Run the Eject XG Mobile Desktop Link to eject the XG Mobile and revert to GameMode.
 
 * **To Play:** Plug in the XG Mobile, lock it, and click **Enable XG Mobile**. The light on the XG Mobile connector will turn red. The screen will then briefly go black as `gamescope` restarts on the external GPU, please be patient. Some external monitors alternate On/Off during this process.
-* **Power Profiles:** Once active, use the **ASUS Hardware Controls** dropdown to toggle between Quiet, Balanced, and Performance thermal limits for the eGPU.
+* **Power Profiles:** Once active, use the **ASUS Power Profile (Ally + XG Mobile)** dropdown to switch between Quiet, Balanced, and Performance (see [Power](#power)).
 * **To Disconnect:** Click **Eject XG Mobile**. Wait for the UI to restart and return to the handheld screen and the light on the XG Mobile connector is white before unlocking the cable.
+
+### Power
+The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit: on the RTX 4090, Balanced is 120 W and Performance is 150 W. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
+
+**Recommended:** for full XG Mobile power with a cool CPU, pick **Performance** and cap the CPU with Steam's TDP slider or a TDP plugin. Measured on SteamOS with the RTX 4090: Performance plus SimpleDeckyTDP's slider at **15 W** kept the XG Mobile at ~149 W while the Ally's CPU drew 11–15 W.
+
+#### Using SimpleDeckyTDP
+To control the XG Mobile's power and the Ally's CPU separately, in SimpleDeckyTDP turn **off** "Enable Asus Platform Profile Management" and keep "Use Asus WMI for TDP" **on**. Then:
+* this plugin's dropdown alone sets the ASUS profile, and through it the XG Mobile's power limit (Balanced ≈ 120 W, Performance ≈ 150 W on the RTX 4090)
+* SimpleDeckyTDP's slider alone sets the CPU limits (asus-armoury `ppt_pl1_spl` / `ppt_pl2_sppt` / `ppt_pl3_fppt`; at a lower setting, for example, it writes 7/15/15)
+
+Why: with "Platform Profile Management" on, SimpleDeckyTDP picks the ASUS profile itself from its TDP slider, so moving the CPU slider also changes the XG Mobile's power and overrides the dropdown.
+
+Measured on SteamOS with the RTX 4090: switching the plugin's profile between Performance and Balanced left `ppt_*` at 30/30/30, moving SimpleDeckyTDP's slider down (it wrote 7/15/15 to `ppt_pl1_spl` / `ppt_pl2_sppt` / `ppt_pl3_fppt`) left the profile on Performance, and the eGPU pulled 150 W on Performance.
+
+Other TDP tools that manage the ASUS platform profile (e.g. Handheld Daemon on Bazzite/CachyOS) may have the same coupling. That's not verified yet; if yours has a platform-profile option, turn it off for separate control.
+
+#### What each profile allows the CPU
+Without a TDP tool, the ASUS profile also sets the Ally CPU's firmware power limits. Measured by @tanayabhay-creator in #25 (ROG Ally + RTX 3080 XG Mobile on Bazzite, read with `ryzenadj`, no TDP tool running):
+
+| Profile | Sustained | Slow boost | Fast boost |
+|---|---|---|---|
+| Quiet | 10 W | 14 W | 17 W |
+| Balanced | 15 W | 20 W | 25 W |
+| Performance | 30 W | 43 W | 53 W |
+
+So Performance on its own lets the CPU boost briefly up to about 53 W, which makes it run hot. For full XG Mobile power with a cooler CPU, pair Performance with a TDP tool that caps the CPU (see above).
+
+#### CPU boost and temperatures
+The CPU's frequency boost is on by default. On the same tester's Ally, turning it off lowered the CPU temperature on the internal screen from about 86 °C to 68–70 °C, at the cost of some single-core speed. TDP tools often have a CPU boost toggle.
 
 ### 🛑 The "SteamOS Update Tax" SteamOS Users only
 Because the NVIDIA drivers are compiled explicitly for the kernel version running at the time of installation, **a SteamOS System Update will break your drivers.**
@@ -170,6 +200,7 @@ If you wish to contribute or build the plugin from your own development environm
 * **Boot Loop after SteamOS Update:** If you update SteamOS *without* running the Reset script first, the system may try to load orphaned kernel modules. Run the Reset script from recovery or TTY to fix.
 * **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesn't affect performance, but is actively being investigated.
 * **Power Profile overwritten by other TDP controllers:** Other TDP controls (like SimpleDeckyTDP and HHD) will override the setting of the Power Profile. Use the dropdown in this app to monitor what the current power profile is (this plugin pings the xg mobile every 3 seconds to determine the current Power Profile setting).
+* **Steam's performance overlay shows 0 °C / 0 MHz for the XG Mobile on SteamOS:** On SteamOS, Steam's performance overlay shows 0 °C and 0 MHz for the XG Mobile (its load and power are correct). Use the plugin's panel for the XG Mobile's temperature.
 * **Set Desktop to Default on BazziteOS:** Setting desktop mode to persistent is not currently possible on BazziteOS. With the deck image of bazzite, they have made it over-write the desktop persistence on a reboot. This is still under investigation
 
 ---

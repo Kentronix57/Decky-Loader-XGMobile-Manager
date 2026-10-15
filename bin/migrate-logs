@@ -7,7 +7,8 @@
 # <homebrew>/logs). LOG_DIR: the plugin's log folder (default LOGS_ROOT/<plugin folder>/activity).
 #
 #   - LOGS_ROOT/xgmobile_manager_<name>.log and the legacy xgmobile_<name>.log -> LOG_DIR/<name>.log.
-#     If that exists, LOG_DIR/archive/<name>.log, then .<mtime>[.N]. Nothing is overwritten.
+#     If that exists, the newer of the two (by mtime) keeps the name and the older goes to
+#     LOG_DIR/archive/<name>.log, then .<mtime>[.N]. Nothing is overwritten.
 #   - LOGS_ROOT/{enable,eject}_{nvidia,amd}.log (exactly these: other plugins log there too), which
 #     the scripts write when a stale shortcut passes the old log dir -> LOG_DIR, the same way.
 #   - The old *_latest.log links are removed (no other link; a stale shortcut's
@@ -45,10 +46,21 @@ free_path() {
   echo "$path.$stamp.$n"
 }
 
-# migrate_file <src> <new name>: to LOG_DIR/<new name>, or archive/ if that's taken.
+# migrate_file <src> <new name>: to LOG_DIR/<new name>. If that's taken, the newer file (by mtime)
+# gets the name and the older one goes to archive/; nothing is overwritten.
 migrate_file() {
-  local dest="$LOG_DIR/$2"
-  exists "$dest" && dest=$(free_path "$LOG_DIR/archive/$2" "$1")
+  local dest="$LOG_DIR/$2" archived
+  if exists "$dest"; then
+    if [ -f "$dest" ] && [ ! -L "$dest" ] && [ "$1" -nt "$dest" ]; then
+      archived=$(free_path "$LOG_DIR/archive/$2" "$dest")
+      move "$dest" "$archived" || return 1
+      note "Archived the older $dest as $archived: $1 is newer"
+    else
+      archived=$(free_path "$LOG_DIR/archive/$2" "$1")
+      move "$1" "$archived" && note "Archived the older $1 as $archived: $dest is newer"
+      return
+    fi
+  fi
   move "$1" "$dest"
 }
 

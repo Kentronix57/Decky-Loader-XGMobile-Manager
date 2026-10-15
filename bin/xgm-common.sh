@@ -87,27 +87,146 @@ xgm_os_type() {
 # set-environment). Keep in sync with egpu-enable.
 XGM_ENV_VARS=(MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAYERS_DISABLE GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT)
 
+# xgm_egpu_env_names: reads `systemctl show-environment` output on stdin and prints the names of
+# the eGPU variables in it: XGM_ENV_VARS and KWIN_DRM_DEVICES (from the xgmobile-*-kwin.sh Plasma
+# env files, which Plasma imports into the user manager) whatever their value; GBM_BACKEND and
+# __GLX_VENDOR_LIBRARY_NAME only with the values those files set, since other setups use them too.
+xgm_egpu_env_names() {
+  local line name value
+  while IFS= read -r line; do
+    name="${line%%=*}"
+    value="${line#*=}"
+    # show-environment shell-quotes values with special characters.
+    value="${value#\$}"
+    case "$value" in
+      \"*\"|\'*\') value="${value:1:${#value}-2}" ;;
+    esac
+    case "$name" in
+      KWIN_DRM_DEVICES) ;;
+      GBM_BACKEND) [ "$value" = "nvidia-drm" ] || continue ;;
+      __GLX_VENDOR_LIBRARY_NAME) [ "$value" = "nvidia" ] || continue ;;
+      *) [[ " ${XGM_ENV_VARS[*]} " == *" $name "* ]] || continue ;;
+    esac
+    echo "$name"
+  done
+}
+
+# _xgm_manager <system|user> <user> <uid> <systemctl args...>: runs systemctl against the system
+# manager, or against that user's manager as the user.
+_xgm_manager() {
+  local scope="$1" user="$2" uid="$3"
+  shift 3
+  if [ "$scope" = "system" ]; then
+    systemctl "$@"
+  else
+    sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid systemctl --user "$@"
+  fi
+}
+
+# _xgm_manager_egpu_vars <system|user> <user> <uid>: the eGPU variables in that manager as
+# "<names>", "none", or "unknown (...)" if its environment can't be read.
+_xgm_manager_egpu_vars() {
+  local out names
+  if ! out=$(_xgm_manager "$@" show-environment 2>&1); then
+    echo "unknown (couldn't read it: $(head -n 1 <<< "$out"))"
+    return 0
+  fi
+  names=$(xgm_egpu_env_names <<< "$out" | xargs)
+  echo "${names:-none}"
+}
+
+# _xgm_clean_manager <system|user> <user> <uid>: logs the eGPU variables in that manager, unsets
+# them, and logs what's left. The variables that are always ours are unset even when the
+# environment can't be read; GBM_BACKEND and __GLX_VENDOR_LIBRARY_NAME only when seen with our values.
+_xgm_clean_manager() {
+  local found var
+  found=$(_xgm_manager_egpu_vars "$@")
+  echo "eGPU variables found in $1 manager: $found"
+  for var in "${XGM_ENV_VARS[@]}" KWIN_DRM_DEVICES; do
+    if [[ "$found" == unknown* ]]; then
+      # The manager doesn't answer; the line above already says so, once.
+      _xgm_manager "$@" unset-environment "$var" 2>/dev/null
+    else
+      _xgm_manager "$@" unset-environment "$var"
+    fi
+  done
+  for var in GBM_BACKEND __GLX_VENDOR_LIBRARY_NAME; do
+    [[ " $found " == *" $var "* ]] && _xgm_manager "$@" unset-environment "$var"
+  done
+  echo "eGPU variables left in $1 manager: $(_xgm_manager_egpu_vars "$@")"
+}
+
+# xgm_wait_for_user_session <user>: waits up to 10 s (checking every 0.5 s) for the user's
+# graphical session to be up (graphical-session.target active), so that a Plasma session that
+# imports its environment into the user manager has done it before the cleanup. Logs how long it
+# took, or that it gave up. Returns at once when the user manager isn't running or doesn't
+# answer (xgm_clean_session_env logs that).
+xgm_wait_for_user_session() {
+  local user="$1" uid state i=0
+  uid=$(id -u "$user" 2>/dev/null)
+  [ -n "$uid" ] && [ -d "$ROOT/run/user/$uid" ] || return 0
+  while :; do
+    if state=$(_xgm_manager user "$user" "$uid" is-active graphical-session.target 2>&1); then
+      echo "user session ready after $((i / 2))$([ $((i % 2)) -eq 1 ] && echo .5)s"
+      return 0
+    fi
+    case "$state" in
+      inactive|activating|deactivating|failed|reloading|unknown) ;;
+      *) echo "user manager not answering; not waiting for the user session"; return 0 ;;
+    esac
+    if [ "$i" -ge 20 ]; then
+      echo "user session not ready after 10s, cleaning anyway"
+      return 0
+    fi
+    sleep 0.5
+    i=$((i + 1))
+  done
+}
+
+# xgm_clean_session_env <user>: unsets the eGPU variables in the system manager and in that user's
+# manager (no files), logging what each held before and after. A user manager that isn't running
+# (no runtime dir: no session yet, or the display manager is stopped) is logged, not skipped silently.
+xgm_clean_session_env() {
+  local user="$1" uid
+  _xgm_clean_manager system "" ""
+  uid=$(id -u "$user" 2>/dev/null)
+  if [ -z "$uid" ]; then
+    echo "eGPU variables left in user manager: not checked (no user '$user')"
+  elif [ ! -d "$ROOT/run/user/$uid" ]; then
+    echo "eGPU variables left in user manager: not checked (the user manager for $user isn't running: no $ROOT/run/user/$uid)"
+  else
+    _xgm_clean_manager user "$user" "$uid"
+  fi
+}
+
 # Undoes everything egpu-enable injects on SteamOS/CachyOS: the variables in /etc/environment,
-# the system and user systemd managers, the Plasma env files and nvidia-egpu.conf. The user
-# manager is skipped when the user has no runtime dir (no session yet, e.g. at early boot).
+# the system and user systemd managers (xgm_clean_session_env), the Plasma env files and
+# nvidia-egpu.conf.
 xgm_sanitize_environment() {
-  local user="$1" var uid
+  local user="$1" var left
   echo "Sanitizing the eGPU environment..."
   for var in "${XGM_ENV_VARS[@]}"; do
     sed -i "/^$var=/d" "$ROOT/etc/environment"
   done
-  for var in "${XGM_ENV_VARS[@]}"; do
-    systemctl unset-environment "$var"
-  done
-  uid=$(id -u "$user" 2>/dev/null)
-  if [ -n "$uid" ] && [ -d "$ROOT/run/user/$uid" ]; then
-    for var in "${XGM_ENV_VARS[@]}"; do
-      sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid systemctl --user unset-environment "$var"
-    done
-  fi
+  left=$(for var in "${XGM_ENV_VARS[@]}"; do grep -q "^$var=" "$ROOT/etc/environment" 2>/dev/null && echo "$var"; done | xargs)
+  echo "eGPU variables left in /etc/environment: ${left:-none}"
+  xgm_clean_session_env "$user"
   rm -f "$ROOT/home/$user/.config/plasma-workspace/env/xgmobile-kwin.sh"
   rm -f "$ROOT/home/$user/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh"
   rm -f "$ROOT/etc/modprobe.d/nvidia-egpu.conf"
+}
+
+# xgm_write_egpu_enable <0|1> <path>: switches the eGPU off/on through asus-nb-wmi's egpu_enable.
+# The write often fails with "Input/output error" even when the switch works, so the shell's
+# error is dropped and one friendly line logged instead; the caller's bus check decides success.
+xgm_write_egpu_enable() {
+  { echo "$1" > "$2"; } 2>/dev/null && return 0
+  if [ "$1" = "1" ]; then
+    echo "asus-nb-wmi reported an error switching the eGPU on (usually harmless); checking for the eGPU..."
+  else
+    echo "asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..."
+  fi
+  return 0
 }
 
 # xgm_egpu_pci_paths <data_dir> [strict]: the eGPU's PCI device dir(s) in sysfs, one per line,

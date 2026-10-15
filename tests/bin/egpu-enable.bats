@@ -464,6 +464,36 @@ sync_service_missing() {
   assert_sync_service_installed
 }
 
+# As seen on SteamOS: "Configuration file .../xgmobile-boot-sync.service is marked executable".
+# cp kept the existing file's mode.
+@test "boot service unit up to date but executable (755): reinstalled as 644" {
+  egpu_appears amd
+  sync_service_installed
+  chmod 755 "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+  assert_equal "$(stat -c %a "$ROOT/etc/systemd/system/$SYNC_UNIT")" 644
+}
+
+@test "boot service unit outdated and executable (755): replaced as 644" {
+  egpu_appears amd
+  sync_service_installed
+  printf '%s\n' '[Service]' 'ExecStart=/usr/local/bin/egpu-sync nvidia steamos' > "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  chmod 755 "$ROOT/etc/systemd/system/$SYNC_UNIT"
+  run_plugin_script egpu-enable amd
+  assert_success
+  assert_sync_service_installed
+  assert_equal "$(stat -c %a "$ROOT/etc/systemd/system/$SYNC_UNIT")" 644
+}
+
+@test "service files are never copied with cp (it keeps an executable destination's mode)" {
+  run grep -nE '\bcp\b.*assets/services' "$XGM_REPO/bin/egpu-enable" "$XGM_REPO/bin/install-nvidia.sh"
+  assert_output ""
+  run grep -c 'install -m 644 "$REPO_ROOT/assets/services/' "$XGM_REPO/bin/install-nvidia.sh"
+  assert_output 1
+}
+
 @test "boot service up to date and enabled: left alone" {
   egpu_appears amd
   sync_service_installed
@@ -542,17 +572,27 @@ assert_nvidia_services_after_modules() {
   [[ "$LOG" == *"Starting NVIDIA services (persistence, Dynamic Boost)..."* ]]
 }
 
-@test "steamos + nvidia with self-repair (as on real installs): no NVIDIA service started early" {
+@test "steamos + nvidia with self-repair (as on real installs): no NVIDIA service started early, unit files installed as 644" {
   nvidia_ready steamos
   rm "$ROOT/etc/systemd/system/nvidia-suspend.service"
   # Self-repair chmods and links the plugin's own files, so run a copy inside the sandbox.
   local plugin="$BATS_TEST_TMPDIR/plugin"
   mkdir -p "$plugin"
   cp -r "$XGM_REPO/bin" "$XGM_REPO/assets" "$plugin/"
+  # Unit files an older version left executable.
+  local unit
+  for unit in egpu-enable.service egpu-eject.service xgmobile-boot-sync.service; do
+    cp "$XGM_REPO/assets/services/$unit" "$ROOT/etc/systemd/system/$unit"
+    chmod 755 "$ROOT/etc/systemd/system/$unit"
+  done
   XGM_BIN_DIR="$plugin/bin" ALLOW_SELF_REPAIR=1 run_script egpu-enable nvidia "$OS_TYPE" "$LOG_DIR" "$DATA_DIR"
   assert_success
   [[ "$LOG" == *"Initiating self-repair"* ]]
   assert_nvidia_services_after_modules
+  for unit in egpu-enable.service egpu-eject.service xgmobile-boot-sync.service; do
+    cmp "$XGM_REPO/assets/services/$unit" "$ROOT/etc/systemd/system/$unit"
+    assert_equal "$unit $(stat -c %a "$ROOT/etc/systemd/system/$unit")" "$unit 644"
+  done
 }
 
 @test "cachyos + nvidia: NVIDIA services start after the modules load, not before the eGPU is on" {
@@ -597,4 +637,47 @@ assert_nvidia_services_after_modules() {
   run_plugin_script egpu-enable amd
   assert_success
   assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user set-environment WLR_DRM_DEVICES=$ROOT/dev/dri/card1:$ROOT/dev/dri/card0"
+}
+
+# write_probe <code>: runs <code> in a script that sources bin/xgm-common.sh, on the sandbox PATH.
+write_probe() {
+  printf '%s\n' '#!/bin/bash' ". '$XGM_REPO/bin/xgm-common.sh'" "$1" > "$BATS_TEST_TMPDIR/probe"
+  run env -i PATH="$SYSBIN" "$SYSBIN/bash" "$BATS_TEST_TMPDIR/probe"
+}
+
+# asus-nb-wmi's egpu_enable often fails the write with "echo: write error: Input/output error"
+# even though the switch works (issue #18). /dev/full fails every write the same way (ENOSPC).
+@test "xgm_write_egpu_enable: a failed write logs one friendly line, no shell write error, returns 0" {
+  [ -w /dev/full ] || skip "no /dev/full"
+  write_probe 'xgm_write_egpu_enable 1 /dev/full; echo "rc=$?"; xgm_write_egpu_enable 0 /dev/full; echo "rc=$?"'
+  assert_success
+  assert_output "$(printf '%s\n' \
+    "asus-nb-wmi reported an error switching the eGPU on (usually harmless); checking for the eGPU..." "rc=0" \
+    "asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..." "rc=0")"
+}
+
+@test "xgm_write_egpu_enable: a write that works is silent" {
+  local f="$BATS_TEST_TMPDIR/egpu_enable"
+  : > "$f"
+  write_probe "xgm_write_egpu_enable 1 '$f'"
+  assert_success
+  assert_output ""
+  assert_equal "$(cat "$f")" 1
+}
+
+@test "egpu_enable write fails: friendly line, no shell error in the log, the detection loop decides (exit 5)" {
+  egpu_appears amd
+  chmod 444 "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  run_plugin_script egpu-enable amd
+  assert_failure 5
+  [[ "$LOG" == *"asus-nb-wmi reported an error switching the eGPU on (usually harmless); checking for the eGPU..."* ]]
+  [[ "$LOG" == *"Waiting for eGPU card... (14)"* ]]
+  [[ "$LOG" != *"write error"* && "$LOG" != *"Permission denied"* ]]
+}
+
+@test "egpu_enable write works: no friendly error line, no write error" {
+  egpu_appears amd
+  run_plugin_script egpu-enable amd
+  assert_success
+  [[ "$LOG" != *"asus-nb-wmi reported an error"* && "$LOG" != *"write error"* ]]
 }

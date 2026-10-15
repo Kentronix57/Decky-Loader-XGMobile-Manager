@@ -344,7 +344,7 @@ export const QuickAccessContent = () => {
       <PanelSection title="ASUS Hardware Controls">
         <PanelSectionRow>
           <div style={{ marginBottom: "6px", fontSize: "14px", opacity: 0.8 }}>
-            Active Power Profile
+            ASUS Power Profile (Ally + XG Mobile)
           </div>
           {powerProfile === "Error" || powerProfile === "Unknown" ? (
             <div style={{ color: "#ffab40", fontSize: "12px", fontStyle: "italic", padding: "4px 0" }}>
@@ -373,6 +373,9 @@ export const QuickAccessContent = () => {
               }}
             />
           )}
+          <div style={{ marginTop: "6px", fontSize: "12px", opacity: 0.7 }}>
+            Sets the Ally's ASUS profile, which also sets the XG Mobile's power limit (on the RTX 4090: Balanced 120 W, Performance 150 W). Steam's performance setting changes the same profile. Use Steam's TDP slider to limit the Ally CPU. For full XG Mobile power with a cool CPU, pick Performance and cap the CPU with Steam's TDP slider or a TDP plugin. If a TDP plugin manages the ASUS profile (e.g. SimpleDeckyTDP's "Enable Asus Platform Profile Management"), turn that off so this setting and the CPU limit stay separate.
+          </div>
         </PanelSectionRow>
       </PanelSection>
 

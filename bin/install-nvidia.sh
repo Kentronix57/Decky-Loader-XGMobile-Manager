@@ -307,7 +307,7 @@ ln -sf "$REPO_ROOT/bin/egpu-enable" /usr/local/bin/egpu-enable
 ln -sf "$REPO_ROOT/bin/egpu-eject" /usr/local/bin/egpu-eject
 chmod +x "$REPO_ROOT/bin/egpu-enable"
 chmod +x "$REPO_ROOT/bin/egpu-eject"
-cp "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
+install -m 644 "$REPO_ROOT/assets/services/"*.service /etc/systemd/system/ 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable nvidia-persistenced nvidia-powerd nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service|| true
 systemctl daemon-reload

@@ -165,3 +165,70 @@ def test_watch_eject_request_session_calls(xgm, session_env, os_type, desktop_de
   assert session_selects(session_env) == expected
   log = open(xgm.mod.EJECTDESKTOP_LOG).read()
   assert log.count("Command exited with code: 0") == len(expected)
+
+
+def eject_link_steps(calls):
+  """The desktop Eject link's calls after egpu-eject, as "clean" or the session-select arguments."""
+  steps = []
+  for argv in calls:
+    if argv[0].endswith("/bin/clean-session-env"):
+      steps.append("clean")
+    elif SESSION_SELECT in argv:
+      steps.append(argv[argv.index(SESSION_SELECT) + 1:])
+  return steps
+
+
+@pytest.mark.parametrize("os_type,desktop_default,expected", [
+  ("cachyos", "1", ["clean", ["oneshot"], "clean", ["gamescope"]]),
+  ("cachyos", "0", ["clean", ["gamescope"]]),
+  ("steamos", "1", ["clean", ["gamescope"]]),
+  ("bazzite", "0", ["clean", ["gamescope"]]),
+])
+def test_watch_eject_request_cleans_session_env_before_each_select(xgm, session_env, os_type, desktop_default, expected):
+  xgm.set_os(os_type)
+  xgm.settings.setSetting("desktop_default", desktop_default)
+  run_watcher(xgm, xgm.plugin.watch_eject_request())
+  assert eject_link_steps(session_env) == expected
+  clean = [argv for argv in session_env if argv[0].endswith("/bin/clean-session-env")][0]
+  assert clean == [str(xgm.bin / "clean-session-env"), "xgmtest", xgm.mod.LOG_DIR]
+  log = open(xgm.mod.EJECTDESKTOP_LOG).read()
+  assert log.count("Clearing the eGPU variables from the session managers for xgmtest...") == expected.count("clean")
+  assert "Switching anyway" not in log
+
+
+@pytest.mark.parametrize("failure", ["exit", "exception"])
+def test_watch_eject_request_cleanup_failure_still_switches(xgm, session_env, monkeypatch, failure):
+  xgm.set_os("cachyos")
+  xgm.settings.setSetting("desktop_default", "1")
+
+  def run(argv, **kwargs):
+    session_env.append(list(argv))
+    if argv[0].endswith("/bin/clean-session-env"):
+      if failure == "exception":
+        raise FileNotFoundError(2, "No such file or directory", argv[0])
+      return subprocess.CompletedProcess(argv, 9, stdout="ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager.\n", stderr="")
+    return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+  monkeypatch.setattr(xgm.mod.subprocess, "run", run)
+  run_watcher(xgm, xgm.plugin.watch_eject_request())
+  assert eject_link_steps(session_env) == ["clean", ["oneshot"], "clean", ["gamescope"]]
+  log = open(xgm.mod.EJECTDESKTOP_LOG).read()
+  if failure == "exit":
+    assert log.count("clean-session-env failed with exit code 9. Switching anyway.") == 2
+    assert "ERROR: xgm-common.sh is missing." in log
+  else:
+    assert log.count("clean-session-env couldn't run: ") == 2
+  assert log.count("Command exited with code: 0") == 2
+
+
+def test_watch_eject_request_failed_eject_skips_cleanup_and_select(xgm, session_env, monkeypatch):
+  xgm.set_os("cachyos")
+
+  def failing_run(argv, **kwargs):
+    session_env.append(list(argv))
+    return subprocess.CompletedProcess(argv, 7, stdout="", stderr="")
+
+  monkeypatch.setattr(xgm.mod.subprocess, "run", failing_run)
+  run_watcher(xgm, xgm.plugin.watch_eject_request())
+  assert len(session_env) == 1 and session_env[0][0].endswith("/bin/egpu-eject")
+  assert eject_link_steps(session_env) == []

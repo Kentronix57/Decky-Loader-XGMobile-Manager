@@ -19,7 +19,7 @@ source "$XGM_REPO/tests/audit/audit.bash"
 source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
-SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee)
+SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install)
 
 refuse_root() {
   if [ "$EUID" -eq 0 ]; then
@@ -260,6 +260,26 @@ module_stuck() { echo "$1" >> "$SHIM_STATE/module_stuck"; }
 # no runtime dir.
 steam_not_running() { touch "$SHIM_STATE/steam_not_running"; }
 no_user_session() { rm -rf "$ROOT/run/user/64999"; }
+
+# manager_env <system|user> NAME=value...: variables already in that systemd manager's environment
+# (shims/systemctl), e.g. what a Plasma session imported.
+manager_env() {
+  local scope="$1"
+  shift
+  mkdir -p "$SHIM_STATE/env"
+  printf '%s\n' "$@" >> "$SHIM_STATE/env/$scope"
+}
+
+# manager_env_of <system|user>: that manager's environment now, one NAME=value per line.
+manager_env_of() { cat "$SHIM_STATE/env/$1" 2>/dev/null || true; }
+
+# The primary user has a runtime dir, but its user manager doesn't answer (every --user call fails).
+user_manager_down() { touch "$SHIM_STATE/user_manager_down"; }
+
+# session_ready now|never|<n>|activating:<n>: when the user's graphical-session.target is active
+# (shims/systemctl): right away (the default), never, after <n> inactive checks, or after <n>
+# checks that answer "activating".
+session_ready() { echo "$1" > "$SHIM_STATE/session_ready"; }
 
 # steam_user <name>: the user Steam runs as (shims/ps), instead of xgmtest.
 steam_user() { echo "$1" > "$SHIM_STATE/steam_user"; }
