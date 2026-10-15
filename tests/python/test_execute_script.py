@@ -168,3 +168,10 @@ def test_enable_config_hints_cover_steamos_and_cachyos(code):
   _, hint = STATIC.SCRIPT_ERROR_CATALOG["egpu-enable"][code]
   assert "On SteamOS, run Advanced → Install NVIDIA Drivers" in hint
   assert "sudo pacman -S nvidia-utils" in hint
+
+
+def test_cachyos_pending_updates_hint_names_both_update_routes():
+  _, hint = STATIC.SCRIPT_ERROR_CATALOG["install-nvidia-cachyos.sh"][3]
+  assert "In Game Mode, go to Settings → System → Check for Updates" in hint
+  assert "sudo pacman -Syu" in hint
+  assert "The install log names the package that didn't match." in hint

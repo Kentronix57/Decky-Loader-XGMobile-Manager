@@ -110,7 +110,7 @@ CachyOS only installs NVIDIA drivers when it detects an NVIDIA GPU, and the XG M
 2. Open the plugin → Advanced → **Install NVIDIA Drivers**. This needs an internet connection. It installs CachyOS's own packages with pacman: the prebuilt NVIDIA module for your kernel (e.g. `linux-cachyos-deckify-nvidia-open`) when the repo has one, `nvidia-open-dkms` otherwise, plus the NVIDIA userspace.
 3. Reboot when prompted.
 
-If the installer reports pending updates, run `sudo pacman -Syu` in a terminal, reboot, then run it again. After that, the drivers update with the rest of the system through `sudo pacman -Syu`, not through the plugin. There is no "Update Tax" and no Reset Driver Environment on CachyOS.
+If the installer reports pending updates, update the system (in Game Mode: Settings → System → Check for Updates; or `sudo pacman -Syu` in a terminal), reboot, then run it again. After that, the drivers update with the rest of the system through `sudo pacman -Syu`, not through the plugin. There is no "Update Tax" and no Reset Driver Environment on CachyOS.
 
 ### Daily Use
 

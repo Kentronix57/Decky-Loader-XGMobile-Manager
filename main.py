@@ -190,7 +190,7 @@ SCRIPT_ERROR_CATALOG = {
     2: ("Unsupported OS. This driver installer is CachyOS-only.",
         "On SteamOS the plugin uses its SteamOS installer. On Bazzite, switch to the bazzite-deck-nvidia image, which includes the drivers."),
     3: ("CachyOS has pending updates. Update the system first.",
-        "Run `sudo pacman -Syu` in a terminal, reboot, then run Install NVIDIA Drivers again. The install log names the package that didn't match."),
+        "In Game Mode, go to Settings → System → Check for Updates, apply the update and reboot (or run `sudo pacman -Syu` in a terminal), then run Install NVIDIA Drivers again. The install log names the package that didn't match."),
     4: ("pacman couldn't install the NVIDIA packages.",
         "The install log shows pacman's error. Check your internet connection. If the package database is locked, wait for any other update to finish, then try again."),
     5: ("The NVIDIA packages installed, but the kernel module is missing.",
