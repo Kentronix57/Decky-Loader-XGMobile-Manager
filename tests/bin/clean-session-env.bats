@@ -157,6 +157,19 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_equal "$(manager_env_of user)" ""
 }
 
+@test "user session activating for 5 checks: keeps waiting (not 'not answering'), ready after 2.5s" {
+  set_os cachyos
+  session_ready activating:5
+  manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  run_clean
+  assert_success
+  assert_equal "$(calls_matching "sleep 0.5" | wc -l)" 5
+  assert_equal "$(grep -cFx "systemctl --user is-active graphical-session.target" "$SHIM_LOG")" 6
+  [[ "$LOG" == *"user session ready after 2.5s"* ]]
+  [[ "$LOG" != *"user manager not answering"* ]]
+  assert_equal "$(manager_env_of user)" ""
+}
+
 @test "user session never ready: gives up after 10s and cleans anyway" {
   set_os cachyos
   session_ready never

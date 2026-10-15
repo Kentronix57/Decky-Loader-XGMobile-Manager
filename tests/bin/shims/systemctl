@@ -5,7 +5,8 @@
 # manager's environment in $SHIM_STATE/env/system or env/user (one NAME=value per line); with
 # $SHIM_STATE/user_manager_down every --user call fails as if the user manager isn't running.
 # `--user is-active graphical-session.target` follows $SHIM_STATE/session_ready: now (default),
-# never, or N (inactive for the first N checks, then active).
+# never, N (inactive for the first N checks, then active) or activating:N (activating for the
+# first N checks, then active).
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 user=0 verb="" units=()
 for arg in "$@"; do
@@ -38,13 +39,18 @@ case "$verb" in
   is-active)
     if [ "$user" -eq 1 ] && [ "${units[-1]}" = "graphical-session.target" ]; then
       ready=$(cat "$SHIM_STATE/session_ready" 2>/dev/null || echo now)
+      waiting=inactive
+      if [[ "$ready" == activating:* ]]; then
+        waiting=activating
+        ready="${ready#activating:}"
+      fi
       polls=$(( $(cat "$SHIM_STATE/session_polls" 2>/dev/null || echo 0) + 1 ))
       echo "$polls" > "$SHIM_STATE/session_polls"
       if [ "$ready" = "now" ] || { [ "$ready" != "never" ] && [ "$polls" -gt "$ready" ]; }; then
         echo active
         exit 0
       fi
-      echo inactive
+      echo "$waiting"
       exit 3
     fi
     [ -e "$SHIM_STATE/active/${units[-1]}" ] && exit 0
