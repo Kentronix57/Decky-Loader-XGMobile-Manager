@@ -64,6 +64,18 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_line "eGPU variables found in system manager: none"
 }
 
+@test "GBM_BACKEND and __GLX_VENDOR_LIBRARY_NAME with values that only start like ours: left alone" {
+  set_os cachyos
+  manager_env user "GBM_BACKEND=nvidia-drm-x" "__GLX_VENDOR_LIBRARY_NAME=nvidia2"
+  run_clean
+  assert_success
+  assert_equal "$(manager_env_of user)" "$(printf '%s\n' "GBM_BACKEND=nvidia-drm-x" "__GLX_VENDOR_LIBRARY_NAME=nvidia2")"
+  refute_called "systemctl --user unset-environment GBM_BACKEND"
+  refute_called "systemctl --user unset-environment __GLX_VENDOR_LIBRARY_NAME"
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "eGPU variables found in user manager: none"
+}
+
 @test "quoted values from show-environment are still recognized as ours" {
   set_os cachyos
   manager_env user "GBM_BACKEND=\$'nvidia-drm'" "__GLX_VENDOR_LIBRARY_NAME=\"nvidia\"" "VK_LOADER_LAYERS_DISABLE=\$'*'"
