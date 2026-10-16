@@ -238,6 +238,36 @@ def _session_select_calls(os_type, desktop_default, target):
     return [["plasma-wayland-persistent"]]
   return [["plasma-wayland"]] if os_type == "steamos" else [["plasma"]]
 
+# steamos-session-select errors that mean the user manager wasn't ready yet (still stopping, not
+# started, or busy with queued jobs): worth a retry once clean-session-env has waited again.
+SESSION_SELECT_TRANSIENT_ERRORS = ("TransactionIsDestructive", "NameHasNoOwner", "concurrent deactivation", "No such file or directory")
+SESSION_SELECT_ATTEMPTS = 3
+SESSION_SELECT_RETRY_DELAY = 3
+
+def _user_session_ids(username):
+  """The user's current login session IDs (`loginctl list-sessions`), or [] if loginctl fails."""
+  try:
+    res = subprocess.run(["loginctl", "list-sessions", "--no-legend"],
+                         capture_output=True, text=True, check=False, env=_script_env())
+  except Exception as e:
+    _log_python_error(f"loginctl list-sessions couldn't run: {e}")
+    return []
+  ids = []
+  for line in res.stdout.splitlines():
+    fields = line.split()
+    if len(fields) >= 3 and fields[2] == username:
+      ids.append(fields[0])
+  return ids
+
+def _game_mode_switch_failed_result(os_type, code):
+  """The pending result for a desktop Eject whose switch back to Game Mode failed."""
+  message = "The XG Mobile was ejected, but switching back to Game Mode failed. In Desktop Mode, open Konsole and run: steamos-session-select gamescope"
+  if os_type == "steamos":
+    message += ' ("Return to Gaming Mode" doesn\'t clear the "Set Desktop to Default" setting)'
+  return _result(False, "error", "Couldn't Switch Back to Game Mode", message + ".",
+                 hint=f"Open Activity Logs → {LOG_MAP['ejectdesktop'][1]} for details.",
+                 code=code, script="steamos-session-select", log_key="ejectdesktop")
+
 def _result(ok, status, title, message, hint="", code=None, script="", log_key=""):
   return {"ok": ok, "status": status, "code": code, "script": script,
           "title": title, "message": message, "hint": hint, "log_key": log_key}
@@ -581,7 +611,12 @@ class Plugin:
       "HOME": home_dir
     }
 
-    result = subprocess.run([
+    # The login sessions from before the eject: clean-session-env waits for a session that isn't
+    # one of them, so it can't take the old, closing one for the new one.
+    known_sessions = " ".join(await asyncio.to_thread(_user_session_ids, username))
+    write_log(f"Login sessions before the eject: {known_sessions or 'none'}")
+
+    result = await asyncio.to_thread(subprocess.run, [
       script_path, 
       vendor, os_type, LOG_DIR, DATA_DIR
     ], capture_output=True, text=True, check=False, env=sterile_env)
@@ -611,14 +646,15 @@ class Plugin:
     }
     clean_script = os.path.join(self.get_plugin_dir(), "bin", "clean-session-env")
 
-    def clean_session_env():
+    async def clean_session_env():
       # The Plasma session that ran until now can have put the eGPU variables back into the user
-      # manager after egpu-eject cleaned it, and Game Mode would start on the ejected GPU. A failure
-      # is only logged: a black screen is worse than a possibly stale variable.
+      # manager after egpu-eject cleaned it, and Game Mode would start on the ejected GPU. It also
+      # waits for the new user session, which steamos-session-select needs. A failure is only
+      # logged: a black screen is worse than a possibly stale variable.
       write_log(f"Clearing the eGPU variables from the session managers for {username}...")
       try:
-        res = subprocess.run([clean_script, username, LOG_DIR],
-                             capture_output=True, text=True, check=False, env=sterile_env)
+        res = await asyncio.to_thread(subprocess.run, [clean_script, username, LOG_DIR, known_sessions],
+                                      capture_output=True, text=True, check=False, env=sterile_env)
       except Exception as e:
         write_log(f"clean-session-env couldn't run: {e}. Switching anyway.")
         return
@@ -628,19 +664,31 @@ class Plugin:
         write_log(f"clean-session-env failed with exit code {res.returncode}. Switching anyway.")
 
     for session_args in _session_select_calls(os_type, desktopdefault, "gamescope"):
-      clean_session_env()
-      write_log(f"Running session select: {' '.join(session_args)}")
-      result = subprocess.run(
-        ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
-        capture_output=True,
-        text=True,
-        check=False,
-        env=safe_env
-      )
+      for attempt in range(1, SESSION_SELECT_ATTEMPTS + 1):
+        if attempt > 1:
+          write_log(f"The user session wasn't ready; retrying in {SESSION_SELECT_RETRY_DELAY} seconds (attempt {attempt} of {SESSION_SELECT_ATTEMPTS})")
+          await asyncio.sleep(SESSION_SELECT_RETRY_DELAY)
+        await clean_session_env()
+        write_log(f"Running session select: {' '.join(session_args)}")
+        result = await asyncio.to_thread(
+          subprocess.run,
+          ["sudo", "-E", "-u", username, "/usr/bin/steamos-session-select", *session_args],
+          capture_output=True,
+          text=True,
+          check=False,
+          env=safe_env
+        )
 
-      write_log(f"Command exited with code: {result.returncode}")
-      if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
-      if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
+        write_log(f"Command exited with code: {result.returncode}")
+        if result.stdout: write_log("STDOUT:\n" + result.stdout.strip())
+        if result.stderr: write_log("STDERR:\n" + result.stderr.strip())
+        if result.returncode == 0 or not any(e in (result.stderr or "") for e in SESSION_SELECT_TRANSIENT_ERRORS):
+          break
+
+    if result.returncode != 0:
+      # Still in Desktop Mode, ejected. Tell the user how to get back once the panel opens.
+      write_log("Switching back to Game Mode failed. Run `steamos-session-select gamescope` in Konsole.")
+      _record_result(_game_mode_switch_failed_result(os_type, result.returncode))
 
   async def watch_eject_request(self):
     request_file = "/tmp/xgmobile_eject_request"
