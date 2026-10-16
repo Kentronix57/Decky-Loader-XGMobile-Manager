@@ -123,7 +123,8 @@ _xgm_user_systemctl() {
     timeout -s KILL 2 setpriv --reuid="$uid" --regid="${gid:-$uid}" --init-groups \
       env XDG_RUNTIME_DIR="$ROOT/run/user/$uid" systemctl --user "$@"
   else
-    timeout -s KILL 2 sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid systemctl --user "$@"
+    # The inner timeout also bounds systemctl if the outer one only kills sudo.
+    timeout -s KILL 2 sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid timeout -s KILL 2 systemctl --user "$@"
   fi
 }
 
@@ -242,6 +243,9 @@ _xgm_manager_state() {
 # _xgm_still_stopping <uid> <invocation id> <what>: succeeds if the user manager that was seen
 # stopping (that invocation) is still the one there and still deactivating. Otherwise logs that
 # <what> won't be killed: a new user manager must never be.
+# The few-ms window between this check and the kill can't be closed from shell: systemctl kill has
+# no invocation-conditional form, the cgroup path is reused by the next user@<uid>, and there's no
+# pidfd; killing only MainPID would leave the stuck fusermount3 child behind.
 _xgm_still_stopping() {
   local state id
   read -r state id < <(_xgm_manager_state "$1")
@@ -270,6 +274,22 @@ _xgm_end_stuck_units() {
   done
 }
 
+# _xgm_clock_read [slept cs]: sets now for xgm_wait_for_user_session, whose locals it shares
+# (bash's dynamic scope): start, last, deact_since and step1_at. If the clock shows less time
+# since the last reading than certainly passed (the poll just slept; NTP stepped the clock back),
+# those reference times move back by the difference, so the time already waited still counts.
+_xgm_clock_read() {
+  local d
+  now=$(_xgm_now_cs)
+  d=$((last + ${1:-0} - now))
+  if [ "$d" -gt 0 ]; then
+    start=$((start - d))
+    [ "$deact_since" -ge 0 ] && deact_since=$((deact_since - d))
+    [ "$step1_at" -ge 0 ] && step1_at=$((step1_at - d))
+  fi
+  last=$now
+}
+
 # xgm_wait_for_user_session <user> [known session ids]: waits until the user's new graphical
 # session is usable, so that a Plasma session that imports its environment into the user manager
 # has done it before the cleanup, and steamos-session-select finds a user bus. Ready means all of:
@@ -286,23 +306,22 @@ _xgm_end_stuck_units() {
 # fresh XGM_HUNG_AFTER. Logs how long it took, or what was still missing.
 # Always returns 0: the caller cleans anyway.
 xgm_wait_for_user_session() {
-  local user="$1" known="${2:-}" uid poll cap cap_cs hung_cs start now
+  local user="$1" known="${2:-}" uid poll poll_cs cap cap_cs hung_cs start now last slept=0
   local deact_since=-1 step1_at=-1 step2=0 state id hung_id="" session target jobs missing
   uid=$(id -u "$user" 2>/dev/null)
   [ -n "$uid" ] || return 0
   _xgm_check_setpriv
   poll="${XGM_WAIT_POLL:-0.25}"
   cap="${XGM_WAIT_CAP:-60}"
+  poll_cs=$(_xgm_cs "$poll")
   cap_cs=$(_xgm_cs "$cap")
   hung_cs=$(_xgm_cs "${XGM_HUNG_AFTER:-5}")
   start=$(_xgm_now_cs)
+  last=$start
   while :; do
     read -r state id < <(_xgm_manager_state "$uid")
-    now=$(_xgm_now_cs)
-    # The clock stepped back (NTP): measure from now on.
-    [ "$now" -lt "$start" ] && start=$now
-    [ "$deact_since" -gt "$now" ] && deact_since=$now
-    [ "$step1_at" -gt "$now" ] && step1_at=$now
+    _xgm_clock_read "$slept"
+    slept=0
     if [ "$id" != "$hung_id" ]; then
       # Another manager (or none): it gets its own XGM_HUNG_AFTER.
       deact_since=-1 step1_at=-1 step2=0 hung_id=""
@@ -316,7 +335,8 @@ xgm_wait_for_user_session() {
       if [ "$step1_at" -lt 0 ] && [ $((now - deact_since)) -ge "$hung_cs" ]; then
         echo "old user manager still stopping after $(_xgm_secs $((now - deact_since)))s; ending its stuck units"
         _xgm_end_stuck_units "$user" "$uid" "$hung_id"
-        step1_at=$(_xgm_now_cs)
+        _xgm_clock_read
+        step1_at=$now
       elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((now - step1_at)) -ge "$hung_cs" ]; then
         step2=1
         if _xgm_still_stopping "$uid" "$hung_id" "user@$uid.service"; then
@@ -339,14 +359,17 @@ xgm_wait_for_user_session() {
     elif ! jobs=$(_xgm_user_systemctl "$user" "$uid" list-jobs --no-legend 2>/dev/null) || [ -n "$jobs" ]; then
       missing="the user manager has jobs queued"
     else
-      echo "user session ready after $(_xgm_secs "$(_xgm_since "$start")")s (session $session)"
+      _xgm_clock_read
+      echo "user session ready after $(_xgm_secs $((now - start)))s (session $session)"
       return 0
     fi
-    if [ "$(_xgm_since "$start")" -ge "$cap_cs" ]; then
+    _xgm_clock_read
+    if [ $((now - start)) -ge "$cap_cs" ]; then
       echo "user session not ready after ${cap}s ($missing), continuing anyway"
       return 0
     fi
     sleep "$poll"
+    slept=$poll_cs
   done
 }
 

@@ -69,15 +69,20 @@ if egpu_card_present; then
   echo "eGPU DRM card already present"
 else
   START=$(_xgm_now_cs)
+  LAST=$START
+  SLEPT=0
   if udevadm wait --help > /dev/null 2>&1; then
     udevadm wait --timeout="$CARD_WAIT" "$ROOT/dev/dri/by-path/pci-$(basename "$EGPU_PCI")-card" > /dev/null 2>&1
   else
     while ! egpu_card_present; do
       NOW=$(_xgm_now_cs)
-      # The clock stepped back (NTP): measure from now on.
-      [ "$NOW" -lt "$START" ] && START=$NOW
+      # At least the poll just slept has passed: if the clock shows less (NTP stepped it back),
+      # move START back by the difference, so the time already waited still counts.
+      [ $((LAST + SLEPT - NOW)) -gt 0 ] && START=$((START - (LAST + SLEPT - NOW)))
+      LAST=$NOW
       [ $((NOW - START)) -lt "$(_xgm_cs "$CARD_WAIT")" ] || break
       sleep 0.25
+      SLEPT=25
     done
   fi
   WAITED=$(_xgm_since "$START")

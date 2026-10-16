@@ -411,14 +411,13 @@ nvidia_card_pending() {
   refute_called "udevadm"
 }
 
-@test "active + nvidia, no udevadm wait, clock steps back: the poll cap is measured from there" {
+@test "active + nvidia, no udevadm wait, clock steps back: the time already waited counts, 4 polls" {
   nvidia_card_pending
   udevadm_wait missing
   clock_step 2 -1
   XGM_CARD_WAIT=1 run_sync
   assert_failure 1
-  # 2 polls, the step back to 0.5 s before the start (the new start), then 1 s more: 5 polls, not
-  # the 8 a stale start needs.
-  assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 5
+  # Exactly the 1 s cap, as without the step: not 5 (restarting at the step) nor 8 (a stale start).
+  assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 4
   [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 1s (or no iGPU card); sync aborted."* ]]
 }

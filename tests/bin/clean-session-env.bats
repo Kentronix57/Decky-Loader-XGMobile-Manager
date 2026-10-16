@@ -366,6 +366,30 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_line "user session ready after 0.12s (session 3)"
 }
 
+@test "the old manager ends and a new one starts stopping: the new one gets its own XGM_HUNG_AFTER, then step 2" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
+  timeline manager "0 deactivating:old"
+  # The old manager's step 1 (tick 5) ends it; a new one comes up at tick 7 and is stopping at 8.
+  manager_after unit-kill "1 inactive" "2 active:new" "3 deactivating:new"
+  timeline sessions "0 2:manager:closing"
+  stuck_unit xdg-document-portal.service
+  run_clean "1 2"
+  assert_success
+  local list="systemctl --user list-units --state=deactivating --no-legend --plain"
+  local kill="systemctl kill -s KILL user@64999.service"
+  assert_equal "$(grep -cFx "$list" "$SHIM_LOG")" 2
+  # The old manager's step 1 at tick 5, the new one's 5 polls after it was first seen stopping
+  # (tick 8), and its step 2 another 5 polls later. Without the reset, the kill came at tick 10.
+  assert_equal "$(count_before "sleep 0.01" "$(line_first "$list")")" 5
+  assert_equal "$(count_before "sleep 0.01" "$(line_last "$list")")" 13
+  assert_equal "$(count_before "sleep 0.01" "$(line_first "$kill")")" 18
+  assert_equal "$(grep -cFx "$kill" "$SHIM_LOG")" 1
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_equal "$(grep -c "old user manager still stopping after 0.05s; ending its stuck units" "$LOG_DIR/desktop_eject_request.log")" 2
+  assert_line "old user manager still stopping; killing it"
+}
+
 @test "a session that's still opening doesn't count, while the hung old manager is still ended" {
   set_os steamos
   export XGM_HUNG_AFTER=0.05
@@ -469,18 +493,18 @@ clock_probe() {
 }
 
 # NTP can step the wall clock back during the wait.
-@test "clock steps back 1 s during the wait: measured from there, the cap isn't stretched" {
+@test "clock steps back 1 s during the wait: the time already waited counts, the cap is exactly 20 polls" {
   set_os steamos
   session_ready never
   clock_step 5 -1
   run_clean
   assert_success
-  # 5 polls, the step back, then the full 0.2 s cap from there: 25, not the 125 a stale start needs.
-  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 25
+  # Not 25 (restarting the cap at the step) nor 120 (a stale start).
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 20
   [[ "$LOG" == *"user session not ready after 0.2s (graphical-session.target is inactive), continuing anyway"* ]]
 }
 
-@test "clock steps back while the old manager is stopping: the hung timer restarts from there" {
+@test "clock steps back while the old manager is stopping: the time it's been stopping counts, step 1 at tick 5" {
   set_os steamos
   export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
   timeline manager "0 deactivating:old"
@@ -489,18 +513,18 @@ clock_probe() {
   clock_step 3 -1
   run_clean "1 2"
   assert_success
-  # Seen stopping at 1000, back to 999.03 at tick 3: step 1 comes 5 polls after that, at tick 8.
-  assert_equal "$(count_before "sleep 0.01" "$(line_first "systemctl --user kill -s KILL -- xdg-document-portal.service")")" 8
+  # Seen stopping at 1000, back to 999.03 at tick 3: still step 1 after 5 polls, as without the step.
+  assert_equal "$(count_before "sleep 0.01" "$(line_first "systemctl --user kill -s KILL -- xdg-document-portal.service")")" 5
 }
 
-@test "setpriv missing: logged once, the user manager calls fall back to sudo -u under the timeout" {
+@test "setpriv missing: logged once, the user manager calls fall back to sudo -u, with a timeout outside and inside sudo" {
   set_os steamos
   no_setpriv
   manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
   run_clean
   assert_success
-  assert_called "timeout -s KILL 2 sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user is-active graphical-session.target"
-  assert_called "timeout -s KILL 2 sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user show-environment"
+  assert_called "timeout -s KILL 2 sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 timeout -s KILL 2 systemctl --user is-active graphical-session.target"
+  assert_called "timeout -s KILL 2 sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 timeout -s KILL 2 systemctl --user show-environment"
   refute_called "setpriv"
   assert_equal "$(manager_env_of user)" ""
   assert_equal "$(grep -c "setpriv not found; using sudo -u" "$LOG_DIR/desktop_eject_request.log")" 1
