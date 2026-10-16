@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Test shim: records the call. Only `udevadm wait` is modeled, by $SHIM_STATE/udevadm_wait:
+#   appears (default)  the eGPU's DRM card appears during the wait (helpers/fake_gpu.bash); exit 0
+#   timeout            nothing appears; exit 1 as udevadm does after --timeout
+#   missing            no wait subcommand (systemd < 251): `udevadm wait --help` and any wait fail
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+[ "${1:-}" = "wait" ] || exit 0
+mode=$(cat "$SHIM_STATE/udevadm_wait" 2>/dev/null || echo appears)
+if [ "$mode" = "missing" ]; then
+  echo "Unknown command verb 'wait'." >&2
+  exit 1
+fi
+[[ " $* " == *" --help "* ]] && exit 0
+if [ "$mode" = "timeout" ]; then
+  echo "Timed out for waiting devices being initialized." >&2
+  exit 1
+fi
+ROOT="$XGM_ROOT"
+[ -n "$ROOT" ] || exit 1
+# shellcheck source=../helpers/fake_gpu.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/fake_gpu.bash"
+fake_egpu_card_appear
+exit 0

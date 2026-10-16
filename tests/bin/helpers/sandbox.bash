@@ -251,6 +251,19 @@ egpu_present() {
   env PATH="$SYSBIN" XGM_ROOT="$ROOT" SHIM_LOG=/dev/null SHIM_STATE="$SHIM_STATE" "$SYSBIN/bash" "$XGM_SHIMS/sleep"
 }
 
+# egpu_card_later [n]: the eGPU is on the bus but nvidia-drm hasn't registered its DRM card yet
+# (as at boot). It appears n sleep calls from now (shims/sleep), or during a `udevadm wait`
+# (udevadm_wait). Without n, only udevadm wait makes it appear.
+egpu_card_later() {
+  fake_gpu_drm_remove "$FAKE_EGPU_PCI_ADDR"
+  rm -f "$SHIM_STATE/egpu_card_at"
+  [ -n "${1:-}" ] && echo $(($(tl_tick) + $1)) > "$SHIM_STATE/egpu_card_at"
+  return 0
+}
+
+# udevadm_wait appears|timeout|missing: what `udevadm wait` does (shims/udevadm).
+udevadm_wait() { echo "$1" > "$SHIM_STATE/udevadm_wait"; }
+
 # gpu_holders <n|ignore-term|unkillable>: the next n fuser checks find the eGPU nodes in use
 # (any fuser -k frees them); or they're in use until fuser -k -KILL (ignore-term); or they stay in
 # use whatever happens. See shims/fuser.
@@ -333,8 +346,8 @@ enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergf
 
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
-# LANG=C unless $SANDBOX_LANG is set, and XGM_WAIT_POLL, XGM_WAIT_CAP and XGM_HUNG_AFTER if
-# set. Sets bats' $status/$output, and
+# LANG=C unless $SANDBOX_LANG is set, and XGM_WAIT_POLL, XGM_WAIT_CAP, XGM_HUNG_AFTER and
+# XGM_CARD_WAIT if set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR. LOG_DIR is emptied first,
 # unless KEEP_LOG_DIR=1 (tests that seed it, e.g. migrate-logs).
 run_script() {
@@ -342,9 +355,9 @@ run_script() {
   shift
   [ -n "${ROOT:-}" ] || fail "run_script: call make_root first"
   [ "${KEEP_LOG_DIR:-0}" = "1" ] || find "$LOG_DIR" -mindepth 1 -delete
-  # The wait tunables (bin/xgm-common.sh) pass through when a test sets them.
+  # The wait tunables (bin/xgm-common.sh, bin/egpu-sync) pass through when a test sets them.
   local var tunables=()
-  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER; do
+  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER XGM_CARD_WAIT; do
     [ -n "${!var:-}" ] && tunables+=("$var=${!var}")
   done
   run env -i \

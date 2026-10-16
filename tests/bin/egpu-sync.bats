@@ -214,7 +214,8 @@ cold_boot_symmetry() {
   before="$(cat "$ROOT/etc/environment")"
   run_sync
   assert_failure 1
-  [[ "$LOG" == *"Failed to detect both GPUs"* ]]
+  [[ "$LOG" == *"eGPU DRM card already present"* ]]
+  [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 10s (or no iGPU card); sync aborted."* ]]
   assert_equal "$(cat "$ROOT/etc/environment")" "$before"
 }
 
@@ -279,12 +280,13 @@ cold_boot_symmetry() {
 @test "active, NVIDIA driver not bound yet (no DRM card), no record: PCI fallback still finds the eGPU" {
   egpu_present nvidia
   # Unbound, as in real sysfs: no class/drm entries and no drm/ dir under the PCI device.
-  rm -rf "$ROOT/sys/class/drm/card1" "$ROOT/sys/class/drm/renderD129" "$(fake_gpu_pci_dir "$FAKE_EGPU_PCI_ADDR")/drm"
+  egpu_card_later
+  udevadm_wait timeout
   echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
   run_sync
   # Active, not sanitized: the eGPU is on the bus, only its card node is missing.
   assert_failure 1
-  [[ "$LOG" == *"Failed to detect both GPUs"* ]]
+  [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 10s (or no iGPU card); sync aborted."* ]]
   run grep -c WLR_DRM_DEVICES "$ROOT/etc/environment"
   assert_output 1
 }
@@ -327,4 +329,84 @@ cold_boot_symmetry() {
   run_sync
   assert_success
   [[ "$LOG" == *"Primary user: deck"* ]]
+}
+
+# Step 0, exp 4: nvidia-drm registered the eGPU's card at 11.56 s, after boot-sync ran (10.99 s).
+nvidia_card_pending() {
+  egpu_present nvidia
+  egpu_card_later "$@"
+  echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+  : > "$SHIM_LOG"
+}
+
+@test "active + nvidia, DRM card not registered yet: udevadm wait for it, then the sync runs" {
+  nvidia_card_pending
+  run_sync
+  assert_success
+  assert_called "udevadm wait --timeout=10 $ROOT/dev/dri/by-path/pci-0000:01:00.0-card"
+  refute_called "sleep"
+  [[ "$LOG" =~ "eGPU DRM card appeared after "[0-9]+\.[0-9][0-9]"s" ]]
+  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+}
+
+@test "active + nvidia, DRM card never appears: udevadm wait times out, exit 1, environment untouched" {
+  nvidia_card_pending
+  udevadm_wait timeout
+  local before
+  before="$(cat "$ROOT/etc/environment")"
+  XGM_CARD_WAIT=3 run_sync
+  assert_failure 1
+  assert_called "udevadm wait --timeout=3 $ROOT/dev/dri/by-path/pci-0000:01:00.0-card"
+  [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 3s (or no iGPU card); sync aborted."* ]]
+  [[ "$LOG" != *"appeared after"* ]]
+  assert_equal "$(cat "$ROOT/etc/environment")" "$before"
+}
+
+@test "active + nvidia, no udevadm wait: polls sysfs until the card appears" {
+  nvidia_card_pending 3
+  udevadm_wait missing
+  run_sync
+  assert_success
+  refute_called "udevadm wait --timeout"
+  assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 3
+  [[ "$LOG" == *"eGPU DRM card appeared after 0.75s"* ]]
+  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+}
+
+@test "active + nvidia, no udevadm wait, card never appears: polls up to XGM_CARD_WAIT, exit 1" {
+  nvidia_card_pending
+  udevadm_wait missing
+  XGM_CARD_WAIT=1 run_sync
+  assert_failure 1
+  assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 4
+  [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 1s (or no iGPU card); sync aborted."* ]]
+}
+
+@test "active + nvidia, DRM card already there: no wait" {
+  egpu_present nvidia
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+  run_sync
+  assert_success
+  refute_called "udevadm"
+  refute_called "sleep"
+  [[ "$LOG" == *"eGPU DRM card already present"* ]]
+}
+
+@test "AMD eGPU and not active: udevadm never called" {
+  egpu_present amd
+  egpu_card_later
+  run_sync
+  assert_success
+  [[ "$LOG" == *"Skipped cleanly"* ]]
+  refute_called "udevadm"
+
+  echo 0 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  : > "$SHIM_LOG"
+  run_sync
+  assert_success
+  [[ "$LOG" == *"XG Mobile not active: egpu_enable is 0."* ]]
+  refute_called "udevadm"
 }
