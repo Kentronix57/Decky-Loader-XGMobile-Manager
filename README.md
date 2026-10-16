@@ -49,7 +49,7 @@ This plugin manages the complex hardware handshakes, dynamically compiles and in
 | Hardware | SteamOS | Bazzite | CachyOS | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🟢 Tested & Working | 🟡 Experimental | Full DKMS driver compilation supported on SteamOS. CachyOS installs its packaged drivers with pacman. BazziteOS cannot recover from sleep/hibernate. |
-| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | 🟡 Experimental | Untested, but should follow all the same rules as the 4090. |
+| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | 🟡 Experimental | Community report (Bazzite, see #25). Should follow all the same rules as the 4090. |
 | **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | 🟡 Experimental | Uses native `amdgpu` kernel drivers. |
 
 ---
@@ -227,7 +227,7 @@ If the XG Mobile was ejected but the Ally stays in Desktop Mode, open Konsole an
 steamos-session-select gamescope
 ```
 
-"Return to Gaming Mode" also goes back, but only once: it doesn't clear "Set Desktop to Default", so Desktop Mode stays the default.
+On SteamOS, "Return to Gaming Mode" also goes back, but only once: it doesn't clear "Set Desktop to Default", so Desktop Mode stays the default.
 
 ### Where the logs are
 Every log is in `~/homebrew/logs/xgmobile-manager/activity/`. Decky's own logs for the plugin stay one level up, in `~/homebrew/logs/xgmobile-manager/`; Decky deletes all but the newest 4 log files there every time the plugin loads, so ours are kept in the subfolder. Open them in **Activity Logs**, or attach them from that folder (on Bazzite, `~` is `/var/home/<user>`):
