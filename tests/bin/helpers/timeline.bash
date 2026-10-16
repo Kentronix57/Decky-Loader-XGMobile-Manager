@@ -48,6 +48,15 @@ tl_clock_add() {
   mv "$XGM_FAKE_CLOCK.new" "$XGM_FAKE_CLOCK"
 }
 
+# tl_clock_steps: applies the clock steps (clock_step) set for the current tick.
+tl_clock_steps() {
+  local tick delta
+  [ -e "$SHIM_STATE/clock_steps" ] || return 0
+  while read -r tick delta; do
+    [ "$tick" = "$(tl_tick)" ] && tl_clock_add "$delta"
+  done < "$SHIM_STATE/clock_steps"
+}
+
 # tl_apply_fs <root>: makes the runtime dir and the bus socket match their timelines.
 tl_apply_fs() {
   local dir="$1/run/user/64999"

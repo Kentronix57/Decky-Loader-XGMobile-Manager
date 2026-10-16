@@ -82,8 +82,9 @@ make_root() {
   # (shims/id) is 64999, and it has a runtime dir with a user bus, as when a session is running.
   touch "$ROOT/run/user/64999/bus"
   : > "$SHIM_LOG"
-  # The fake wall clock the waits read (XGM_FAKE_CLOCK); the sleep shim moves it forward.
-  echo 0 > "$SHIM_STATE/clock"
+  # The fake wall clock the waits read (XGM_FAKE_CLOCK); the sleep shim moves it forward. It starts
+  # at 1000 s so that a clock_step back stays positive, like a real one.
+  echo 1000 > "$SHIM_STATE/clock"
 
   local tool path
   for tool in "${SANDBOX_TOOLS[@]}"; do
@@ -321,6 +322,10 @@ manager_after() {
   mkdir -p "$SHIM_STATE/timeline"
   printf '%s\n' "$@" > "$SHIM_STATE/timeline/manager.after_$event"
 }
+
+# clock_step <tick> <seconds>: the fake clock jumps by <seconds> (negative: back, as NTP can step
+# it) when that tick is reached.
+clock_step() { echo "$1 $2" >> "$SHIM_STATE/clock_steps"; }
 
 # manager_call_cost <seconds>: every systemctl call to user@64999 takes that long (fake clock)
 # while it's deactivating, as a hung manager's calls run into their timeout.

@@ -196,6 +196,12 @@ _xgm_now_cs() {
   echo $((10#${t:-0} * 100 + 10#${frac:0:2}))
 }
 
+# _xgm_since <cs>: centiseconds from <cs> (an _xgm_now_cs value) to now, never negative.
+_xgm_since() {
+  local d=$(($(_xgm_now_cs) - $1))
+  echo $((d < 0 ? 0 : d))
+}
+
 # _xgm_new_user_session <user> <known ids>: prints the ID of a login session of that user with
 # Class=user and State active or online that isn't in <known ids> (space-separated; empty: any
 # counts). The user manager's own session (Class=manager), greeter and lock-screen sessions, and
@@ -278,6 +284,10 @@ xgm_wait_for_user_session() {
   while :; do
     read -r state id < <(_xgm_manager_state "$uid")
     now=$(_xgm_now_cs)
+    # The clock stepped back (NTP): measure from now on.
+    [ "$now" -lt "$start" ] && start=$now
+    [ "$deact_since" -gt "$now" ] && deact_since=$now
+    [ "$step1_at" -gt "$now" ] && step1_at=$now
     if [ "$id" != "$hung_id" ]; then
       # Another manager (or none): it gets its own XGM_HUNG_AFTER.
       deact_since=-1 step1_at=-1 step2=0 hung_id=""
@@ -314,10 +324,10 @@ xgm_wait_for_user_session() {
     elif ! jobs=$(_xgm_user_systemctl "$user" "$uid" list-jobs --no-legend 2>/dev/null) || [ -n "$jobs" ]; then
       missing="the user manager has jobs queued"
     else
-      echo "user session ready after $(_xgm_secs $(($(_xgm_now_cs) - start)))s (session $session)"
+      echo "user session ready after $(_xgm_secs "$(_xgm_since "$start")")s (session $session)"
       return 0
     fi
-    if [ $(($(_xgm_now_cs) - start)) -ge "$cap_cs" ]; then
+    if [ "$(_xgm_since "$start")" -ge "$cap_cs" ]; then
       echo "user session not ready after ${cap}s ($missing), continuing anyway"
       return 0
     fi

@@ -410,3 +410,15 @@ nvidia_card_pending() {
   [[ "$LOG" == *"XG Mobile not active: egpu_enable is 0."* ]]
   refute_called "udevadm"
 }
+
+@test "active + nvidia, no udevadm wait, clock steps back: the poll cap is measured from there" {
+  nvidia_card_pending
+  udevadm_wait missing
+  clock_step 2 -1
+  XGM_CARD_WAIT=1 run_sync
+  assert_failure 1
+  # 2 polls, the step back to 0.5 s before the start (the new start), then 1 s more: 5 polls, not
+  # the 8 a stale start needs.
+  assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 5
+  [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 1s (or no iGPU card); sync aborted."* ]]
+}

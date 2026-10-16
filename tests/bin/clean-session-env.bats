@@ -300,8 +300,8 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   # The 20 s cap is clock time: 6 polls, not 80. The last iteration starts before 20 s and makes
   # at most 3 calls of 2 s each (show, recheck, kill).
   assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 6
-  awk -v c="$(cat "$SHIM_STATE/clock")" 'BEGIN { exit !(c >= 20 && c < 26.25) }' \
-    || fail "the wait gave up at clock $(cat "$SHIM_STATE/clock"), expected within one iteration after 20 s"
+  awk -v c="$(cat "$SHIM_STATE/clock")" 'BEGIN { exit !(c >= 1020 && c < 1026.25) }' \
+    || fail "the wait gave up at clock $(cat "$SHIM_STATE/clock") (started at 1000), expected within one iteration after 20 s"
 
   run cat "$LOG_DIR/desktop_eject_request.log"
   assert_line "old user manager still stopping after 6.75s; ending its stuck units"
@@ -466,4 +466,29 @@ clock_probe() {
   local a b
   read -r a b <<< "$output"
   [ "$a" -gt 170000000000 ] && [ "$b" -ge "$a" ] || fail "unexpected clock: $output"
+}
+
+# NTP can step the wall clock back during the wait.
+@test "clock steps back 1 s during the wait: measured from there, the cap isn't stretched" {
+  set_os steamos
+  session_ready never
+  clock_step 5 -1
+  run_clean
+  assert_success
+  # 5 polls, the step back, then the full 0.2 s cap from there: 25, not the 125 a stale start needs.
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 25
+  [[ "$LOG" == *"user session not ready after 0.2s (graphical-session.target is inactive), continuing anyway"* ]]
+}
+
+@test "clock steps back while the old manager is stopping: the hung timer restarts from there" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
+  timeline manager "0 deactivating:old"
+  timeline sessions "0 2:manager:closing"
+  stuck_unit xdg-document-portal.service
+  clock_step 3 -1
+  run_clean "1 2"
+  assert_success
+  # Seen stopping at 1000, back to 999.03 at tick 3: step 1 comes 5 polls after that, at tick 8.
+  assert_equal "$(count_before "sleep 0.01" "$(line_first "systemctl --user kill -s KILL -- xdg-document-portal.service")")" 8
 }
