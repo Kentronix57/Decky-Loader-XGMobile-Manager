@@ -380,8 +380,15 @@ def test_eject_session_select_non_transient_error_no_retry(xgm, session_env, mon
   assert pending_result(xgm)["message"].startswith("The XG Mobile was ejected, but switching back to Game Mode failed.")
 
 
-def test_eject_link_subprocess_calls_go_through_to_thread(xgm, session_env, monkeypatch):
+@pytest.mark.parametrize("decky_user", [True, False])
+def test_eject_link_subprocess_calls_go_through_to_thread(xgm, session_env, monkeypatch, decky_user):
   xgm.set_os("cachyos")
+  if not decky_user:
+    # No DECKY_USER: the user is looked up with pgrep first (it finds nothing here), then pwd.
+    monkeypatch.delenv("DECKY_USER")
+    user = xgm.mod.pwd.getpwnam("xgmtest")
+    monkeypatch.setattr(xgm.mod.pwd, "getpwall", lambda: [SimpleNamespace(pw_name="xgmtest", pw_dir="/home/xgmtest", pw_uid=64999)])
+    monkeypatch.setattr(xgm.mod.pwd, "getpwuid", lambda uid: user)
   xgm.settings.setSetting("desktop_default", "1")
   in_thread = []
   direct = []
@@ -403,4 +410,6 @@ def test_eject_link_subprocess_calls_go_through_to_thread(xgm, session_env, monk
   run_watcher(xgm, xgm.plugin.watch_eject_request())
   assert direct == []
   assert eject_link_steps(session_env) == ["clean", ["oneshot"], "clean", ["gamescope"]]
-  assert in_thread.count("open") == 6  # loginctl, egpu-eject, 2 x (clean-session-env, session select)
+  # [pgrep,] loginctl, egpu-eject, 2 x (clean-session-env, session select)
+  assert in_thread.count("open") == (6 if decky_user else 7)
+  assert any(argv[0] == "pgrep" for argv in session_env) == (not decky_user)

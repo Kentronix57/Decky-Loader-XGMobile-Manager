@@ -574,7 +574,7 @@ class Plugin:
 
     if not target_user:
       try:
-        res = subprocess.run(["pgrep", "-x", "steam"], capture_output=True, text=True)
+        res = await asyncio.to_thread(subprocess.run, ["pgrep", "-x", "steam"], capture_output=True, text=True)
         if res.returncode == 0 and res.stdout.strip():
           pid = res.stdout.strip().split()[0]
           uid = os.stat(f"/proc/{pid}").st_uid
