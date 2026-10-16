@@ -3,7 +3,8 @@
 # ticks: every `sleep` call is one tick ($SHIM_STATE/ticks). A timeline is a file
 # $SHIM_STATE/timeline/<key> with one "<tick> <value>" line per change, in tick order; the value
 # at tick t is the one on the last line with a tick <= t. Keys (see helpers/sandbox.bash timeline):
-#   manager   user@64999.service ActiveState (default active)
+#   manager   user@64999.service as "<ActiveState>[:<InvocationID>]" (default active; the ID
+#             defaults to inv0, or nothing when inactive)
 #   sessions  the login sessions, "<id>:<class>:<state>[:<user>] ..." (default 2:user:active)
 #   rundir    present|absent: $ROOT/run/user/64999
 #   bus       present|absent: $ROOT/run/user/64999/bus
@@ -20,6 +21,20 @@ tl_value() {
     return 0
   fi
   awk -v t="$(tl_tick)" -v d="$2" '$1 <= t { v = $0; sub(/^[^ ]+ ?/, "", v); found = 1 } END { print (found ? v : d) }' "$file"
+}
+
+# tl_manager_state / tl_manager_id: the user manager's ActiveState and InvocationID now.
+tl_manager_state() { local v; v=$(tl_value manager active); echo "${v%%:*}"; }
+tl_manager_id() {
+  local v
+  v=$(tl_value manager active)
+  if [[ "$v" == *:* ]]; then echo "${v#*:}"; elif [ "$v" != "inactive" ]; then echo inv0; fi
+}
+
+# tl_manager_event <event>: the manager follows timeline/manager.after_<event> from now on, if set.
+tl_manager_event() {
+  [ -e "$SHIM_STATE/timeline/manager.after_$1" ] && tl_restart manager "$SHIM_STATE/timeline/manager.after_$1"
+  return 0
 }
 
 # tl_advance: one tick passes.

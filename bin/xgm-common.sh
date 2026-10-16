@@ -213,16 +213,36 @@ _xgm_new_user_session() {
   return 1
 }
 
-# _xgm_end_stuck_units <user> <uid>: unmounts the document portal's FUSE mount (a fusermount3
-# child of xdg-document-portal kept the old manager stopping for 90 s) and kills every unit the
-# stopping user manager still has in "deactivating".
+# _xgm_manager_state <uid>: user@<uid>.service's ActiveState and InvocationID, as "<state> <id>".
+_xgm_manager_state() {
+  systemctl show -p ActiveState -p InvocationID "user@$1.service" 2>/dev/null \
+    | awk -F= '$1 == "ActiveState" { s = $2 } $1 == "InvocationID" { i = $2 } END { print s, i }'
+}
+
+# _xgm_still_stopping <uid> <invocation id> <what>: succeeds if the user manager that was seen
+# stopping (that invocation) is still the one there and still deactivating. Otherwise logs that
+# <what> won't be killed: a new user manager must never be.
+_xgm_still_stopping() {
+  local state id
+  read -r state id < <(_xgm_manager_state "$1")
+  [ "$state" = "deactivating" ] && [ "$id" = "$2" ] && return 0
+  echo "old user manager gone; not killing $3"
+  return 1
+}
+
+# _xgm_end_stuck_units <user> <uid> <invocation id>: unmounts the document portal's FUSE mount (a
+# fusermount3 child of xdg-document-portal kept the old manager stopping for 90 s) and kills every
+# unit the stopping user manager still has in "deactivating". Rechecks before each action that
+# it's still that manager; stops (and fails) as soon as it isn't.
 _xgm_end_stuck_units() {
-  local user="$1" uid="$2" unit
-  if findmnt -n "$ROOT/run/user/$uid/doc" >/dev/null 2>&1; then
-    fusermount3 -uz "$ROOT/run/user/$uid/doc"
+  local user="$1" uid="$2" id="$3" doc="$ROOT/run/user/$2/doc" unit
+  if findmnt -n "$doc" >/dev/null 2>&1; then
+    _xgm_still_stopping "$uid" "$id" "$doc" || return 1
+    timeout -s KILL 2 fusermount3 -uz "$doc"
   fi
   for unit in $(_xgm_user_systemctl "$user" "$uid" list-units --state=deactivating --no-legend --plain 2>/dev/null | awk '{ print $1 }'); do
-    if _xgm_user_systemctl "$user" "$uid" kill -s KILL "$unit"; then
+    _xgm_still_stopping "$uid" "$id" "$unit" || return 1
+    if _xgm_user_systemctl "$user" "$uid" kill -s KILL -- "$unit"; then
       echo "killed stuck unit: $unit"
     else
       echo "couldn't kill stuck unit: $unit"
@@ -242,11 +262,12 @@ _xgm_end_stuck_units() {
 # A missing runtime dir or a manager that doesn't answer only means "not yet": the eject stopped
 # the display manager, and logind removes the old user manager seconds later. If the old manager
 # is stuck stopping for XGM_HUNG_AFTER s (5), its stuck units are killed; if it's still stopping
-# XGM_HUNG_AFTER s later, the manager itself. Logs how long it took, or what was still missing.
+# XGM_HUNG_AFTER s later, the manager itself. Only that manager (its InvocationID): a new one gets a
+# fresh XGM_HUNG_AFTER. Logs how long it took, or what was still missing.
 # Always returns 0: the caller cleans anyway.
 xgm_wait_for_user_session() {
   local user="$1" known="${2:-}" uid poll cap cap_cs hung_cs start now
-  local deact_since=-1 step1_at=-1 step2=0 state session target jobs missing
+  local deact_since=-1 step1_at=-1 step2=0 state id hung_id="" session target jobs missing
   uid=$(id -u "$user" 2>/dev/null)
   [ -n "$uid" ] || return 0
   poll="${XGM_WAIT_POLL:-0.25}"
@@ -255,19 +276,28 @@ xgm_wait_for_user_session() {
   hung_cs=$(_xgm_cs "${XGM_HUNG_AFTER:-5}")
   start=$(_xgm_now_cs)
   while :; do
-    state=$(systemctl show -p ActiveState --value "user@$uid.service" 2>/dev/null)
+    read -r state id < <(_xgm_manager_state "$uid")
     now=$(_xgm_now_cs)
+    if [ "$id" != "$hung_id" ]; then
+      # Another manager (or none): it gets its own XGM_HUNG_AFTER.
+      deact_since=-1 step1_at=-1 step2=0 hung_id=""
+    fi
     if [ "$state" = "deactivating" ]; then
       # Measured from the first time it was seen stopping, and from the end of step 1.
-      [ "$deact_since" -ge 0 ] || deact_since=$now
+      if [ "$deact_since" -lt 0 ]; then
+        deact_since=$now
+        hung_id="$id"
+      fi
       if [ "$step1_at" -lt 0 ] && [ $((now - deact_since)) -ge "$hung_cs" ]; then
         echo "old user manager still stopping after $(_xgm_secs $((now - deact_since)))s; ending its stuck units"
-        _xgm_end_stuck_units "$user" "$uid"
+        _xgm_end_stuck_units "$user" "$uid" "$hung_id"
         step1_at=$(_xgm_now_cs)
       elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((now - step1_at)) -ge "$hung_cs" ]; then
-        echo "old user manager still stopping; killing it"
-        systemctl kill -s KILL "user@$uid.service"
         step2=1
+        if _xgm_still_stopping "$uid" "$hung_id" "user@$uid.service"; then
+          echo "old user manager still stopping; killing it"
+          systemctl kill -s KILL "user@$uid.service"
+        fi
       fi
     else
       deact_since=-1

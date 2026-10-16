@@ -310,15 +310,16 @@ timeline() {
   tl_apply_fs "$ROOT"
 }
 
-# manager_after_kill <kill|unit-kill> "<ticks later> <state>"...: what user@64999.service does
-# after `systemctl kill -s KILL user@64999.service` (kill), or after a stuck unit is killed
-# (unit-kill). Without it, a killed manager is inactive and a unit kill changes nothing.
-manager_after_kill() {
-  local file="$SHIM_STATE/timeline/manager.after_kill"
-  [ "$1" = "unit-kill" ] && file="$SHIM_STATE/timeline/manager.after_unit_kill"
+# manager_after <event> "<ticks later> <state>[:<id>]"...: what user@64999.service does after an
+# event (shims/systemctl): kill (`systemctl kill -s KILL user@64999.service`), unit-kill (a stuck
+# unit killed), list-units (its deactivating units listed) or show:<n> (the n-th `show` of it).
+# Without it, a killed manager is inactive and the other events change nothing.
+manager_after() {
+  local event="${1//-/_}"
+  event="${event//:/_}"
   shift
   mkdir -p "$SHIM_STATE/timeline"
-  printf '%s\n' "$@" > "$file"
+  printf '%s\n' "$@" > "$SHIM_STATE/timeline/manager.after_$event"
 }
 
 # manager_call_cost <seconds>: every systemctl call to user@64999 takes that long (fake clock)

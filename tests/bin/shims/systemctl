@@ -7,21 +7,28 @@
 # `--user is-active graphical-session.target` follows $SHIM_STATE/session_ready: now (default),
 # never, N (inactive for the first N checks, then active) or activating:N (activating for the
 # first N checks, then active), unless a "graphical" timeline is set (helpers/timeline.bash).
-# The user manager (user@64999.service) follows the timelines too: `show -p ActiveState --value
-# user@64999.service` prints the "manager" timeline (active by default), `--user list-jobs` prints
-# one job per the "jobs" timeline, and `--user list-units --state=deactivating` lists the units in
-# $SHIM_STATE/stuck_units until `--user kill -s KILL <unit>` ends them. `kill -s KILL
-# user@64999.service` ends the manager: from then on it follows timeline/manager.after_kill, or is
-# inactive (killing a stuck unit does the same with timeline/manager.after_unit_kill, if set).
+# The user manager (user@64999.service) follows the timelines too: `show -p ActiveState -p
+# InvocationID [--value] user@64999.service` prints the "manager" timeline (active by default),
+# and every --user call fails unless it's active or deactivating (the old manager still answers).
+# `--user list-jobs` prints one job per the "jobs" timeline, and `--user list-units
+# --state=deactivating` lists the units in $SHIM_STATE/stuck_units until `--user kill -s KILL
+# <unit>` ends them. `kill -s KILL user@64999.service` ends the manager: from then on it follows
+# timeline/manager.after_kill, or is inactive. Other events switch it the same way, if their file
+# is set: after_unit_kill, after_list_units, and after_show_<n> (after the n-th show of it).
 # While the manager is deactivating, every call to it (--user, or naming user@64999.service)
 # moves the fake clock forward by $SHIM_STATE/manager_call_cost seconds, if set.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 # shellcheck source=../helpers/timeline.bash
 . "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
 if [ -e "$SHIM_STATE/manager_call_cost" ] && { [[ " $* " == *" --user "* ]] || [[ " $* " == *" user@64999.service "* ]]; } \
-  && [ "$(tl_value manager active)" = "deactivating" ]; then
+  && [ "$(tl_manager_state)" = "deactivating" ]; then
   tl_clock_add "$(cat "$SHIM_STATE/manager_call_cost")"
 fi
+props=() prev=""
+for arg in "$@"; do
+  [ "$prev" = "-p" ] && props+=("$arg")
+  prev="$arg"
+done
 user=0 verb="" units=()
 for arg in "$@"; do
   case "$arg" in
@@ -32,7 +39,9 @@ for arg in "$@"; do
 done
 scope=system
 [ "$user" -eq 1 ] && scope=user
-if [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/user_manager_down" ]; then
+manager_up=1
+case "$(tl_manager_state)" in active|deactivating) ;; *) manager_up=0 ;; esac
+if [ "$user" -eq 1 ] && { [ -e "$SHIM_STATE/user_manager_down" ] || [ "$manager_up" -eq 0 ]; }; then
   echo "Failed to connect to bus: No such file or directory" >&2
   exit 1
 fi
@@ -52,7 +61,17 @@ case "$verb" in
     exit 0 ;;
   show)
     if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
-      tl_value manager active
+      for prop in "${props[@]}"; do
+        case "$prop" in
+          ActiveState) value=$(tl_manager_state) ;;
+          InvocationID) value=$(tl_manager_id) ;;
+          *) value="" ;;
+        esac
+        if [[ " $* " == *" --value "* ]]; then echo "$value"; else echo "$prop=$value"; fi
+      done
+      shows=$(( $(cat "$SHIM_STATE/manager_shows" 2>/dev/null || echo 0) + 1 ))
+      echo "$shows" > "$SHIM_STATE/manager_shows"
+      tl_manager_event "show_$shows"
     fi
     exit 0 ;;
   list-jobs)
@@ -67,6 +86,7 @@ case "$verb" in
       while IFS= read -r unit; do
         [ -n "$unit" ] && echo "$unit loaded deactivating stop-sigterm $unit"
       done < <(cat "$SHIM_STATE/stuck_units" 2>/dev/null)
+      tl_manager_event list_units
     fi
     exit 0 ;;
   kill)
@@ -75,9 +95,7 @@ case "$verb" in
     elif [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/stuck_units" ]; then
       grep -vFx -- "${units[-1]}" "$SHIM_STATE/stuck_units" > "$SHIM_STATE/stuck_units.new"
       mv "$SHIM_STATE/stuck_units.new" "$SHIM_STATE/stuck_units"
-      if [ -e "$SHIM_STATE/timeline/manager.after_unit_kill" ]; then
-        tl_restart manager "$SHIM_STATE/timeline/manager.after_unit_kill"
-      fi
+      tl_manager_event unit_kill
     fi
     exit 0 ;;
   is-active)

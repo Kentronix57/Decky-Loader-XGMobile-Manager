@@ -223,14 +223,16 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   timeline rundir "0 absent" "3 present"
   timeline bus "0 absent" "5 present"
   timeline graphical "0 inactive" "6 active"
+  # The capture showed the new manager starting with a long job queue.
+  timeline jobs "0 30" "7 0"
   manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
   run_clean "1 2"
   assert_success
-  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 6
-  [[ "$LOG" == *"user session ready after 0.06s (session 3)"* ]]
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 7
+  [[ "$LOG" == *"user session ready after 0.07s (session 3)"* ]]
   [ "$(line_last "sleep 0.01")" -lt "$(line_first "systemctl --user show-environment")" ]
   run grep -n -e "user session ready" -e "eGPU variables found in user manager" "$LOG_DIR/desktop_eject_request.log"
-  assert_line --index 0 --partial "user session ready after 0.06s (session 3)"
+  assert_line --index 0 --partial "user session ready after 0.07s (session 3)"
   assert_line --index 1 --partial "eGPU variables found in user manager: KWIN_DRM_DEVICES"
   assert_equal "$(manager_env_of user)" ""
   refute_called "systemctl kill"
@@ -243,7 +245,7 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   set_os steamos
   export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
   timeline manager "0 deactivating"
-  manager_after_kill kill "0 inactive" "2 active"
+  manager_after kill "0 inactive" "2 active"
   timeline sessions "0 2:manager:closing" "1 3:user:active"
   stuck_unit xdg-document-portal.service
   doc_mounted
@@ -252,7 +254,7 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
 
   local fuse unit_kill manager_kill
   fuse=$(line_first "fusermount3 -uz $ROOT/run/user/64999/doc")
-  unit_kill=$(line_first "systemctl --user kill -s KILL xdg-document-portal.service")
+  unit_kill=$(line_first "systemctl --user kill -s KILL -- xdg-document-portal.service")
   manager_kill=$(line_first "systemctl kill -s KILL user@64999.service")
   [ "$fuse" -gt 0 ] && [ "$unit_kill" -gt "$fuse" ] && [ "$manager_kill" -gt "$unit_kill" ] \
     || fail "expected fusermount3 ($fuse), then the unit kill ($unit_kill), then the manager kill ($manager_kill)"
@@ -262,7 +264,8 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_called "$(as_user list-units --state=deactivating --no-legend --plain)"
   assert_equal "$(grep -cFx "systemctl kill -s KILL user@64999.service" "$SHIM_LOG")" 1
   assert_equal "$(grep -c "^systemctl --user kill" "$SHIM_LOG")" 1
-  assert_equal "$(calls_matching "fusermount3" | wc -l)" 1
+  assert_equal "$(grep -c "^fusermount3" "$SHIM_LOG")" 1
+  assert_called "timeout -s KILL 2 fusermount3 -uz $ROOT/run/user/64999/doc"
 
   run cat "$LOG_DIR/desktop_eject_request.log"
   assert_line "old user manager still stopping after 0.05s; ending its stuck units"
@@ -285,18 +288,20 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_success
 
   local unit_kill manager_kill
-  unit_kill=$(line_first "systemctl --user kill -s KILL xdg-document-portal.service")
+  unit_kill=$(line_first "systemctl --user kill -s KILL -- xdg-document-portal.service")
   manager_kill=$(line_first "systemctl kill -s KILL user@64999.service")
   [ "$unit_kill" -gt 0 ] && [ "$manager_kill" -gt "$unit_kill" ] || fail "expected the unit kill ($unit_kill), then the manager kill ($manager_kill)"
   # First seen stopping at 2.00 s; 3 polls later the clock is at 8.75 s (6.75 s of it stopping),
   # where counting polls would have needed 20 (5 s / 0.25 s).
   assert_equal "$(count_before "sleep 0.25" "$unit_kill")" 3
-  # Step 1's two calls end at 12.75 s; the manager kill comes at 19.50 s, 3 polls later.
+  # Step 1's three calls (recheck, list-units, kill) end at 14.75 s; the manager kill comes 3 polls
+  # later (the iteration that starts at 19.50 s).
   assert_equal "$(( $(count_before "sleep 0.25" "$manager_kill") - $(count_before "sleep 0.25" "$unit_kill") ))" 3
-  # The 20 s cap is clock time: 6 polls, not 80.
+  # The 20 s cap is clock time: 6 polls, not 80. The last iteration starts before 20 s and makes
+  # at most 3 calls of 2 s each (show, recheck, kill).
   assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 6
-  awk -v c="$(cat "$SHIM_STATE/clock")" 'BEGIN { exit !(c >= 20 && c < 22.25) }' \
-    || fail "the wait gave up at clock $(cat "$SHIM_STATE/clock"), expected within one check after 20 s"
+  awk -v c="$(cat "$SHIM_STATE/clock")" 'BEGIN { exit !(c >= 20 && c < 26.25) }' \
+    || fail "the wait gave up at clock $(cat "$SHIM_STATE/clock"), expected within one iteration after 20 s"
 
   run cat "$LOG_DIR/desktop_eject_request.log"
   assert_line "old user manager still stopping after 6.75s; ending its stuck units"
@@ -310,16 +315,68 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   set_os steamos
   export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
   timeline manager "0 deactivating"
-  manager_after_kill unit-kill "1 inactive" "2 active"
+  manager_after unit-kill "1 inactive" "2 active"
   timeline sessions "0 2:manager:closing" "1 3:user:active"
   stuck_unit xdg-document-portal.service
   run_clean "1 2"
   assert_success
-  assert_called "systemctl --user kill -s KILL xdg-document-portal.service"
+  assert_called "systemctl --user kill -s KILL -- xdg-document-portal.service"
   refute_called "systemctl kill"
   refute_called "fusermount3"
   [[ "$LOG" == *"user session ready after 0.07s (session 3)"* ]]
   [[ "$LOG" != *"killing it"* ]]
+}
+
+# The kill steps only ever hit the manager that was seen stopping (its InvocationID).
+@test "the manager changes between list-units and the kills: the remaining units aren't killed" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
+  timeline manager "0 deactivating:old"
+  manager_after list-units "0 active:new"
+  timeline sessions "0 2:manager:closing" "1 3:user:active"
+  stuck_unit xdg-document-portal.service
+  stuck_unit app-steam@autostart.service
+  run_clean "1 2"
+  assert_success
+  assert_called "$(as_user list-units --state=deactivating --no-legend --plain)"
+  refute_called "systemctl --user kill"
+  refute_called "systemctl kill"
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "old user manager gone; not killing xdg-document-portal.service"
+  refute_line --partial "killed stuck unit"
+  refute_line --partial "not killing app-steam@autostart.service"
+  assert_line "user session ready after 0.06s (session 3)"
+}
+
+@test "the manager changes right before the step-2 kill: the new one isn't killed and gets its own time" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
+  timeline manager "0 deactivating:old"
+  # Shows 1-11 are the checks of ticks 0-10 (step 1 at tick 5 has no units, so no recheck); the
+  # 12th is step 2's recheck, which finds a new manager.
+  manager_after show:11 "0 deactivating:new" "2 active:new"
+  timeline sessions "0 2:manager:closing" "1 3:user:active"
+  run_clean "1 2"
+  assert_success
+  refute_called "systemctl kill"
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "old user manager still stopping after 0.05s; ending its stuck units"
+  assert_line "old user manager gone; not killing user@64999.service"
+  refute_line "old user manager still stopping; killing it"
+  assert_line "user session ready after 0.12s (session 3)"
+}
+
+@test "a session that's still opening doesn't count, while the hung old manager is still ended" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05
+  timeline manager "0 deactivating:old"
+  timeline sessions "0 2:manager:closing 3:user:opening"
+  stuck_unit xdg-document-portal.service
+  run_clean "1 2"
+  assert_success
+  assert_called "systemctl --user kill -s KILL -- xdg-document-portal.service"
+  assert_called "systemctl kill -s KILL user@64999.service"
+  [[ "$LOG" == *"user session not ready after 0.2s (no new user session for xgmtest), continuing anyway"* ]]
 }
 
 @test "fast eject: the old manager stays active and a new user session appears: ready, nothing killed" {

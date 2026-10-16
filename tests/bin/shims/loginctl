@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Test shim: records the call. The login sessions follow the "sessions" timeline
 # (helpers/timeline.bash): "<id>:<class>:<state>[:<user>] ...", 2:user:active by default (one
-# session of xgmtest). `list-sessions` prints them in systemd 257's columns (SESSION UID USER SEAT
-# LEADER CLASS TTY IDLE SINCE); `show-session <id> -p Class -p State` prints those two properties.
+# session of xgmtest); a state can be anything loginctl reports (opening, online, active, closing).
+# `list-sessions` prints them in systemd 257's columns (SESSION UID USER SEAT LEADER CLASS TTY IDLE
+# SINCE; the seat is - for the user manager's own Class=manager session); `show-session <id> -p
+# Class -p State` prints those two properties.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 # shellcheck source=../helpers/timeline.bash
 . "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
@@ -19,7 +21,9 @@ case "$verb" in
   list-sessions)
     for s in $sessions; do
       IFS=: read -r id class state user <<< "$s"
-      printf '%s 64999 %s seat0 1000 %s tty2 no -\n' "$id" "${user:-xgmtest}" "$class"
+      seat=seat0
+      [ "$class" = "manager" ] && seat=-
+      printf '%s 64999 %s %s 1000 %s tty2 no -\n' "$id" "${user:-xgmtest}" "$seat" "$class"
     done ;;
   show-session)
     for s in $sessions; do
