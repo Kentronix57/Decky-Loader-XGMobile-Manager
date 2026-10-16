@@ -11,9 +11,22 @@ setup_file() {
 setup() {
   load helpers/sandbox
   make_root
+  # The wait for the user session (xgm_wait_for_user_session): one tick per check, capped at 20.
+  export XGM_WAIT_POLL=0.01 XGM_WAIT_CAP=0.2
 }
 
-run_clean() { run_script clean-session-env xgmtest "$LOG_DIR"; }
+# run_clean [known session ids]
+run_clean() { run_script clean-session-env xgmtest "$LOG_DIR" "$@"; }
+
+# The line number of the first (line_first) or last (line_last) shim log line equal to the text, or 0.
+line_first() { grep -Fxn -- "$1" "$SHIM_LOG" | head -n 1 | cut -d: -f1 | grep . || echo 0; }
+line_last() { grep -Fxn -- "$1" "$SHIM_LOG" | tail -n 1 | cut -d: -f1 | grep . || echo 0; }
+
+# How many shim log lines equal the text, before line <n>.
+count_before() { head -n "$(($2 - 1))" "$SHIM_LOG" | grep -cFx -- "$1" || true; }
+
+# The user manager calls, as the wait and the cleanup make them.
+as_user() { echo "setpriv --reuid=64999 --regid=64999 --init-groups env XDG_RUNTIME_DIR=$ROOT/run/user/64999 systemctl --user $*"; }
 
 # What egpu-enable injects, plus what Plasma imports from xgmobile-nvidia-kwin.sh.
 EGPU_ENV=(
@@ -43,7 +56,7 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_line "eGPU variables left in system manager: none"
   assert_line "eGPU variables found in user manager: $EGPU_NAMES"
   assert_line "eGPU variables left in user manager: none"
-  assert_called "sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user show-environment"
+  assert_called "$(as_user show-environment)"
 }
 
 @test "GBM_BACKEND and __GLX_VENDOR_LIBRARY_NAME with other values: left alone" {
@@ -132,71 +145,210 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   [[ "$LOG" == *"bazzite-nvidia: egpu-enable doesn't inject the eGPU environment here. Skipping."* ]]
 }
 
-# The wait for the user's graphical session (graphical-session.target), before anything is read.
-@test "user session ready right away: no wait, logged as 0s, then cleaned" {
+# The wait for the user's new graphical session (xgm_wait_for_user_session), before anything is read.
+@test "user session ready right away: no wait, logged as 0.00s, then cleaned" {
   set_os steamos
   manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
   run_clean
   assert_success
   refute_called "sleep"
   assert_called_before "systemctl --user is-active graphical-session.target" "systemctl --user show-environment"
-  [[ "$LOG" == *"user session ready after 0s"* ]]
+  [[ "$LOG" == *"user session ready after 0.00s (session 2)"* ]]
   assert_equal "$(manager_env_of user)" ""
 }
 
-@test "user session ready after 3 checks: waits 1.5s, then cleans what the session imported" {
+@test "graphical session ready after 3 checks: waits 0.03s, then cleans what the session imported" {
   set_os steamos
   session_ready 3
   manager_env user "GBM_BACKEND=nvidia-drm"
   run_clean
   assert_success
-  assert_equal "$(calls_matching "sleep 0.5" | wc -l)" 3
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 3
   assert_equal "$(grep -cFx "systemctl --user is-active graphical-session.target" "$SHIM_LOG")" 4
-  assert_called_before "sleep 0.5" "systemctl --user show-environment"
-  [[ "$LOG" == *"user session ready after 1.5s"* ]]
+  assert_called_before "sleep 0.01" "systemctl --user show-environment"
+  [[ "$LOG" == *"user session ready after 0.03s (session 2)"* ]]
   assert_equal "$(manager_env_of user)" ""
 }
 
-@test "user session activating for 5 checks: keeps waiting (not 'not answering'), ready after 2.5s" {
+@test "graphical session activating for 5 checks: keeps waiting, ready after 0.05s" {
   set_os cachyos
   session_ready activating:5
   manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
   run_clean
   assert_success
-  assert_equal "$(calls_matching "sleep 0.5" | wc -l)" 5
-  assert_equal "$(grep -cFx "systemctl --user is-active graphical-session.target" "$SHIM_LOG")" 6
-  [[ "$LOG" == *"user session ready after 2.5s"* ]]
-  [[ "$LOG" != *"user manager not answering"* ]]
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 5
+  [[ "$LOG" == *"user session ready after 0.05s (session 2)"* ]]
   assert_equal "$(manager_env_of user)" ""
 }
 
-@test "user session never ready: gives up after 10s and cleans anyway" {
+@test "graphical session never ready: gives up at the cap, names what's missing, cleans anyway" {
   set_os cachyos
   session_ready never
   manager_env user "MESA_VK_DEVICE_SELECT=10de:2717"
   run_clean
   assert_success
-  assert_equal "$(calls_matching "sleep 0.5" | wc -l)" 20
-  [[ "$LOG" == *"user session not ready after 10s, cleaning anyway"* ]]
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 20
+  [[ "$LOG" == *"user session not ready after 0.2s (graphical-session.target is inactive), continuing anyway"* ]]
   [[ "$LOG" == *"eGPU variables left in user manager: none"* ]]
   assert_equal "$(manager_env_of user)" ""
 }
 
-@test "user manager not running or not answering: no wait" {
+@test "user manager not answering, or no runtime dir: keeps waiting until the cap, exit 0" {
   set_os cachyos
   user_manager_down
   run_clean
   assert_success
-  refute_called "sleep"
-  [[ "$LOG" == *"user manager not answering; not waiting for the user session"* ]]
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 20
+  [[ "$LOG" == *"user session not ready after 0.2s (graphical-session.target is not answering), continuing anyway"* ]]
 
   : > "$SHIM_LOG"
-  rm -f "$SHIM_STATE/user_manager_down"
+  rm -f "$SHIM_STATE/user_manager_down" "$SHIM_STATE/ticks"
   no_user_session
   run_clean
   assert_success
-  refute_called "sleep"
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 20
   refute_called "systemctl --user"
-  [[ "$LOG" != *"user session"* ]]
+  [[ "$LOG" == *"user session not ready after 0.2s (no $ROOT/run/user/64999/bus), continuing anyway"* ]]
   [[ "$LOG" == *"eGPU variables left in user manager: not checked (the user manager for xgmtest isn't running: no $ROOT/run/user/64999)"* ]]
+}
+
+# Step 0, exp 2 (SteamOS): the eject stopped sddm, logind removed login session 1 and then the old
+# user manager (and its Class=manager session 2). sddm starts again, the new login session 3
+# appears, then the new manager, its bus, and graphical-session.target. 6c1a24c returned at once
+# because there was no runtime dir, and steamos-session-select found no user bus.
+@test "exp 2: no runtime dir, then the new session, manager, bus and graphical session: waits for all, then cleans" {
+  set_os steamos
+  timeline sessions "0 2:manager:closing" "2 3:user:online" "3 3:user:active 4:manager:active"
+  timeline manager "0 inactive" "3 activating" "4 active"
+  timeline rundir "0 absent" "3 present"
+  timeline bus "0 absent" "5 present"
+  timeline graphical "0 inactive" "6 active"
+  manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  run_clean "1 2"
+  assert_success
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 6
+  [[ "$LOG" == *"user session ready after 0.06s (session 3)"* ]]
+  [ "$(line_last "sleep 0.01")" -lt "$(line_first "systemctl --user show-environment")" ]
+  run grep -n -e "user session ready" -e "eGPU variables found in user manager" "$LOG_DIR/desktop_eject_request.log"
+  assert_line --index 0 --partial "user session ready after 0.06s (session 3)"
+  assert_line --index 1 --partial "eGPU variables found in user manager: KWIN_DRM_DEVICES"
+  assert_equal "$(manager_env_of user)" ""
+  refute_called "systemctl kill"
+  refute_called "systemctl --user kill"
+}
+
+# Pass 3 (SteamOS): the old user manager hung in "deactivating" for 90 s, because
+# xdg-document-portal.service couldn't stop (a fusermount3 child stayed alive).
+@test "pass 3: old manager stuck stopping: ends its stuck units after XGM_HUNG_AFTER, then kills it, once each" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
+  timeline manager "0 deactivating"
+  manager_after_kill kill "0 inactive" "2 active"
+  timeline sessions "0 2:manager:closing" "1 3:user:active"
+  stuck_unit xdg-document-portal.service
+  doc_mounted
+  run_clean "1 2"
+  assert_success
+
+  local fuse unit_kill manager_kill
+  fuse=$(line_first "fusermount3 -uz $ROOT/run/user/64999/doc")
+  unit_kill=$(line_first "systemctl --user kill -s KILL xdg-document-portal.service")
+  manager_kill=$(line_first "systemctl kill -s KILL user@64999.service")
+  [ "$fuse" -gt 0 ] && [ "$unit_kill" -gt "$fuse" ] && [ "$manager_kill" -gt "$unit_kill" ] \
+    || fail "expected fusermount3 ($fuse), then the unit kill ($unit_kill), then the manager kill ($manager_kill)"
+  # Not before XGM_HUNG_AFTER (5 checks), and the manager XGM_HUNG_AFTER after the unit.
+  assert_equal "$(count_before "sleep 0.01" "$fuse")" 5
+  assert_equal "$(( $(count_before "sleep 0.01" "$manager_kill") - $(count_before "sleep 0.01" "$unit_kill") ))" 5
+  assert_called "$(as_user list-units --state=deactivating --no-legend --plain)"
+  assert_equal "$(grep -cFx "systemctl kill -s KILL user@64999.service" "$SHIM_LOG")" 1
+  assert_equal "$(grep -c "^systemctl --user kill" "$SHIM_LOG")" 1
+  assert_equal "$(calls_matching "fusermount3" | wc -l)" 1
+
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "old user manager still stopping after 0.05s; ending its stuck units"
+  assert_line "killed stuck unit: xdg-document-portal.service"
+  assert_line "old user manager still stopping; killing it"
+  assert_equal "$(grep -c "old user manager still stopping" "$LOG_DIR/desktop_eject_request.log")" 2
+  assert_line "user session ready after 0.12s (session 3)"
+}
+
+@test "old manager stops once its stuck unit is killed: the manager itself isn't killed" {
+  set_os steamos
+  export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
+  timeline manager "0 deactivating"
+  manager_after_kill unit-kill "1 inactive" "2 active"
+  timeline sessions "0 2:manager:closing" "1 3:user:active"
+  stuck_unit xdg-document-portal.service
+  run_clean "1 2"
+  assert_success
+  assert_called "systemctl --user kill -s KILL xdg-document-portal.service"
+  refute_called "systemctl kill"
+  refute_called "fusermount3"
+  [[ "$LOG" == *"user session ready after 0.07s (session 3)"* ]]
+  [[ "$LOG" != *"killing it"* ]]
+}
+
+@test "fast eject: the old manager stays active and a new user session appears: ready, nothing killed" {
+  set_os steamos
+  timeline sessions "0 2:user:active" "2 2:user:closing" "3 5:user:active"
+  run_clean "2"
+  assert_success
+  [[ "$LOG" == *"user session ready after 0.03s (session 5)"* ]]
+  refute_called "systemctl kill"
+  refute_called "systemctl --user kill"
+  refute_called "fusermount3"
+}
+
+@test "only the known session, a manager, a closing, a greeter and another user's session: not ready, the cap names it" {
+  set_os steamos
+  timeline sessions "0 2:user:active 3:manager:active 4:user:closing 6:greeter:online 7:user:active:someone"
+  manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  run_clean "2"
+  assert_success
+  assert_equal "$(calls_matching "sleep 0.01" | wc -l)" 20
+  [[ "$LOG" == *"user session not ready after 0.2s (no new user session for xgmtest), continuing anyway"* ]]
+  [[ "$LOG" == *"eGPU variables left in user manager: none"* ]]
+}
+
+@test "jobs queued in the user manager: not ready until they're done" {
+  set_os steamos
+  timeline jobs "0 2" "4 0"
+  run_clean
+  assert_success
+  [[ "$LOG" == *"user session ready after 0.04s (session 2)"* ]]
+  assert_equal "$(grep -cFx "systemctl --user list-jobs --no-legend" "$SHIM_LOG")" 5
+
+  : > "$SHIM_LOG"
+  rm -f "$SHIM_STATE/ticks"
+  timeline jobs "0 1"
+  run_clean
+  assert_success
+  [[ "$LOG" == *"user session not ready after 0.2s (the user manager has jobs queued), continuing anyway"* ]]
+}
+
+@test "user manager stopping at cleanup time: logged, its environment not read" {
+  set_os steamos
+  export XGM_HUNG_AFTER=10
+  timeline manager "0 deactivating"
+  manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  run_clean
+  assert_success
+  refute_called "systemctl --user show-environment"
+  refute_called "systemctl kill"
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "user session not ready after 0.2s (user@64999.service is deactivating), continuing anyway"
+  assert_line "eGPU variables left in system manager: none"
+  assert_line "eGPU variables left in user manager: not checked (the user manager for xgmtest is stopping; its environment won't carry over)"
+}
+
+@test "user manager calls go through setpriv with a 2 s timeout, never sudo or runuser" {
+  set_os steamos
+  run_clean
+  assert_success
+  assert_called "timeout -s KILL 2 $(as_user is-active graphical-session.target)"
+  assert_called "timeout -s KILL 2 $(as_user list-jobs --no-legend)"
+  assert_called "timeout -s KILL 2 $(as_user show-environment)"
+  assert_called "timeout -s KILL 2 $(as_user unset-environment KWIN_DRM_DEVICES)"
+  refute_called "sudo"
+  refute_called "runuser"
 }

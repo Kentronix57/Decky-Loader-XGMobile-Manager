@@ -19,7 +19,6 @@ bin/egpu-enable @allow failed to appear in /dev/dri/
 bin/egpu-sync @allow ="/dev/dri/$(basename $card)"
 bin/egpu-enable @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
 bin/egpu-eject @allow XDG_RUNTIME_DIR=/run/user/$USER_UID
-bin/xgm-common.sh @allow XDG_RUNTIME_DIR=/run/user/$uid
 bin/xgm-common.sh @allow eGPU variables left in /etc/environment
 bin/create-shortcuts @allow Exec=bash -c "touch /tmp/xgmobile_eject_request"
 

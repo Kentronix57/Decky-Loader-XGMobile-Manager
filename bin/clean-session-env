@@ -2,7 +2,9 @@
 # Unsets the eGPU variables in the system manager and the user's systemd manager, right before the
 # desktop Eject link switches back to Game Mode (main.py), so the Game Mode session doesn't start
 # on the GPU that was just ejected. A Plasma session can put them back after egpu-eject cleaned up.
-#   clean-session-env <user> <log dir>
+#   clean-session-env <user> <log dir> [known session ids]
+# [known session ids] are the user's login sessions from before the eject (space-separated): the
+# wait only accepts a session that isn't one of them.
 # Appends to <log dir>/desktop_eject_request.log. Only SteamOS and CachyOS: egpu-enable doesn't
 # inject the eGPU environment elsewhere, and on Bazzite GBM_BACKEND/__GLX_VENDOR_LIBRARY_NAME
 # belong to the image.
@@ -23,6 +25,6 @@ fi
 # Eject restarted the display manager, and the session it started (the persistent Plasma desktop,
 # if that's the default) can import its environment into the user manager a moment later. On
 # SteamOS there's no wait before this runs, so wait for the session first.
-xgm_wait_for_user_session "$TARGET_USER"
+xgm_wait_for_user_session "$TARGET_USER" "${3:-}"
 xgm_clean_session_env "$TARGET_USER"
 exit 0

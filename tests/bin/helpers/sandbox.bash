@@ -17,6 +17,8 @@ load "$XGM_REPO/node_modules/bats-assert/load"
 source "$XGM_REPO/tests/audit/audit.bash"
 # shellcheck source=fake_gpu.bash
 source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
+# shellcheck source=timeline.bash
+source "$XGM_REPO/tests/bin/helpers/timeline.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
 SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install)
@@ -77,7 +79,8 @@ make_root() {
     "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest" \
     "$ROOT/sys/module" "$ROOT/run/user/64999"
   # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host. Its uid
-  # (shims/id) is 64999, and it has a runtime dir, as when a session is running.
+  # (shims/id) is 64999, and it has a runtime dir with a user bus, as when a session is running.
+  touch "$ROOT/run/user/64999/bus"
   : > "$SHIM_LOG"
 
   local tool path
@@ -281,6 +284,34 @@ user_manager_down() { touch "$SHIM_STATE/user_manager_down"; }
 # checks that answer "activating".
 session_ready() { echo "$1" > "$SHIM_STATE/session_ready"; }
 
+# timeline <key> "<tick> <value>"...: scripts how a piece of the user session changes over time
+# (helpers/timeline.bash has the keys). Every sleep call is one tick; tick 0 is the start. The
+# runtime dir and bus keys are applied to the tree right away for tick 0.
+timeline() {
+  local key="$1"
+  shift
+  mkdir -p "$SHIM_STATE/timeline"
+  printf '%s\n' "$@" > "$SHIM_STATE/timeline/$key"
+  tl_apply_fs "$ROOT"
+}
+
+# manager_after_kill <kill|unit-kill> "<ticks later> <state>"...: what user@64999.service does
+# after `systemctl kill -s KILL user@64999.service` (kill), or after a stuck unit is killed
+# (unit-kill). Without it, a killed manager is inactive and a unit kill changes nothing.
+manager_after_kill() {
+  local file="$SHIM_STATE/timeline/manager.after_kill"
+  [ "$1" = "unit-kill" ] && file="$SHIM_STATE/timeline/manager.after_unit_kill"
+  shift
+  mkdir -p "$SHIM_STATE/timeline"
+  printf '%s\n' "$@" > "$file"
+}
+
+# stuck_unit <unit>: a unit the stopping user manager can't stop, until it's killed.
+stuck_unit() { echo "$1" >> "$SHIM_STATE/stuck_units"; }
+
+# The document portal's FUSE mount at run/user/64999/doc (shims/findmnt), until fusermount3 -u.
+doc_mounted() { touch "$SHIM_STATE/doc_mounted"; }
+
 # steam_user <name>: the user Steam runs as (shims/ps), instead of xgmtest.
 steam_user() { echo "$1" > "$SHIM_STATE/steam_user"; }
 
@@ -302,7 +333,8 @@ enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergf
 
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
-# LANG=C unless $SANDBOX_LANG is set. Sets bats' $status/$output, and
+# LANG=C unless $SANDBOX_LANG is set, and XGM_WAIT_POLL, XGM_WAIT_CAP and XGM_HUNG_AFTER if
+# set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR. LOG_DIR is emptied first,
 # unless KEEP_LOG_DIR=1 (tests that seed it, e.g. migrate-logs).
 run_script() {
@@ -310,7 +342,13 @@ run_script() {
   shift
   [ -n "${ROOT:-}" ] || fail "run_script: call make_root first"
   [ "${KEEP_LOG_DIR:-0}" = "1" ] || find "$LOG_DIR" -mindepth 1 -delete
+  # The wait tunables (bin/xgm-common.sh) pass through when a test sets them.
+  local var tunables=()
+  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER; do
+    [ -n "${!var:-}" ] && tunables+=("$var=${!var}")
+  done
   run env -i \
+    "${tunables[@]}" \
     HOME="$BATS_TEST_TMPDIR/home" \
     LANG="${SANDBOX_LANG:-C}" \
     PATH="$XGM_SHIMS:$OPTBIN:$SYSBIN" \

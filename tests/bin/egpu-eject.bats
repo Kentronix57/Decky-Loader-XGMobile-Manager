@@ -678,7 +678,9 @@ eject_with_numbering() {
   egpu_present amd
   run_plugin_script egpu-eject amd
   assert_success
-  assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
+  assert_called "id -u deck"
+  assert_called "setpriv --reuid=64999 --regid=64999 --init-groups env XDG_RUNTIME_DIR=$ROOT/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
+  assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user daemon-reload"
 }
 
 @test "egpu_enable write fails: friendly line, no shell error in the log, the drop wait decides" {

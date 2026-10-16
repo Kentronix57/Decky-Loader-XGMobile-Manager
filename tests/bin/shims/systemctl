@@ -6,8 +6,16 @@
 # $SHIM_STATE/user_manager_down every --user call fails as if the user manager isn't running.
 # `--user is-active graphical-session.target` follows $SHIM_STATE/session_ready: now (default),
 # never, N (inactive for the first N checks, then active) or activating:N (activating for the
-# first N checks, then active).
+# first N checks, then active), unless a "graphical" timeline is set (helpers/timeline.bash).
+# The user manager (user@64999.service) follows the timelines too: `show -p ActiveState --value
+# user@64999.service` prints the "manager" timeline (active by default), `--user list-jobs` prints
+# one job per the "jobs" timeline, and `--user list-units --state=deactivating` lists the units in
+# $SHIM_STATE/stuck_units until `--user kill -s KILL <unit>` ends them. `kill -s KILL
+# user@64999.service` ends the manager: from then on it follows timeline/manager.after_kill, or is
+# inactive (killing a stuck unit does the same with timeline/manager.after_unit_kill, if set).
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+# shellcheck source=../helpers/timeline.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
 user=0 verb="" units=()
 for arg in "$@"; do
   case "$arg" in
@@ -36,7 +44,43 @@ case "$verb" in
       mv "$envfile.new" "$envfile"
     done
     exit 0 ;;
+  show)
+    if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      tl_value manager active
+    fi
+    exit 0 ;;
+  list-jobs)
+    if [ "$user" -eq 1 ]; then
+      for ((i = 1; i <= $(tl_value jobs 0); i++)); do
+        echo "$i gamescope-session.target start waiting"
+      done
+    fi
+    exit 0 ;;
+  list-units)
+    if [ "$user" -eq 1 ] && [[ " $* " == *" --state=deactivating "* ]]; then
+      while IFS= read -r unit; do
+        [ -n "$unit" ] && echo "$unit loaded deactivating stop-sigterm $unit"
+      done < <(cat "$SHIM_STATE/stuck_units" 2>/dev/null)
+    fi
+    exit 0 ;;
+  kill)
+    if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      tl_restart manager "$SHIM_STATE/timeline/manager.after_kill"
+    elif [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/stuck_units" ]; then
+      grep -vFx -- "${units[-1]}" "$SHIM_STATE/stuck_units" > "$SHIM_STATE/stuck_units.new"
+      mv "$SHIM_STATE/stuck_units.new" "$SHIM_STATE/stuck_units"
+      if [ -e "$SHIM_STATE/timeline/manager.after_unit_kill" ]; then
+        tl_restart manager "$SHIM_STATE/timeline/manager.after_unit_kill"
+      fi
+    fi
+    exit 0 ;;
   is-active)
+    if [ "$user" -eq 1 ] && [ "${units[-1]}" = "graphical-session.target" ] && [ -e "$SHIM_STATE/timeline/graphical" ]; then
+      state=$(tl_value graphical active)
+      echo "$state"
+      [ "$state" = "active" ] && exit 0
+      exit 3
+    fi
     if [ "$user" -eq 1 ] && [ "${units[-1]}" = "graphical-session.target" ]; then
       ready=$(cat "$SHIM_STATE/session_ready" 2>/dev/null || echo now)
       waiting=inactive

@@ -111,6 +111,17 @@ xgm_egpu_env_names() {
   done
 }
 
+# _xgm_user_systemctl <user> <uid> <systemctl args...>: runs `systemctl --user` against that user's
+# manager as the user. setpriv, not sudo/runuser: their PAM stacks can open a logind session, which
+# would keep a stopping user manager alive. Killed after 2 s, so a hung manager can't block the caller.
+_xgm_user_systemctl() {
+  local user="$1" uid="$2" gid
+  shift 2
+  gid=$(id -g "$user" 2>/dev/null)
+  timeout -s KILL 2 setpriv --reuid="$uid" --regid="${gid:-$uid}" --init-groups \
+    env XDG_RUNTIME_DIR="$ROOT/run/user/$uid" systemctl --user "$@"
+}
+
 # _xgm_manager <system|user> <user> <uid> <systemctl args...>: runs systemctl against the system
 # manager, or against that user's manager as the user.
 _xgm_manager() {
@@ -119,7 +130,7 @@ _xgm_manager() {
   if [ "$scope" = "system" ]; then
     systemctl "$@"
   else
-    sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid systemctl --user "$@"
+    _xgm_user_systemctl "$user" "$uid" "$@"
   fi
 }
 
@@ -156,36 +167,112 @@ _xgm_clean_manager() {
   echo "eGPU variables left in $1 manager: $(_xgm_manager_egpu_vars "$@")"
 }
 
-# xgm_wait_for_user_session <user>: waits up to 10 s (checking every 0.5 s) for the user's
-# graphical session to be up (graphical-session.target active), so that a Plasma session that
-# imports its environment into the user manager has done it before the cleanup. Logs how long it
-# took, or that it gave up. Returns at once when the user manager isn't running or doesn't
-# answer (xgm_clean_session_env logs that).
+# _xgm_cs <seconds>: seconds (0.25) as whole centiseconds, at least 1. _xgm_secs <cs>: back as "0.25".
+_xgm_cs() { awk -v s="$1" 'BEGIN { c = int(s * 100 + 0.5); print (c < 1 ? 1 : c) }'; }
+_xgm_secs() { printf '%d.%02d' $(($1 / 100)) $(($1 % 100)); }
+
+# _xgm_new_user_session <user> <known ids>: prints the ID of a login session of that user with
+# Class=user and State active or online that isn't in <known ids> (space-separated; empty: any
+# counts). The user manager's own session (Class=manager), greeter and lock-screen sessions, and
+# sessions still listed as closing don't count. Fails if there's none.
+_xgm_new_user_session() {
+  local user="$1" known=" $2 " id props
+  for id in $(loginctl list-sessions --no-legend 2>/dev/null | awk -v u="$user" '$3 == u { print $1 }'); do
+    [ -n "${known// }" ] && [[ "$known" == *" $id "* ]] && continue
+    props=$(loginctl show-session "$id" -p Class -p State 2>/dev/null)
+    grep -qx "Class=user" <<< "$props" || continue
+    grep -qxE "State=(active|online)" <<< "$props" || continue
+    echo "$id"
+    return 0
+  done
+  return 1
+}
+
+# _xgm_end_stuck_units <user> <uid>: unmounts the document portal's FUSE mount (a fusermount3
+# child of xdg-document-portal kept the old manager stopping for 90 s) and kills every unit the
+# stopping user manager still has in "deactivating".
+_xgm_end_stuck_units() {
+  local user="$1" uid="$2" unit
+  if findmnt -n "$ROOT/run/user/$uid/doc" >/dev/null 2>&1; then
+    fusermount3 -uz "$ROOT/run/user/$uid/doc"
+  fi
+  for unit in $(_xgm_user_systemctl "$user" "$uid" list-units --state=deactivating --no-legend --plain 2>/dev/null | awk '{ print $1 }'); do
+    if _xgm_user_systemctl "$user" "$uid" kill -s KILL "$unit"; then
+      echo "killed stuck unit: $unit"
+    else
+      echo "couldn't kill stuck unit: $unit"
+    fi
+  done
+}
+
+# xgm_wait_for_user_session <user> [known session ids]: waits until the user's new graphical
+# session is usable, so that a Plasma session that imports its environment into the user manager
+# has done it before the cleanup, and steamos-session-select finds a user bus. Ready means all of:
+#   1. a new login session (see _xgm_new_user_session; <known ids> are the ones from before eject)
+#   2. user@<uid>.service active
+#   3. the user bus socket exists
+#   4. graphical-session.target active in the user manager
+#   5. no jobs queued in the user manager
+# Checks every XGM_WAIT_POLL s (0.25) for up to XGM_WAIT_CAP s (60), counted in poll intervals.
+# A missing runtime dir or a manager that doesn't answer only means "not yet": the eject stopped
+# the display manager, and logind removes the old user manager seconds later. If the old manager
+# is stuck stopping for XGM_HUNG_AFTER s (5), its stuck units are killed; if it's still stopping
+# XGM_HUNG_AFTER s later, the manager itself. Logs how long it took, or what was still missing.
+# Always returns 0: the caller cleans anyway.
 xgm_wait_for_user_session() {
-  local user="$1" uid state i=0
+  local user="$1" known="${2:-}" uid poll cap poll_cs cap_cs hung_cs elapsed=0
+  local deact_since=-1 step1_at=-1 step2=0 state session target jobs missing
   uid=$(id -u "$user" 2>/dev/null)
-  [ -n "$uid" ] && [ -d "$ROOT/run/user/$uid" ] || return 0
+  [ -n "$uid" ] || return 0
+  poll="${XGM_WAIT_POLL:-0.25}"
+  cap="${XGM_WAIT_CAP:-60}"
+  poll_cs=$(_xgm_cs "$poll")
+  cap_cs=$(_xgm_cs "$cap")
+  hung_cs=$(_xgm_cs "${XGM_HUNG_AFTER:-5}")
   while :; do
-    if state=$(_xgm_manager user "$user" "$uid" is-active graphical-session.target 2>&1); then
-      echo "user session ready after $((i / 2))$([ $((i % 2)) -eq 1 ] && echo .5)s"
+    state=$(systemctl show -p ActiveState --value "user@$uid.service" 2>/dev/null)
+    if [ "$state" = "deactivating" ]; then
+      [ "$deact_since" -ge 0 ] || deact_since=$elapsed
+      if [ "$step1_at" -lt 0 ] && [ $((elapsed - deact_since)) -ge "$hung_cs" ]; then
+        echo "old user manager still stopping after $(_xgm_secs $((elapsed - deact_since)))s; ending its stuck units"
+        _xgm_end_stuck_units "$user" "$uid"
+        step1_at=$elapsed
+      elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((elapsed - step1_at)) -ge "$hung_cs" ]; then
+        echo "old user manager still stopping; killing it"
+        systemctl kill -s KILL "user@$uid.service"
+        step2=1
+      fi
+    else
+      deact_since=-1
+    fi
+
+    if ! session=$(_xgm_new_user_session "$user" "$known"); then
+      missing="no new user session for $user"
+    elif [ "$state" != "active" ]; then
+      missing="user@$uid.service is ${state:-unknown}"
+    elif [ ! -e "$ROOT/run/user/$uid/bus" ]; then
+      missing="no $ROOT/run/user/$uid/bus"
+    elif ! target=$(_xgm_user_systemctl "$user" "$uid" is-active graphical-session.target 2>/dev/null); then
+      missing="graphical-session.target is ${target:-not answering}"
+    elif ! jobs=$(_xgm_user_systemctl "$user" "$uid" list-jobs --no-legend 2>/dev/null) || [ -n "$jobs" ]; then
+      missing="the user manager has jobs queued"
+    else
+      echo "user session ready after $(_xgm_secs "$elapsed")s (session $session)"
       return 0
     fi
-    case "$state" in
-      inactive|activating|deactivating|failed|reloading|unknown) ;;
-      *) echo "user manager not answering; not waiting for the user session"; return 0 ;;
-    esac
-    if [ "$i" -ge 20 ]; then
-      echo "user session not ready after 10s, cleaning anyway"
+    if [ "$elapsed" -ge "$cap_cs" ]; then
+      echo "user session not ready after ${cap}s ($missing), continuing anyway"
       return 0
     fi
-    sleep 0.5
-    i=$((i + 1))
+    sleep "$poll"
+    elapsed=$((elapsed + poll_cs))
   done
 }
 
 # xgm_clean_session_env <user>: unsets the eGPU variables in the system manager and in that user's
 # manager (no files), logging what each held before and after. A user manager that isn't running
-# (no runtime dir: no session yet, or the display manager is stopped) is logged, not skipped silently.
+# (no runtime dir: no session yet, or the display manager is stopped) or is stopping is logged, not
+# skipped silently.
 xgm_clean_session_env() {
   local user="$1" uid
   _xgm_clean_manager system "" ""
@@ -194,6 +281,8 @@ xgm_clean_session_env() {
     echo "eGPU variables left in user manager: not checked (no user '$user')"
   elif [ ! -d "$ROOT/run/user/$uid" ]; then
     echo "eGPU variables left in user manager: not checked (the user manager for $user isn't running: no $ROOT/run/user/$uid)"
+  elif [ "$(systemctl show -p ActiveState --value "user@$uid.service" 2>/dev/null)" = "deactivating" ]; then
+    echo "eGPU variables left in user manager: not checked (the user manager for $user is stopping; its environment won't carry over)"
   else
     _xgm_clean_manager user "$user" "$uid"
   fi

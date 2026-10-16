@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Test shim: records the call; -u unmounts the document portal's mount (shims/findmnt).
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+[[ " $* " == *" -u"* ]] && rm -f "$SHIM_STATE/doc_mounted"
+exit 0

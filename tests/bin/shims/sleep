@@ -8,6 +8,11 @@
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 ROOT="$XGM_ROOT"
 [ -n "$ROOT" ] || exit 0
+# Every call is also one tick of the user-session timelines (runtime dir and bus socket included).
+# shellcheck source=../helpers/timeline.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
+tl_advance
+tl_apply_fs "$ROOT"
 # shellcheck source=../helpers/fake_gpu.bash
 . "$(dirname "$(readlink -f "$0")")/../helpers/fake_gpu.bash"
 PCI=$(fake_gpu_pci_dir "$FAKE_EGPU_PCI_ADDR")
