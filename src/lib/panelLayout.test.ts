@@ -5,17 +5,20 @@ const active = { connected: true, active: true };
 const connected = { connected: true, active: false };
 const disconnected = { connected: false, active: false };
 
+const enable = { action: "enable_egpu", statusLabel: "Enabling", actionPhrase: "enable the XG Mobile" };
+const eject = { action: "eject_egpu", statusLabel: "Ejecting", actionPhrase: "eject the XG Mobile" };
+
 describe("mainButton", () => {
   it("ejects when the XG Mobile is active", () => {
-    expect(mainButton(active, false)).toEqual({ action: "eject_egpu", label: "Eject XG Mobile", disabled: false });
+    expect(mainButton(active, false)).toEqual({ ...eject, label: "Eject XG Mobile", disabled: false });
   });
 
   it("enables when it is connected but not active", () => {
-    expect(mainButton(connected, false)).toEqual({ action: "enable_egpu", label: "Enable XG Mobile", disabled: false });
+    expect(mainButton(connected, false)).toEqual({ ...enable, label: "Enable XG Mobile", disabled: false });
   });
 
   it("asks to connect, disabled, when it is not connected", () => {
-    expect(mainButton(disconnected, false)).toEqual({ action: "enable_egpu", label: "Connect the XG Mobile", disabled: true });
+    expect(mainButton(disconnected, false)).toEqual({ ...enable, label: "Connect the XG Mobile", disabled: true });
   });
 
   it("is never clickable while loading", () => {
@@ -26,16 +29,22 @@ describe("mainButton", () => {
 });
 
 describe("statusLine", () => {
+  it("shows Checking dimmed until the first status poll returns", () => {
+    for (const status of [active, connected, disconnected]) {
+      expect(statusLine(status, false)).toEqual({ text: "XG Mobile: Checking…", color: "#8b929a" });
+    }
+  });
+
   it("shows Active in green", () => {
-    expect(statusLine(active)).toEqual({ text: "XG Mobile: Active", color: "#59bf40" });
+    expect(statusLine(active, true)).toEqual({ text: "XG Mobile: Active", color: "#59bf40" });
   });
 
   it("shows Connected in a neutral color", () => {
-    expect(statusLine(connected)).toEqual({ text: "XG Mobile: Connected", color: "#dcdedf" });
+    expect(statusLine(connected, true)).toEqual({ text: "XG Mobile: Connected", color: "#dcdedf" });
   });
 
   it("shows Not connected dimmed", () => {
-    expect(statusLine(disconnected)).toEqual({ text: "XG Mobile: Not connected", color: "#8b929a" });
+    expect(statusLine(disconnected, true)).toEqual({ text: "XG Mobile: Not connected", color: "#8b929a" });
   });
 });
 

@@ -94,6 +94,7 @@ export const QuickAccessContent = () => {
   const [osType, setOsType] = useState("steamos");
   const [powerProfile, setPowerProfile] = useState("Unknown");
   const [statusError, setStatusError] = useState("");
+  const [statusLoaded, setStatusLoaded] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
 
@@ -139,7 +140,13 @@ export const QuickAccessContent = () => {
   useEffect(() => {
     const poll = async () => {
       try {
-        const currentStatus = await call("get_gpu_status") as any;
+        let currentStatus: any;
+        try {
+          currentStatus = await call("get_gpu_status");
+        } finally {
+          // First answer (or failure) is in: stop showing "Checking…"
+          setStatusLoaded(true);
+        }
         if (currentStatus && typeof currentStatus === "object") {
           setGpuStatus(currentStatus);
           setStatusError(currentStatus.error ?? "");
@@ -353,7 +360,7 @@ export const QuickAccessContent = () => {
     );
   }
   const button = mainButton(gpuStatus, isLoading);
-  const status = statusLine(gpuStatus);
+  const status = statusLine(gpuStatus, statusLoaded);
   const rows = maintenanceRows(osType, deviceType);
 
   return (
@@ -424,9 +431,7 @@ export const QuickAccessContent = () => {
               <ButtonItem
                 layout="below"
                 disabled={button.disabled}
-                onClick={() => button.action === "eject_egpu"
-                  ? handleAction("eject_egpu", "Ejecting", "eject the XG Mobile")
-                  : handleAction("enable_egpu", "Enabling", "enable the XG Mobile")}
+                onClick={() => handleAction(button.action, button.statusLabel, button.actionPhrase)}
               >
                 {button.label}
               </ButtonItem>
@@ -630,7 +635,7 @@ export const QuickAccessContent = () => {
         {/* About */}
         <PanelSectionRow>
           <div style={{ opacity: 0.6, fontSize: "0.8em" }}>
-            v{pluginVersion} · Created by Kentronix
+            {pluginVersion !== "Loading..." && `v${pluginVersion} · `}Created by Kentronix
           </div>
         </PanelSectionRow>
       </PanelSection>

@@ -9,9 +9,14 @@ export type MainAction = "enable_egpu" | "eject_egpu";
 
 export interface MainButton {
   action: MainAction;
+  statusLabel: string;
+  actionPhrase: string;
   label: string;
   disabled: boolean;
 }
+
+const ENABLE = { action: "enable_egpu", statusLabel: "Enabling", actionPhrase: "enable the XG Mobile" } as const;
+const EJECT = { action: "eject_egpu", statusLabel: "Ejecting", actionPhrase: "eject the XG Mobile" } as const;
 
 export interface StatusLine {
   text: string;
@@ -23,15 +28,17 @@ export type MaintenanceRow = "shortcuts" | "install" | "reset" | "flow";
 // One main button: Eject while active, otherwise Enable (only once the XG Mobile is connected).
 export function mainButton(gpuStatus: GpuStatus, isLoading: boolean): MainButton {
   if (gpuStatus.active) {
-    return { action: "eject_egpu", label: "Eject XG Mobile", disabled: isLoading };
+    return { ...EJECT, label: "Eject XG Mobile", disabled: isLoading };
   }
   if (!gpuStatus.connected) {
-    return { action: "enable_egpu", label: "Connect the XG Mobile", disabled: true };
+    return { ...ENABLE, label: "Connect the XG Mobile", disabled: true };
   }
-  return { action: "enable_egpu", label: "Enable XG Mobile", disabled: isLoading };
+  return { ...ENABLE, label: "Enable XG Mobile", disabled: isLoading };
 }
 
-export function statusLine(gpuStatus: GpuStatus): StatusLine {
+// Until the first status poll returns, `loaded` is false and the state is unknown.
+export function statusLine(gpuStatus: GpuStatus, loaded: boolean): StatusLine {
+  if (!loaded) return { text: "XG Mobile: Checking…", color: "#8b929a" };
   if (gpuStatus.active) return { text: "XG Mobile: Active", color: "#59bf40" };
   if (gpuStatus.connected) return { text: "XG Mobile: Connected", color: "#dcdedf" };
   return { text: "XG Mobile: Not connected", color: "#8b929a" };
