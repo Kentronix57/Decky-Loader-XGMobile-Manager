@@ -272,6 +272,40 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_line "user session ready after 0.12s (session 3)"
 }
 
+# On hardware a check of a hung manager can take seconds (each call can run into its 2 s
+# timeout), so the waits go by the clock, not by the number of polls.
+@test "hung manager whose every call takes 2 s: kill steps and the cap go by clock time, not polls" {
+  set_os steamos
+  export XGM_WAIT_POLL=0.25 XGM_HUNG_AFTER=5 XGM_WAIT_CAP=20
+  timeline manager "0 deactivating"
+  timeline sessions "0 2:manager:closing" "1 3:user:active"
+  stuck_unit xdg-document-portal.service
+  manager_call_cost 2
+  run_clean "1 2"
+  assert_success
+
+  local unit_kill manager_kill
+  unit_kill=$(line_first "systemctl --user kill -s KILL xdg-document-portal.service")
+  manager_kill=$(line_first "systemctl kill -s KILL user@64999.service")
+  [ "$unit_kill" -gt 0 ] && [ "$manager_kill" -gt "$unit_kill" ] || fail "expected the unit kill ($unit_kill), then the manager kill ($manager_kill)"
+  # First seen stopping at 2.00 s; 3 polls later the clock is at 8.75 s (6.75 s of it stopping),
+  # where counting polls would have needed 20 (5 s / 0.25 s).
+  assert_equal "$(count_before "sleep 0.25" "$unit_kill")" 3
+  # Step 1's two calls end at 12.75 s; the manager kill comes at 19.50 s, 3 polls later.
+  assert_equal "$(( $(count_before "sleep 0.25" "$manager_kill") - $(count_before "sleep 0.25" "$unit_kill") ))" 3
+  # The 20 s cap is clock time: 6 polls, not 80.
+  assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 6
+  awk -v c="$(cat "$SHIM_STATE/clock")" 'BEGIN { exit !(c >= 20 && c < 22.25) }' \
+    || fail "the wait gave up at clock $(cat "$SHIM_STATE/clock"), expected within one check after 20 s"
+
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "old user manager still stopping after 6.75s; ending its stuck units"
+  assert_line "killed stuck unit: xdg-document-portal.service"
+  assert_line "old user manager still stopping; killing it"
+  assert_line "user session not ready after 20s (user@64999.service is deactivating), continuing anyway"
+  assert_equal "$(grep -c "old user manager still stopping" "$LOG_DIR/desktop_eject_request.log")" 2
+}
+
 @test "old manager stops once its stuck unit is killed: the manager itself isn't killed" {
   set_os steamos
   export XGM_HUNG_AFTER=0.05 XGM_WAIT_CAP=1
@@ -351,4 +385,28 @@ EGPU_NAMES="MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAY
   assert_called "timeout -s KILL 2 $(as_user unset-environment KWIN_DRM_DEVICES)"
   refute_called "sudo"
   refute_called "runuser"
+}
+
+# _xgm_now: the fake clock file in tests, else the wall clock ($EPOCHREALTIME or date).
+clock_probe() {
+  printf '%s\n' '#!/bin/bash' ". '$XGM_REPO/bin/xgm-common.sh'" "$1" > "$BATS_TEST_TMPDIR/probe"
+  run env -i PATH="$SYSBIN" ${2:+XGM_FAKE_CLOCK="$2"} "$SYSBIN/bash" "$BATS_TEST_TMPDIR/probe"
+}
+
+@test "_xgm_now / _xgm_now_cs: fake clock file, else the wall clock" {
+  echo 12.345678 > "$BATS_TEST_TMPDIR/clock"
+  clock_probe 'echo "$(_xgm_now) $(_xgm_now_cs)"' "$BATS_TEST_TMPDIR/clock"
+  assert_success
+  assert_output "12.345678 1234"
+
+  echo 7 > "$BATS_TEST_TMPDIR/clock"
+  clock_probe '_xgm_now_cs' "$BATS_TEST_TMPDIR/clock"
+  assert_output "700"
+
+  # No fake clock: the real one, in seconds since the epoch, moving forward.
+  clock_probe 'a=$(_xgm_now_cs); b=$(_xgm_now_cs); echo "$a $b"'
+  assert_success
+  local a b
+  read -r a b <<< "$output"
+  [ "$a" -gt 170000000000 ] && [ "$b" -ge "$a" ] || fail "unexpected clock: $output"
 }

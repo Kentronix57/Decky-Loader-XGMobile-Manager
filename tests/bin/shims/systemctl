@@ -13,9 +13,15 @@
 # $SHIM_STATE/stuck_units until `--user kill -s KILL <unit>` ends them. `kill -s KILL
 # user@64999.service` ends the manager: from then on it follows timeline/manager.after_kill, or is
 # inactive (killing a stuck unit does the same with timeline/manager.after_unit_kill, if set).
+# While the manager is deactivating, every call to it (--user, or naming user@64999.service)
+# moves the fake clock forward by $SHIM_STATE/manager_call_cost seconds, if set.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 # shellcheck source=../helpers/timeline.bash
 . "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
+if [ -e "$SHIM_STATE/manager_call_cost" ] && { [[ " $* " == *" --user "* ]] || [[ " $* " == *" user@64999.service "* ]]; } \
+  && [ "$(tl_value manager active)" = "deactivating" ]; then
+  tl_clock_add "$(cat "$SHIM_STATE/manager_call_cost")"
+fi
 user=0 verb="" units=()
 for arg in "$@"; do
   case "$arg" in

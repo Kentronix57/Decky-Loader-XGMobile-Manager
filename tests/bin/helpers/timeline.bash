@@ -25,6 +25,14 @@ tl_value() {
 # tl_advance: one tick passes.
 tl_advance() { echo $(($(tl_tick) + 1)) > "$SHIM_STATE/ticks"; }
 
+# tl_clock_add <seconds>: moves the fake wall clock ($XGM_FAKE_CLOCK, read by _xgm_now in
+# bin/xgm-common.sh) forward. Ticks order the timelines; the clock is what the waits measure.
+tl_clock_add() {
+  [ -n "${XGM_FAKE_CLOCK:-}" ] && [ -f "$XGM_FAKE_CLOCK" ] || return 0
+  awk -v a="$(cat "$XGM_FAKE_CLOCK")" -v b="$1" 'BEGIN { printf "%.6f\n", a + b }' > "$XGM_FAKE_CLOCK.new"
+  mv "$XGM_FAKE_CLOCK.new" "$XGM_FAKE_CLOCK"
+}
+
 # tl_apply_fs <root>: makes the runtime dir and the bus socket match their timelines.
 tl_apply_fs() {
   local dir="$1/run/user/64999"

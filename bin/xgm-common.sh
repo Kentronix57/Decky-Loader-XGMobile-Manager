@@ -171,6 +171,31 @@ _xgm_clean_manager() {
 _xgm_cs() { awk -v s="$1" 'BEGIN { c = int(s * 100 + 0.5); print (c < 1 ? 1 : c) }'; }
 _xgm_secs() { printf '%d.%02d' $(($1 / 100)) $(($1 % 100)); }
 
+# _xgm_now: the wall clock in seconds with a fraction ($EPOCHREALTIME, else date). The waits use
+# it, not poll counts: a single check can take seconds when the user manager is hung. Tests point
+# XGM_FAKE_CLOCK at a file that the sleep shim advances.
+_xgm_now() {
+  if [ -n "${XGM_FAKE_CLOCK:-}" ] && [ -f "$XGM_FAKE_CLOCK" ]; then
+    cat "$XGM_FAKE_CLOCK"
+  elif [ -n "${EPOCHREALTIME:-}" ]; then
+    echo "${EPOCHREALTIME/,/.}"
+  else
+    date +%s.%N
+  fi
+}
+
+# _xgm_now_cs: _xgm_now in whole centiseconds.
+_xgm_now_cs() {
+  local t frac
+  t=$(_xgm_now)
+  frac=00
+  if [[ "$t" == *.* ]]; then
+    frac="${t#*.}00"
+    t="${t%%.*}"
+  fi
+  echo $((10#${t:-0} * 100 + 10#${frac:0:2}))
+}
+
 # _xgm_new_user_session <user> <known ids>: prints the ID of a login session of that user with
 # Class=user and State active or online that isn't in <known ids> (space-separated; empty: any
 # counts). The user manager's own session (Class=manager), greeter and lock-screen sessions, and
@@ -213,31 +238,33 @@ _xgm_end_stuck_units() {
 #   3. the user bus socket exists
 #   4. graphical-session.target active in the user manager
 #   5. no jobs queued in the user manager
-# Checks every XGM_WAIT_POLL s (0.25) for up to XGM_WAIT_CAP s (60), counted in poll intervals.
+# Checks every XGM_WAIT_POLL s (0.25) for up to XGM_WAIT_CAP s (60) of wall-clock time (_xgm_now).
 # A missing runtime dir or a manager that doesn't answer only means "not yet": the eject stopped
 # the display manager, and logind removes the old user manager seconds later. If the old manager
 # is stuck stopping for XGM_HUNG_AFTER s (5), its stuck units are killed; if it's still stopping
 # XGM_HUNG_AFTER s later, the manager itself. Logs how long it took, or what was still missing.
 # Always returns 0: the caller cleans anyway.
 xgm_wait_for_user_session() {
-  local user="$1" known="${2:-}" uid poll cap poll_cs cap_cs hung_cs elapsed=0
+  local user="$1" known="${2:-}" uid poll cap cap_cs hung_cs start now
   local deact_since=-1 step1_at=-1 step2=0 state session target jobs missing
   uid=$(id -u "$user" 2>/dev/null)
   [ -n "$uid" ] || return 0
   poll="${XGM_WAIT_POLL:-0.25}"
   cap="${XGM_WAIT_CAP:-60}"
-  poll_cs=$(_xgm_cs "$poll")
   cap_cs=$(_xgm_cs "$cap")
   hung_cs=$(_xgm_cs "${XGM_HUNG_AFTER:-5}")
+  start=$(_xgm_now_cs)
   while :; do
     state=$(systemctl show -p ActiveState --value "user@$uid.service" 2>/dev/null)
+    now=$(_xgm_now_cs)
     if [ "$state" = "deactivating" ]; then
-      [ "$deact_since" -ge 0 ] || deact_since=$elapsed
-      if [ "$step1_at" -lt 0 ] && [ $((elapsed - deact_since)) -ge "$hung_cs" ]; then
-        echo "old user manager still stopping after $(_xgm_secs $((elapsed - deact_since)))s; ending its stuck units"
+      # Measured from the first time it was seen stopping, and from the end of step 1.
+      [ "$deact_since" -ge 0 ] || deact_since=$now
+      if [ "$step1_at" -lt 0 ] && [ $((now - deact_since)) -ge "$hung_cs" ]; then
+        echo "old user manager still stopping after $(_xgm_secs $((now - deact_since)))s; ending its stuck units"
         _xgm_end_stuck_units "$user" "$uid"
-        step1_at=$elapsed
-      elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((elapsed - step1_at)) -ge "$hung_cs" ]; then
+        step1_at=$(_xgm_now_cs)
+      elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((now - step1_at)) -ge "$hung_cs" ]; then
         echo "old user manager still stopping; killing it"
         systemctl kill -s KILL "user@$uid.service"
         step2=1
@@ -257,15 +284,14 @@ xgm_wait_for_user_session() {
     elif ! jobs=$(_xgm_user_systemctl "$user" "$uid" list-jobs --no-legend 2>/dev/null) || [ -n "$jobs" ]; then
       missing="the user manager has jobs queued"
     else
-      echo "user session ready after $(_xgm_secs "$elapsed")s (session $session)"
+      echo "user session ready after $(_xgm_secs $(($(_xgm_now_cs) - start)))s (session $session)"
       return 0
     fi
-    if [ "$elapsed" -ge "$cap_cs" ]; then
+    if [ $(($(_xgm_now_cs) - start)) -ge "$cap_cs" ]; then
       echo "user session not ready after ${cap}s ($missing), continuing anyway"
       return 0
     fi
     sleep "$poll"
-    elapsed=$((elapsed + poll_cs))
   done
 }
 

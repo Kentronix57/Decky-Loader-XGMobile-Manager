@@ -82,6 +82,8 @@ make_root() {
   # (shims/id) is 64999, and it has a runtime dir with a user bus, as when a session is running.
   touch "$ROOT/run/user/64999/bus"
   : > "$SHIM_LOG"
+  # The fake wall clock the waits read (XGM_FAKE_CLOCK); the sleep shim moves it forward.
+  echo 0 > "$SHIM_STATE/clock"
 
   local tool path
   for tool in "${SANDBOX_TOOLS[@]}"; do
@@ -319,6 +321,10 @@ manager_after_kill() {
   printf '%s\n' "$@" > "$file"
 }
 
+# manager_call_cost <seconds>: every systemctl call to user@64999 takes that long (fake clock)
+# while it's deactivating, as a hung manager's calls run into their timeout.
+manager_call_cost() { echo "$1" > "$SHIM_STATE/manager_call_cost"; }
+
 # stuck_unit <unit>: a unit the stopping user manager can't stop, until it's killed.
 stuck_unit() { echo "$1" >> "$SHIM_STATE/stuck_units"; }
 
@@ -346,8 +352,8 @@ enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergf
 
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
-# LANG=C unless $SANDBOX_LANG is set, and XGM_WAIT_POLL, XGM_WAIT_CAP, XGM_HUNG_AFTER and
-# XGM_CARD_WAIT if set. Sets bats' $status/$output, and
+# LANG=C unless $SANDBOX_LANG is set, the fake clock (XGM_FAKE_CLOCK), and XGM_WAIT_POLL,
+# XGM_WAIT_CAP, XGM_HUNG_AFTER and XGM_CARD_WAIT if set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR. LOG_DIR is emptied first,
 # unless KEEP_LOG_DIR=1 (tests that seed it, e.g. migrate-logs).
 run_script() {
@@ -368,6 +374,7 @@ run_script() {
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \
     SHIM_STATE="$SHIM_STATE" \
+    XGM_FAKE_CLOCK="$SHIM_STATE/clock" \
     SHIM_SANDBOX="$BATS_TEST_TMPDIR" \
     SHIM_REAL_CHMOD="$SYSBIN/chmod" \
     FAKE_SUPERGFX_RC="${FAKE_SUPERGFX_RC:-0}" \
