@@ -693,3 +693,27 @@ eject_with_numbering() {
   [[ "$LOG" == *"WARNING: Hardware did not seem to drop from the PCIe bus."* ]]
   [[ "$LOG" != *"write error"* && "$LOG" != *"Permission denied"* ]]
 }
+
+# Step 0, exp 2: with the display manager stopped the user manager can already be gone, and the
+# user daemon-reload only logged "Failed to connect to user scope bus via local transport".
+@test "no user bus: no user daemon-reload, the system one still runs" {
+  set_os steamos
+  egpu_present amd
+  rm -f "$ROOT/run/user/64999/bus"
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert_called "systemctl daemon-reload"
+  refute_called "systemctl --user daemon-reload"
+  refute_called "sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user daemon-reload"
+  [[ "$LOG" == *"user manager not running; no reload needed"* ]]
+}
+
+@test "user bus present: the user daemon-reload still runs" {
+  set_os cachyos
+  no_steamos_readonly
+  egpu_present amd
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert_called "sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user daemon-reload"
+  [[ "$LOG" != *"no reload needed"* ]]
+}
