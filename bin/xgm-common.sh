@@ -113,13 +113,27 @@ xgm_egpu_env_names() {
 
 # _xgm_user_systemctl <user> <uid> <systemctl args...>: runs `systemctl --user` against that user's
 # manager as the user. setpriv, not sudo/runuser: their PAM stacks can open a logind session, which
-# would keep a stopping user manager alive. Killed after 2 s, so a hung manager can't block the caller.
+# would keep a stopping user manager alive. Without setpriv, falls back to the sudo form used
+# before (_xgm_check_setpriv logs that). Killed after 2 s, so a hung manager can't block the caller.
 _xgm_user_systemctl() {
   local user="$1" uid="$2" gid
   shift 2
-  gid=$(id -g "$user" 2>/dev/null)
-  timeout -s KILL 2 setpriv --reuid="$uid" --regid="${gid:-$uid}" --init-groups \
-    env XDG_RUNTIME_DIR="$ROOT/run/user/$uid" systemctl --user "$@"
+  if command -v setpriv >/dev/null 2>&1; then
+    gid=$(id -g "$user" 2>/dev/null)
+    timeout -s KILL 2 setpriv --reuid="$uid" --regid="${gid:-$uid}" --init-groups \
+      env XDG_RUNTIME_DIR="$ROOT/run/user/$uid" systemctl --user "$@"
+  else
+    timeout -s KILL 2 sudo -u "$user" XDG_RUNTIME_DIR=/run/user/$uid systemctl --user "$@"
+  fi
+}
+
+# _xgm_check_setpriv: logs, once per run, that setpriv is missing (_xgm_user_systemctl then uses
+# sudo). Call it outside $(...), where the log line would be captured instead.
+_xgm_check_setpriv() {
+  command -v setpriv >/dev/null 2>&1 && return 0
+  [ -n "${_XGM_SETPRIV_LOGGED:-}" ] && return 0
+  echo "setpriv not found; using sudo -u"
+  _XGM_SETPRIV_LOGGED=1
 }
 
 # _xgm_manager <system|user> <user> <uid> <systemctl args...>: runs systemctl against the system
@@ -276,6 +290,7 @@ xgm_wait_for_user_session() {
   local deact_since=-1 step1_at=-1 step2=0 state id hung_id="" session target jobs missing
   uid=$(id -u "$user" 2>/dev/null)
   [ -n "$uid" ] || return 0
+  _xgm_check_setpriv
   poll="${XGM_WAIT_POLL:-0.25}"
   cap="${XGM_WAIT_CAP:-60}"
   cap_cs=$(_xgm_cs "$cap")
@@ -350,6 +365,7 @@ xgm_clean_session_env() {
   elif [ "$(systemctl show -p ActiveState --value "user@$uid.service" 2>/dev/null)" = "deactivating" ]; then
     echo "eGPU variables left in user manager: not checked (the user manager for $user is stopping; its environment won't carry over)"
   else
+    _xgm_check_setpriv
     _xgm_clean_manager user "$user" "$uid"
   fi
 }

@@ -492,3 +492,18 @@ clock_probe() {
   # Seen stopping at 1000, back to 999.03 at tick 3: step 1 comes 5 polls after that, at tick 8.
   assert_equal "$(count_before "sleep 0.01" "$(line_first "systemctl --user kill -s KILL -- xdg-document-portal.service")")" 8
 }
+
+@test "setpriv missing: logged once, the user manager calls fall back to sudo -u under the timeout" {
+  set_os steamos
+  no_setpriv
+  manager_env user "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+  run_clean
+  assert_success
+  assert_called "timeout -s KILL 2 sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user is-active graphical-session.target"
+  assert_called "timeout -s KILL 2 sudo -u xgmtest XDG_RUNTIME_DIR=/run/user/64999 systemctl --user show-environment"
+  refute_called "setpriv"
+  assert_equal "$(manager_env_of user)" ""
+  assert_equal "$(grep -c "setpriv not found; using sudo -u" "$LOG_DIR/desktop_eject_request.log")" 1
+  [[ "$LOG" == *"user session ready after 0.00s (session 2)"* ]]
+  [[ "$LOG" == *"eGPU variables left in user manager: none"* ]]
+}

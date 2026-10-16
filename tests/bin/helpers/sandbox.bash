@@ -112,6 +112,8 @@ make_root() {
 
   # steamos-readonly is on PATH by default; no_steamos_readonly removes it (CachyOS, Bazzite).
   ln -s "$XGM_OPTIONAL_SHIMS/steamos-readonly" "$OPTBIN/steamos-readonly"
+  # setpriv (util-linux) is on PATH by default; no_setpriv removes it.
+  ln -s "$XGM_OPTIONAL_SHIMS/setpriv" "$OPTBIN/setpriv"
 
   set_os steamos
   set_product "RC71L"
@@ -349,6 +351,9 @@ sync_service_installed() {
 }
 
 supergfxd_active() { touch "$SHIM_STATE/active/supergfxd.service"; }
+
+# Takes setpriv off PATH: the user manager calls fall back to sudo -u.
+no_setpriv() { rm -f "$OPTBIN/setpriv"; }
 
 # Takes steamos-readonly off PATH, as on CachyOS and Bazzite.
 no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
