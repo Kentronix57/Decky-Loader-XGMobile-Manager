@@ -43,7 +43,7 @@ const showPowerInfo = () => {
             <div key={paragraph} style={infoParagraph}>{paragraph}</div>
           ))}
           <div style={{ opacity: 0.85 }}>
-            Measured on the RTX 4090; the RTX 3080 showed 120 W / 150 W.
+            Measured on the RTX 4090. The RTX 3080 showed the same 120 W / 150 W; Quiet is expected to be 60 W there too.
           </div>
         </>
       }
@@ -492,7 +492,7 @@ export const QuickAccessContent = () => {
             />
           )}
           <div style={{ marginTop: "6px", fontSize: "12px", opacity: 0.7 }}>
-            XG Mobile limit: Quiet 60 W · Balanced 120 W · Performance 150 W (RTX 4090)
+            XG Mobile limit: Quiet 60 W · Balanced 120 W · Performance 150 W (RTX 4090 and RTX 3080)
           </div>
         </PanelSectionRow>
         <PanelSectionRow>
