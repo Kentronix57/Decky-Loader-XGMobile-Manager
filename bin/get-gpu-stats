@@ -1,15 +1,39 @@
 #!/bin/bash
-# Returns JSON formatted stats for the frontend
+# Returns JSON formatted stats for the frontend.
+# The string keys (temp, util, vram, power) are kept for older frontends; the numeric keys
+# (temp_c, util_pct, vram_mb, vram_total_mb, power_w, power_limit_w) are numbers or null.
 ROOT="${XGM_ROOT:-}"
 
+# trim <value>: strips leading and trailing whitespace
+trim() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    printf '%s' "$v"
+}
+
+# num <value>: the value as a JSON number, or null when it isn't one ("", "[N/A]", "[Not Supported]")
+num() {
+    if [[ "$1" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+        printf '%s' "$1"
+    else
+        printf 'null'
+    fi
+}
+
 if lsmod | grep -q "nvidia"; then
-    # Query NVIDIA via nvidia-smi (if installed) or sysfs
-    TEMP=$($ROOT/usr/bin/nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null || echo "0")
-    UTIL=$($ROOT/usr/bin/nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo "0")
-    VRAM=$($ROOT/usr/bin/nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits 2>/dev/null || echo "0")
-    POWER=$($ROOT/usr/bin/nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits 2>/dev/null || echo "0")
-    
-    echo "{\"vendor\": \"nvidia\", \"temp\": \"$TEMP°C\", \"util\": \"$UTIL%\", \"vram\": \"${VRAM}MB\", \"power\": \"${POWER}W\"}"
+    # Query NVIDIA via nvidia-smi: one call for every field (it's polled every few seconds)
+    # A failed nvidia-smi prints its error on stdout, so its output is only used on success.
+    OUT=$($ROOT/usr/bin/nvidia-smi --query-gpu=temperature.gpu,utilization.gpu,memory.used,memory.total,power.draw,enforced.power.limit --format=csv,noheader,nounits 2>/dev/null) || OUT=""
+    # First GPU only; quotes and backslashes can't break the JSON
+    LINE=$(printf '%s\n' "$OUT" | head -n 1 | tr -d '"\\')
+    IFS=, read -r TEMP UTIL VRAM VRAM_TOTAL POWER POWER_LIMIT <<< "$LINE"
+    TEMP=$(trim "$TEMP"); UTIL=$(trim "$UTIL"); VRAM=$(trim "$VRAM")
+    VRAM_TOTAL=$(trim "$VRAM_TOTAL"); POWER=$(trim "$POWER"); POWER_LIMIT=$(trim "$POWER_LIMIT")
+
+    echo "{\"vendor\": \"nvidia\", \"temp\": \"${TEMP:-0}°C\", \"util\": \"${UTIL:-0}%\", \"vram\": \"${VRAM:-0}MB\", \"power\": \"${POWER:-0}W\"," \
+        "\"temp_c\": $(num "$TEMP"), \"util_pct\": $(num "$UTIL"), \"vram_mb\": $(num "$VRAM"), \"vram_total_mb\": $(num "$VRAM_TOTAL")," \
+        "\"power_w\": $(num "$POWER"), \"power_limit_w\": $(num "$POWER_LIMIT")}"
 
 elif lsmod | grep -q "amdgpu"; then
     # Query AMD via sysfs (Standard Linux paths)
@@ -19,17 +43,22 @@ elif lsmod | grep -q "amdgpu"; then
     # 1. Temperature (Millidegrees Celsius -> Celsius)
     # Using 'head -n 1' prevents bash math errors if multiple hwmon files exist
     TEMP_INPUT=$(cat $ROOT/sys/class/drm/$CARD/device/hwmon/hwmon*/temp1_input 2>/dev/null | head -n 1)
+    TEMP_C=null; [ -n "$TEMP_INPUT" ] && TEMP_C=$((TEMP_INPUT / 1000))
     TEMP_INPUT=${TEMP_INPUT:-0} # Fallback to 0 if empty
     TEMP=$((TEMP_INPUT / 1000))
 
     # 2. GPU Utilization (0-100 Direct Percentage)
     UTIL=$(cat $ROOT/sys/class/drm/$CARD/device/gpu_busy_percent 2>/dev/null | head -n 1)
+    UTIL_PCT=$(num "$UTIL")
     UTIL=${UTIL:-0}
 
     # 3. VRAM Usage (Bytes -> Megabytes)
     VRAM_BYTES=$(cat $ROOT/sys/class/drm/$CARD/device/mem_info_vram_used 2>/dev/null | head -n 1)
+    VRAM_MB=null; [ -n "$VRAM_BYTES" ] && VRAM_MB=$((VRAM_BYTES / 1048576))
     VRAM_BYTES=${VRAM_BYTES:-0}
     VRAM=$((VRAM_BYTES / 1048576))
+    VRAM_TOTAL_BYTES=$(cat $ROOT/sys/class/drm/$CARD/device/mem_info_vram_total 2>/dev/null | head -n 1)
+    VRAM_TOTAL_MB=null; [ -n "$VRAM_TOTAL_BYTES" ] && VRAM_TOTAL_MB=$((VRAM_TOTAL_BYTES / 1048576))
 
     # 4. Power Draw (Microwatts -> Watts)
     # We check average first, and fallback to input if average isn't exposed by the firmware
@@ -37,10 +66,15 @@ elif lsmod | grep -q "amdgpu"; then
     if [ -z "$POWER_UW" ]; then
         POWER_UW=$(cat $ROOT/sys/class/drm/$CARD/device/hwmon/hwmon*/power1_input 2>/dev/null | head -n 1)
     fi
+    POWER_W=null; [ -n "$POWER_UW" ] && POWER_W=$((POWER_UW / 1000000))
     POWER_UW=${POWER_UW:-0}
     POWER=$((POWER_UW / 1000000))
-    
-    echo "{\"vendor\": \"amd\", \"temp\": \"$TEMP°C\", \"util\": \"$UTIL%\", \"vram\": \"${VRAM}MB\", \"power\": \"${POWER}W\"}"
+    POWER_CAP_UW=$(cat $ROOT/sys/class/drm/$CARD/device/hwmon/hwmon*/power1_cap 2>/dev/null | head -n 1)
+    POWER_LIMIT_W=null; [ -n "$POWER_CAP_UW" ] && POWER_LIMIT_W=$((POWER_CAP_UW / 1000000))
+
+    echo "{\"vendor\": \"amd\", \"temp\": \"$TEMP°C\", \"util\": \"$UTIL%\", \"vram\": \"${VRAM}MB\", \"power\": \"${POWER}W\"," \
+        "\"temp_c\": $TEMP_C, \"util_pct\": $UTIL_PCT, \"vram_mb\": $VRAM_MB, \"vram_total_mb\": $VRAM_TOTAL_MB," \
+        "\"power_w\": $POWER_W, \"power_limit_w\": $POWER_LIMIT_W}"
 else
     echo "{\"vendor\": \"none\"}"
 fi
