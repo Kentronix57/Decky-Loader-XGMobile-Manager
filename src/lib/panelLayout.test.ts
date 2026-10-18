@@ -138,6 +138,14 @@ describe("formatPower / powerColor", () => {
     expect(powerColor(null, null)).toBeUndefined();
   });
 
+  it("treats a limit of 0 or less as unknown", () => {
+    expect(formatPower(57.5, 0)).toBe("57.5 W");
+    expect(formatPower(57.5, -1)).toBe("57.5 W");
+    expect(powerColor(57.5, 0)).toBeUndefined();
+    expect(powerColor(0, 0)).toBeUndefined();
+    expect(powerColor(5, -1)).toBeUndefined();
+  });
+
   it("is neutral below 95 % of the limit", () => {
     expect(powerColor(57.5, 150)).toBeUndefined();
     expect(powerColor(142.4, 150)).toBeUndefined();
@@ -163,6 +171,13 @@ describe("formatVram / vramColor", () => {
     expect(vramColor(16000, null)).toBeUndefined();
   });
 
+  it("treats a total of 0 or less as unknown", () => {
+    expect(formatVram(1049, 0)).toBe("1.0 GB");
+    expect(formatVram(1049, -1)).toBe("1.0 GB");
+    expect(vramColor(1049, 0)).toBeUndefined();
+    expect(vramColor(1049, -1)).toBeUndefined();
+  });
+
   it("is neutral up to 85 %, amber above", () => {
     expect(vramColor(1049, 16384)).toBeUndefined();
     expect(vramColor(850, 1000)).toBeUndefined();
@@ -184,6 +199,18 @@ describe("telemetryCells", () => {
       { label: "Temperature", text: "54 °C", color: tempColor(54) },
       { label: "Power Draw", text: "57.5 / 150 W", color: undefined },
       { label: "VRAM Usage", text: "1.0 / 16.0 GB", color: undefined },
+      { label: "GPU Load", text: "100 %", color: undefined },
+    ]);
+  });
+
+  it("colours the cells that are past their thresholds", () => {
+    const cells = telemetryCells({
+      temp_c: 90, util_pct: 100, vram_mb: 15800, vram_total_mb: 16384, power_w: 148, power_limit_w: 150,
+    });
+    expect(cells).toEqual([
+      { label: "Temperature", text: "90 °C", color: RED },
+      { label: "Power Draw", text: "148.0 / 150 W", color: AMBER },
+      { label: "VRAM Usage", text: "15.4 / 16.0 GB", color: RED },
       { label: "GPU Load", text: "100 %", color: undefined },
     ]);
   });

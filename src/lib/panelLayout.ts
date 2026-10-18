@@ -115,26 +115,35 @@ export function formatUtil(p: number | null): string {
   return p === null ? "--" : `${Math.round(p)} %`;
 }
 
-export function formatPower(w: number | null, limit: number | null): string {
+// A limit or total of 0 or less isn't a real one: treat it as unknown.
+function known(v: number | null): number | null {
+  return v !== null && v > 0 ? v : null;
+}
+
+export function formatPower(w: number | null, rawLimit: number | null): string {
+  const limit = known(rawLimit);
   if (w === null) return "--";
   return limit === null ? `${w.toFixed(1)} W` : `${w.toFixed(1)} / ${limit.toFixed(0)} W`;
 }
 
 // Amber when pinned at the limit (a higher power profile would help).
-export function powerColor(w: number | null, limit: number | null): Color {
+export function powerColor(w: number | null, rawLimit: number | null): Color {
+  const limit = known(rawLimit);
   if (w === null || limit === null) return undefined;
   return w >= 0.95 * limit ? AMBER : undefined;
 }
 
-export function formatVram(mb: number | null, totalMb: number | null): string {
+export function formatVram(mb: number | null, rawTotalMb: number | null): string {
+  const totalMb = known(rawTotalMb);
   if (mb === null) return "--";
   const gb = (v: number) => (v / 1024).toFixed(1);
   return totalMb === null ? `${gb(mb)} GB` : `${gb(mb)} / ${gb(totalMb)} GB`;
 }
 
 // Amber above 85 % of VRAM, red above 95 %.
-export function vramColor(mb: number | null, totalMb: number | null): Color {
-  if (mb === null || totalMb === null || totalMb <= 0) return undefined;
+export function vramColor(mb: number | null, rawTotalMb: number | null): Color {
+  const totalMb = known(rawTotalMb);
+  if (mb === null || totalMb === null) return undefined;
   const used = mb / totalMb;
   if (used > 0.95) return RED;
   if (used > 0.85) return AMBER;
