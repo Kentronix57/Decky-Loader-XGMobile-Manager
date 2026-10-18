@@ -14,7 +14,7 @@ import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
 import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
-import { mainButton, maintenanceRows, statusLine } from "../lib/panelLayout";
+import { Telemetry, mainButton, maintenanceRows, statusLine, telemetryCells } from "../lib/panelLayout";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -30,7 +30,7 @@ const statsStyle: React.CSSProperties = {
 const infoParagraph: React.CSSProperties = { marginBottom: "10px" };
 
 // Kept as one string (a Tier 0 test pins it verbatim); shown as three paragraphs.
-const POWER_INFO = `Sets the Ally's ASUS profile, which also sets the XG Mobile's power limit (on the RTX 4090: Balanced 120 W, Performance 150 W). Steam's performance setting changes the same profile. Use Steam's TDP slider to limit the Ally CPU. For full XG Mobile power with a cool CPU, pick Performance and cap the CPU with Steam's TDP slider or a TDP plugin. If a TDP plugin manages the ASUS profile (e.g. SimpleDeckyTDP's "Enable Asus Platform Profile Management"), turn that off so this setting and the CPU limit stay separate.`;
+const POWER_INFO = `Sets the Ally's ASUS profile, which also sets the XG Mobile's power limit (on the RTX 4090: Quiet 60 W, Balanced 120 W, Performance 150 W). Steam's performance setting changes the same profile. Use Steam's TDP slider to limit the Ally CPU. For full XG Mobile power with a cool CPU, pick Performance and cap the CPU with Steam's TDP slider or a TDP plugin. If a TDP plugin manages the ASUS profile (e.g. SimpleDeckyTDP's "Enable Asus Platform Profile Management"), turn that off so this setting and the CPU limit stay separate.`;
 
 // The full text behind the panel's ⓘ buttons
 const showPowerInfo = () => {
@@ -87,7 +87,7 @@ export const QuickAccessContent = () => {
   
   // Dynamic State from Backend
   const [gpuStatus, setGpuStatus] = useState({ connected: false, active: false, vendor: "none" });
-  const [telemetry, setTelemetry] = useState({ temp: "--", power: "--", vram: "--", util: "--" });
+  const [telemetry, setTelemetry] = useState<Telemetry>({ temp: "--", power: "--", vram: "--", util: "--" });
   const [selectedVendor, setSelectedVendor] = useState("nvidia");
   const [selectedDesktopMode, setSelectedDesktopMode] = useState("0");
   const [selectedDesktopDefault, setSelectedDesktopDefault] = useState("0");
@@ -368,7 +368,7 @@ export const QuickAccessContent = () => {
       <PanelSection>
         {/* STATUS LINE */}
         <PanelSectionRow>
-          <div style={{ fontSize: "14px", color: status.color, padding: "4px 0" }}>
+          <div style={{ fontSize: "14px", color: status.color, opacity: status.dimmed ? 0.6 : 1, padding: "4px 0" }}>
             ● {status.text}
           </div>
         </PanelSectionRow>
@@ -383,29 +383,17 @@ export const QuickAccessContent = () => {
         {/* Telemetry Dashboard (Only show if active) */}
         {(gpuStatus.active) && (
           <div style={statsStyle}>
-            <div>
-              <small>Temperature</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.temp}</div>
-            </div>
-            <div>
-              <small>Power Draw</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.power}</div>
-            </div>
-            <div>
-              <small>VRAM Usage</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.vram}</div>
-            </div>
-            <div>
-              <small>GPU Load</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.util}</div>
-            </div>
+            {telemetryCells(telemetry).map((cell) => (
+              <div key={cell.label}>
+                <small>{cell.label}</small>
+                <div style={{ fontSize: "1.2em", fontWeight: "bold", color: cell.color }}>{cell.text}</div>
+              </div>
+            ))}
           </div>
         )}
-      </PanelSection>
 
-      {/* OS WARNING: WRONG BAZZITE IMAGE */}
-      {(osType === "bazzite") && (selectedVendor === "nvidia") && (
-        <PanelSection title="System Warning">
+        {/* OS WARNING: WRONG BAZZITE IMAGE */}
+        {(osType === "bazzite") && (selectedVendor === "nvidia") && (
           <PanelSectionRow>
             <div style={{ color: "#ff5555", fontSize: "14px", marginBottom: "10px" }}>
               <strong>Wrong OS Image Detected!</strong><br/>
@@ -413,11 +401,9 @@ export const QuickAccessContent = () => {
               The NVIDIA XG Mobile will not function correctly on this installation. Please install the correct version or select AMD.
             </div>
           </PanelSectionRow>
-        </PanelSection>
-      )}
+        )}
 
-      {/* MAIN BUTTON: Enable or Eject */}
-      <PanelSection>
+        {/* MAIN BUTTON: Enable or Eject */}
         {isLoading ? (
           <PanelSectionRow>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -539,10 +525,8 @@ export const QuickAccessContent = () => {
             ⓘ About Desktop Mode
           </ButtonItem>
         </PanelSectionRow>
-      </PanelSection>
 
-      {/* SETUP & MAINTENANCE (collapsed by default) */}
-      <PanelSection>
+        {/* SETUP & MAINTENANCE (collapsed by default; same section, so no untitled section break) */}
         <PanelSectionRow>
           <ButtonItem layout="below" onClick={() => setShowMaintenance(!showMaintenance)}>
             {showMaintenance ? "▾" : "▸"} Setup & Maintenance
