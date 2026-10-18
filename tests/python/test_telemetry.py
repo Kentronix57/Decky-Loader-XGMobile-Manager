@@ -1,5 +1,6 @@
 """get_telemetry: runs bin/get-gpu-stats off the event loop and always returns the numeric keys."""
 import json
+import time
 
 import pytest
 
@@ -23,10 +24,12 @@ def test_get_telemetry_runs_through_to_thread(xgm, monkeypatch):
   stats_script(xgm, 'echo \'{"vendor": "none"}\'')
   in_thread = []
   direct = []
+  calls = []
   real_run = xgm.mod.subprocess.run
 
   def run(argv, **kwargs):
     (in_thread if in_thread and in_thread[-1] == "open" else direct).append(list(argv))
+    calls.append(kwargs)
     return real_run(argv, **kwargs)
 
   async def to_thread(func, *args, **kwargs):
@@ -40,7 +43,10 @@ def test_get_telemetry_runs_through_to_thread(xgm, monkeypatch):
   monkeypatch.setattr(xgm.mod.asyncio, "to_thread", to_thread)
   assert xgm.run(xgm.plugin.get_telemetry()) == {"vendor": "none"}
   assert direct == []
-  assert in_thread == ["open", [str(xgm.bin / "get-gpu-stats")], "closed"]
+  # The data dir is the first argument, as for the other scripts: it holds the eGPU's PCI address.
+  assert in_thread == ["open", [str(xgm.bin / "get-gpu-stats"), xgm.mod.DATA_DIR], "closed"]
+  assert calls[0]["timeout"] == xgm.mod.TELEMETRY_TIMEOUT == 5
+  assert calls[0]["encoding"] == "utf-8"
 
 
 @pytest.mark.parametrize("body,text", [
@@ -51,4 +57,15 @@ def test_get_telemetry_fallbacks_include_the_numeric_keys(xgm, body, text):
   stats_script(xgm, body)
   result = xgm.run(xgm.plugin.get_telemetry())
   assert result == {"vendor": "none", "temp": text, "util": text, "vram": text, "power": text,
+                    **{key: None for key in NUMERIC_KEYS}}
+
+
+def test_get_telemetry_times_out_to_the_fallback(xgm, monkeypatch):
+  # A hung nvidia-smi must not stall the 3 s poll.
+  stats_script(xgm, "sleep 10")
+  monkeypatch.setattr(xgm.mod, "TELEMETRY_TIMEOUT", 0.2)
+  start = time.monotonic()
+  result = xgm.run(xgm.plugin.get_telemetry())
+  assert time.monotonic() - start < 5
+  assert result == {"vendor": "none", "temp": "--", "util": "--", "vram": "--", "power": "--",
                     **{key: None for key in NUMERIC_KEYS}}

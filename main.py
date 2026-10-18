@@ -51,6 +51,7 @@ PENDING_RESULT_SCRIPTS = ("egpu-enable", "egpu-eject")
 # get-gpu-stats' numeric keys, all unknown (the telemetry fallbacks)
 TELEMETRY_UNKNOWN = {"temp_c": None, "util_pct": None, "vram_mb": None, "vram_total_mb": None,
                      "power_w": None, "power_limit_w": None}
+TELEMETRY_TIMEOUT = 5  # seconds; polled every 3 s, so a hung nvidia-smi must not pile up
 
 os.makedirs(os.path.join(DATA_DIR, "configs"), exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -1144,10 +1145,12 @@ class Plugin:
     try:
       result = await asyncio.to_thread(
           subprocess.run,
-          [script_path],
+          [script_path, DATA_DIR],
           capture_output=True,
           text=True,
-          env=clean_env
+          encoding="utf-8",
+          env=clean_env,
+          timeout=TELEMETRY_TIMEOUT
       )
       
       if result.returncode == 0:
