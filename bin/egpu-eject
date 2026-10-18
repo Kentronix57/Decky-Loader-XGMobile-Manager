@@ -223,6 +223,9 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   fi
   # Variables in /etc/environment and both systemd managers, Plasma env files, nvidia-egpu.conf.
   xgm_sanitize_environment "$PRIMARY_USER"
+  # A user manager that started with the eGPU variables keeps them; stop it so the next login
+  # starts a clean one.
+  xgm_restart_dirty_user_manager "$PRIMARY_USER"
 elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Applying Bazzite overlay environment fixes..."

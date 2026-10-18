@@ -291,6 +291,14 @@ manager_env() {
   printf '%s\n' "$@" >> "$SHIM_STATE/env/$scope"
 }
 
+# user_initial_env NAME=value...: variables the user manager started with (from /etc/environment
+# at boot). show-environment lists them, but unset-environment can't remove them; only stopping
+# or killing user@64999.service does (shims/systemctl).
+user_initial_env() {
+  mkdir -p "$SHIM_STATE/env"
+  printf '%s\n' "$@" >> "$SHIM_STATE/env/user_initial"
+}
+
 # manager_env_of <system|user>: that manager's environment now, one NAME=value per line.
 manager_env_of() { cat "$SHIM_STATE/env/$1" 2>/dev/null || true; }
 
@@ -314,9 +322,10 @@ timeline() {
 }
 
 # manager_after <event> "<ticks later> <state>[:<id>]"...: what user@64999.service does after an
-# event (shims/systemctl): kill (`systemctl kill -s KILL user@64999.service`), unit-kill (a stuck
+# event (shims/systemctl): kill (`systemctl kill -s KILL user@64999.service`), stop (`systemctl
+# stop user@64999.service`), unit-kill (a stuck
 # unit killed), list-units (its deactivating units listed) or show:<n> (the n-th `show` of it).
-# Without it, a killed manager is inactive and the other events change nothing.
+# Without it, a killed or stopped manager is inactive and the other events change nothing.
 manager_after() {
   local event="${1//-/_}"
   event="${event//:/_}"
@@ -364,7 +373,7 @@ enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergf
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
 # LANG=C unless $SANDBOX_LANG is set, the fake clock (XGM_FAKE_CLOCK), and XGM_WAIT_POLL,
-# XGM_WAIT_CAP, XGM_HUNG_AFTER and XGM_CARD_WAIT if set. Sets bats' $status/$output, and
+# XGM_WAIT_CAP, XGM_HUNG_AFTER, XGM_RESTART_CAP and XGM_CARD_WAIT if set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR. LOG_DIR is emptied first,
 # unless KEEP_LOG_DIR=1 (tests that seed it, e.g. migrate-logs).
 run_script() {
@@ -374,7 +383,7 @@ run_script() {
   [ "${KEEP_LOG_DIR:-0}" = "1" ] || find "$LOG_DIR" -mindepth 1 -delete
   # The wait tunables (bin/xgm-common.sh, bin/egpu-sync) pass through when a test sets them.
   local var tunables=()
-  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER XGM_CARD_WAIT; do
+  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER XGM_RESTART_CAP XGM_CARD_WAIT; do
     [ -n "${!var:-}" ] && tunables+=("$var=${!var}")
   done
   run env -i \

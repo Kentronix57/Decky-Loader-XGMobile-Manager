@@ -274,8 +274,9 @@ _xgm_end_stuck_units() {
   done
 }
 
-# _xgm_clock_read [slept cs]: sets now for xgm_wait_for_user_session, whose locals it shares
-# (bash's dynamic scope): start, last, deact_since and step1_at. If the clock shows less time
+# _xgm_clock_read [slept cs]: sets now for xgm_wait_for_user_session and
+# xgm_restart_dirty_user_manager, whose locals it shares (bash's dynamic scope): start, last,
+# deact_since and step1_at. If the clock shows less time
 # since the last reading than certainly passed (the poll just slept; NTP stepped the clock back),
 # those reference times move back by the difference, so the time already waited still counts.
 _xgm_clock_read() {
@@ -377,6 +378,56 @@ xgm_wait_for_user_session() {
     _xgm_clock_read
     if [ $((now - start)) -ge "$cap_cs" ]; then
       echo "user session not ready after ${cap}s ($missing), continuing anyway"
+      return 0
+    fi
+    sleep "$poll"
+    slept=$poll_cs
+  done
+}
+
+# xgm_restart_dirty_user_manager <user>: stops that user's systemd manager if it still holds eGPU
+# variables after the cleanup. A manager that started while /etc/environment had them (a boot with
+# the eGPU active) keeps them in its initial environment, which unset-environment and daemon-reload
+# can't remove; if the display manager starts again within logind's UserStopDelay (10 s), or
+# another login (SSH) is open, that manager survives the eject and the next Game Mode session
+# inherits them. Stopped with --no-block and not started again: logind starts a fresh one, from
+# the clean /etc/environment, at the next login. SSH shells live in their session scopes, not in
+# user@<uid>.service, so they survive. A manager that isn't active, or is clean, is left alone; one
+# whose environment can't be read is stopped, since it can't be proven clean.
+# Waits until that manager (its InvocationID) is gone, for up to XGM_RESTART_CAP s (15) of wall-clock
+# time, checking every XGM_WAIT_POLL s (0.25), with the same hung-manager escalation as
+# xgm_wait_for_user_session. Always returns 0: the eject must go on to start the display manager.
+xgm_restart_dirty_user_manager() {
+  local user="$1" uid vars old_id poll poll_cs cap cap_cs hung_cs start now last slept=0
+  local deact_since=-1 step1_at=-1 step2=0 state id hung_id=""
+  uid=$(id -u "$user" 2>/dev/null)
+  [ -n "$uid" ] || return 0
+  read -r state old_id < <(_xgm_manager_state "$uid")
+  [ "$state" = "active" ] || return 0
+  _xgm_check_setpriv
+  vars=$(_xgm_manager_egpu_vars user "$user" "$uid")
+  [ "$vars" = "none" ] && return 0
+  echo "eGPU variables can't be removed from the running user manager (it started with them): $vars; restarting it so the next login starts clean"
+  systemctl stop --no-block "user@$uid.service"
+  poll="${XGM_WAIT_POLL:-0.25}"
+  cap="${XGM_RESTART_CAP:-15}"
+  poll_cs=$(_xgm_cs "$poll")
+  cap_cs=$(_xgm_cs "$cap")
+  hung_cs=$(_xgm_cs "${XGM_HUNG_AFTER:-5}")
+  start=$(_xgm_now_cs)
+  last=$start
+  while :; do
+    read -r state id < <(_xgm_manager_state "$uid")
+    _xgm_clock_read "$slept"
+    slept=0
+    if [ "$id" != "$old_id" ] || [ "$state" = "inactive" ] || [ "$state" = "failed" ]; then
+      echo "old user manager stopped after $(_xgm_secs $((now - start)))s"
+      return 0
+    fi
+    _xgm_end_hung_manager "$user" "$uid" "$state" "$id"
+    _xgm_clock_read
+    if [ $((now - start)) -ge "$cap_cs" ]; then
+      echo "user manager still running after ${cap}s; continuing (a reboot clears the eGPU variables)"
       return 0
     fi
     sleep "$poll"
