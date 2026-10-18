@@ -290,6 +290,41 @@ _xgm_clock_read() {
   last=$now
 }
 
+# _xgm_end_hung_manager <user> <uid> <state> <invocation id>: one step of the hung-manager
+# escalation, for the user manager state just read. If that manager (its InvocationID) has been
+# stopping for XGM_HUNG_AFTER s, its stuck units are killed; if it's still stopping XGM_HUNG_AFTER s
+# later, the manager itself. Both recheck that it's still that manager first. Another manager (or
+# none) gets a fresh XGM_HUNG_AFTER. Shares the caller's locals (bash's dynamic scope): now,
+# hung_cs, deact_since, step1_at, step2 and hung_id (and _xgm_clock_read's).
+_xgm_end_hung_manager() {
+  local user="$1" uid="$2" state="$3" id="$4"
+  if [ "$id" != "$hung_id" ]; then
+    # Another manager (or none): it gets its own XGM_HUNG_AFTER.
+    deact_since=-1 step1_at=-1 step2=0 hung_id=""
+  fi
+  if [ "$state" = "deactivating" ]; then
+    # Measured from the first time it was seen stopping, and from the end of step 1.
+    if [ "$deact_since" -lt 0 ]; then
+      deact_since=$now
+      hung_id="$id"
+    fi
+    if [ "$step1_at" -lt 0 ] && [ $((now - deact_since)) -ge "$hung_cs" ]; then
+      echo "old user manager still stopping after $(_xgm_secs $((now - deact_since)))s; ending its stuck units"
+      _xgm_end_stuck_units "$user" "$uid" "$hung_id"
+      _xgm_clock_read
+      step1_at=$now
+    elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((now - step1_at)) -ge "$hung_cs" ]; then
+      step2=1
+      if _xgm_still_stopping "$uid" "$hung_id" "user@$uid.service"; then
+        echo "old user manager still stopping; killing it"
+        systemctl kill -s KILL "user@$uid.service"
+      fi
+    fi
+  else
+    deact_since=-1
+  fi
+}
+
 # xgm_wait_for_user_session <user> [known session ids]: waits until the user's new graphical
 # session is usable, so that a Plasma session that imports its environment into the user manager
 # has done it before the cleanup, and steamos-session-select finds a user bus. Ready means all of:
@@ -322,31 +357,7 @@ xgm_wait_for_user_session() {
     read -r state id < <(_xgm_manager_state "$uid")
     _xgm_clock_read "$slept"
     slept=0
-    if [ "$id" != "$hung_id" ]; then
-      # Another manager (or none): it gets its own XGM_HUNG_AFTER.
-      deact_since=-1 step1_at=-1 step2=0 hung_id=""
-    fi
-    if [ "$state" = "deactivating" ]; then
-      # Measured from the first time it was seen stopping, and from the end of step 1.
-      if [ "$deact_since" -lt 0 ]; then
-        deact_since=$now
-        hung_id="$id"
-      fi
-      if [ "$step1_at" -lt 0 ] && [ $((now - deact_since)) -ge "$hung_cs" ]; then
-        echo "old user manager still stopping after $(_xgm_secs $((now - deact_since)))s; ending its stuck units"
-        _xgm_end_stuck_units "$user" "$uid" "$hung_id"
-        _xgm_clock_read
-        step1_at=$now
-      elif [ "$step1_at" -ge 0 ] && [ "$step2" -eq 0 ] && [ $((now - step1_at)) -ge "$hung_cs" ]; then
-        step2=1
-        if _xgm_still_stopping "$uid" "$hung_id" "user@$uid.service"; then
-          echo "old user manager still stopping; killing it"
-          systemctl kill -s KILL "user@$uid.service"
-        fi
-      fi
-    else
-      deact_since=-1
-    fi
+    _xgm_end_hung_manager "$user" "$uid" "$state" "$id"
 
     if ! session=$(_xgm_new_user_session "$user" "$known"); then
       missing="no new user session for $user"
