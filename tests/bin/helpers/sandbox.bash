@@ -80,7 +80,11 @@ make_root() {
     "$ROOT/sys/module" "$ROOT/run/user/64999"
   # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host. Its uid
   # (shims/id) is 64999, and it has a runtime dir with a user bus, as when a session is running.
-  touch "$ROOT/run/user/64999/bus"
+  # The bus is a real socket (egpu-eject checks -S): a hard link to a template the bus timeline
+  # reuses. Bound from inside the dir, since socket paths are limited to 108 bytes.
+  (cd "$SHIM_STATE" && python3 -c 'import socket; socket.socket(socket.AF_UNIX).bind("bus.sock")') \
+    || fail "couldn't create the template bus socket"
+  ln -f "$SHIM_STATE/bus.sock" "$ROOT/run/user/64999/bus"
   : > "$SHIM_LOG"
   # The fake wall clock the waits read (XGM_FAKE_CLOCK); the sleep shim moves it forward. It starts
   # at 1000 s so that a clock_step back stays positive, like a real one.

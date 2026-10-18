@@ -242,11 +242,12 @@ systemctl daemon-reload
 # Final Reload & Restore Handheld UI
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   USER_UID=$(id -u $PRIMARY_USER)
-  # The display manager is stopped: the user manager may already be gone, and a reload would only
-  # log "Failed to connect to user scope bus".
-  if [ -e "$ROOT/run/user/$USER_UID/bus" ]; then
-    export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
-    sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
+  # The display manager is stopped: the user manager may already be gone (or stopped above, and
+  # still stopping), and a reload would only log "Failed to connect to user scope bus".
+  if [ "$(systemctl show -p ActiveState --value "user@$USER_UID.service" 2>/dev/null)" = "active" ] \
+    && [ -S "$ROOT/run/user/$USER_UID/bus" ]; then
+    _xgm_check_setpriv
+    _xgm_user_systemctl "$PRIMARY_USER" "$USER_UID" daemon-reload
   else
     echo "user manager not running; no reload needed"
   fi

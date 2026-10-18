@@ -276,9 +276,9 @@ _xgm_end_stuck_units() {
 
 # _xgm_clock_read [slept cs]: sets now for xgm_wait_for_user_session and
 # xgm_restart_dirty_user_manager, whose locals it shares (bash's dynamic scope): start, last,
-# deact_since and step1_at. If the clock shows less time
-# since the last reading than certainly passed (the poll just slept; NTP stepped the clock back),
-# those reference times move back by the difference, so the time already waited still counts.
+# deact_since and step1_at. If the clock shows less time since the last reading than certainly
+# passed (the poll just slept; NTP stepped the clock back), those reference times move back by
+# the difference, so the time already waited still counts.
 _xgm_clock_read() {
   local d
   now=$(_xgm_now_cs)
@@ -407,7 +407,11 @@ xgm_restart_dirty_user_manager() {
   _xgm_check_setpriv
   vars=$(_xgm_manager_egpu_vars user "$user" "$uid")
   [ "$vars" = "none" ] && return 0
-  echo "eGPU variables can't be removed from the running user manager (it started with them): $vars; restarting it so the next login starts clean"
+  if [[ "$vars" == unknown* ]]; then
+    echo "the user manager's environment can't be read ${vars#unknown }; restarting it so the next login starts clean"
+  else
+    echo "eGPU variables can't be removed from the running user manager (it started with them): $vars; restarting it so the next login starts clean"
+  fi
   systemctl stop --no-block "user@$uid.service"
   poll="${XGM_WAIT_POLL:-0.25}"
   cap="${XGM_RESTART_CAP:-15}"

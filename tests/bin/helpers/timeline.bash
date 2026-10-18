@@ -4,7 +4,8 @@
 # $SHIM_STATE/timeline/<key> with one "<tick> <value>" line per change, in tick order; the value
 # at tick t is the one on the last line with a tick <= t. Keys (see helpers/sandbox.bash timeline):
 #   manager   user@64999.service as "<ActiveState>[:<InvocationID>]" (default active; the ID
-#             defaults to inv0, or nothing when inactive)
+#             defaults to inv0; inactive and failed keep the last ID, as systemd does, or
+#             nothing if it never ran)
 #   sessions  the login sessions, "<id>:<class>:<state>[:<user>] ..." (default 2:user:active)
 #   rundir    present|absent: $ROOT/run/user/64999
 #   bus       present|absent: $ROOT/run/user/64999/bus
@@ -26,9 +27,29 @@ tl_value() {
 # tl_manager_state / tl_manager_id: the user manager's ActiveState and InvocationID now.
 tl_manager_state() { local v; v=$(tl_value manager active); echo "${v%%:*}"; }
 tl_manager_id() {
-  local v
-  v=$(tl_value manager active)
-  if [[ "$v" == *:* ]]; then echo "${v#*:}"; elif [ "$v" != "inactive" ]; then echo inv0; fi
+  local file="$SHIM_STATE/timeline/manager"
+  [ -e "$file" ] || { echo inv0; return 0; }
+  # The ID before a tl_restart (kill/stop) carries over into the follow-up timeline.
+  awk -v t="$(tl_tick)" -v last="$(cat "$SHIM_STATE/manager_last_id" 2>/dev/null)" '
+    $1 <= t {
+      found = 1; s = $2; sub(/:.*/, "", s)
+      if ($2 ~ /:/) { last = $2; sub(/^[^:]*:/, "", last) }
+      else if (s != "inactive" && s != "failed") last = "inv0"
+    }
+    END { print (found ? last : "inv0") }' "$file"
+}
+
+# tl_manager_env_exit: the environments of a stopped or killed manager ($SHIM_STATE/env_drop_on_exit
+# holds its ID) go once it's inactive or failed, or replaced; the next one starts clean.
+tl_manager_env_exit() {
+  local old
+  [ -e "$SHIM_STATE/env_drop_on_exit" ] || return 0
+  old=$(cat "$SHIM_STATE/env_drop_on_exit")
+  case "$(tl_manager_state)" in
+    inactive|failed) ;;
+    *) [ "$(tl_manager_id)" != "$old" ] || return 0 ;;
+  esac
+  rm -f "$SHIM_STATE/env/user" "$SHIM_STATE/env/user_initial" "$SHIM_STATE/env_drop_on_exit"
 }
 
 # tl_manager_event <event>: the manager follows timeline/manager.after_<event> from now on, if set.
@@ -65,7 +86,8 @@ tl_apply_fs() {
     absent) rm -rf "$dir" ;;
   esac
   case "$(tl_value bus "")" in
-    present) mkdir -p "$dir" && touch "$dir/bus" ;;
+    # A real socket (make_root's template), for the scripts' -S checks.
+    present) mkdir -p "$dir" && { ln -f "$SHIM_STATE/bus.sock" "$dir/bus" 2>/dev/null || touch "$dir/bus"; } ;;
     absent) rm -f "$dir/bus" ;;
   esac
 }
@@ -76,6 +98,7 @@ tl_restart() {
   local t file="$SHIM_STATE/timeline/$1"
   t=$(tl_tick)
   mkdir -p "$SHIM_STATE/timeline"
+  [ "$1" = "manager" ] && tl_manager_id > "$SHIM_STATE/manager_last_id"
   if [ -e "$2" ]; then
     awk -v t="$t" '{ $1 = $1 + t; print }' "$2" > "$file"
   else

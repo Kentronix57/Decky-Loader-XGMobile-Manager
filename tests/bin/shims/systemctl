@@ -18,13 +18,15 @@
 # The user manager's initial environment ($SHIM_STATE/env/user_initial: what it started with from
 # /etc/environment) shows in `--user show-environment` with the set-environment variables, but
 # `unset-environment` only removes the latter, as on systemd. `stop [--no-block]
-# user@64999.service` ends the manager like the kill (timeline/manager.after_stop, or inactive);
-# either one also drops both environments, since the next manager starts from the clean file.
+# user@64999.service` ends the manager like the kill (timeline/manager.after_stop, or inactive).
+# After either one, both environments stay while it's still stopping, and go once it's inactive
+# or failed or has a new InvocationID: the next manager starts from the clean file.
 # While the manager is deactivating, every call to it (--user, or naming user@64999.service)
 # moves the fake clock forward by $SHIM_STATE/manager_call_cost seconds, if set.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 # shellcheck source=../helpers/timeline.bash
 . "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
+tl_manager_env_exit
 if [ -e "$SHIM_STATE/manager_call_cost" ] && { [[ " $* " == *" --user "* ]] || [[ " $* " == *" user@64999.service "* ]]; } \
   && [ "$(tl_manager_state)" = "deactivating" ]; then
   tl_clock_add "$(cat "$SHIM_STATE/manager_call_cost")"
@@ -102,14 +104,14 @@ case "$verb" in
     exit 0 ;;
   stop)
     if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      tl_manager_id > "$SHIM_STATE/env_drop_on_exit"
       tl_restart manager "$SHIM_STATE/timeline/manager.after_stop"
-      rm -f "$SHIM_STATE/env/user" "$SHIM_STATE/env/user_initial"
     fi
     exit 0 ;;
   kill)
     if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      tl_manager_id > "$SHIM_STATE/env_drop_on_exit"
       tl_restart manager "$SHIM_STATE/timeline/manager.after_kill"
-      rm -f "$SHIM_STATE/env/user" "$SHIM_STATE/env/user_initial"
     elif [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/stuck_units" ]; then
       grep -vFx -- "${units[-1]}" "$SHIM_STATE/stuck_units" > "$SHIM_STATE/stuck_units.new"
       mv "$SHIM_STATE/stuck_units.new" "$SHIM_STATE/stuck_units"
