@@ -229,6 +229,9 @@ steamos-session-select gamescope
 
 On SteamOS, "Return to Gaming Mode" also goes back, but only once: it doesn't clear "Set Desktop to Default", so Desktop Mode stays the default.
 
+### Black screen in Game Mode after an eject
+On older builds, an eject after booting with the XG Mobile active could leave Game Mode on a black screen. Over SSH (or a TTY), run `sudo systemctl stop user@1000.service`, or reboot.
+
 ### Where the logs are
 Every log is in `~/homebrew/logs/xgmobile-manager/activity/`. Decky's own logs for the plugin stay one level up, in `~/homebrew/logs/xgmobile-manager/`; Decky deletes all but the newest 4 log files there every time the plugin loads, so ours are kept in the subfolder. Open them in **Activity Logs**, or attach them from that folder (on Bazzite, `~` is `/var/home/<user>`):
 
