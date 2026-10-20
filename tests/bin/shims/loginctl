@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Test shim: records the call. The login sessions follow the "sessions" timeline
+# (helpers/timeline.bash): "<id>:<class>:<state>[:<user>] ...", 2:user:active by default (one
+# session of xgmtest); a state can be anything loginctl reports (opening, online, active, closing).
+# `list-sessions` prints them in systemd 257's columns (SESSION UID USER SEAT LEADER CLASS TTY IDLE
+# SINCE; the seat is - for the user manager's own Class=manager session); `show-session <id> -p
+# Class -p State` prints those two properties.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+# shellcheck source=../helpers/timeline.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
+verb="" args=()
+for arg in "$@"; do
+  case "$arg" in
+    -p) ;;
+    -*) ;;
+    *) if [ -z "$verb" ]; then verb="$arg"; else args+=("$arg"); fi ;;
+  esac
+done
+sessions=$(tl_value sessions "2:user:active")
+case "$verb" in
+  list-sessions)
+    for s in $sessions; do
+      IFS=: read -r id class state user <<< "$s"
+      seat=seat0
+      [ "$class" = "manager" ] && seat=-
+      printf '%s 64999 %s %s 1000 %s tty2 no -\n' "$id" "${user:-xgmtest}" "$seat" "$class"
+    done ;;
+  show-session)
+    for s in $sessions; do
+      IFS=: read -r id class state _ <<< "$s"
+      if [ "$id" = "${args[0]}" ]; then
+        printf 'Class=%s\nState=%s\n' "$class" "$state"
+        exit 0
+      fi
+    done
+    echo "Failed to get session path: Session '${args[0]}' not known" >&2
+    exit 1 ;;
+esac
+exit 0

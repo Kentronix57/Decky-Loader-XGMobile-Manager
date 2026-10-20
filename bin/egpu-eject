@@ -223,6 +223,9 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   fi
   # Variables in /etc/environment and both systemd managers, Plasma env files, nvidia-egpu.conf.
   xgm_sanitize_environment "$PRIMARY_USER"
+  # A user manager that started with the eGPU variables keeps them; stop it so the next login
+  # starts a clean one.
+  xgm_restart_dirty_user_manager "$PRIMARY_USER"
 elif [[ "$OS_TYPE" == *"bazzite"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Applying Bazzite overlay environment fixes..."
@@ -239,8 +242,15 @@ systemctl daemon-reload
 # Final Reload & Restore Handheld UI
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   USER_UID=$(id -u $PRIMARY_USER)
-  export DECK_BUS="XDG_RUNTIME_DIR=/run/user/$USER_UID"
-  sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
+  # The display manager is stopped: the user manager may already be gone (or stopped above, and
+  # still stopping), and a reload would only log "Failed to connect to user scope bus".
+  if [ "$(systemctl show -p ActiveState --value "user@$USER_UID.service" 2>/dev/null)" = "active" ] \
+    && [ -S "$ROOT/run/user/$USER_UID/bus" ]; then
+    _xgm_check_setpriv
+    _xgm_user_systemctl "$PRIMARY_USER" "$USER_UID" daemon-reload
+  else
+    echo "user manager not running; no reload needed"
+  fi
 fi
 
 # Hardware Deactivation

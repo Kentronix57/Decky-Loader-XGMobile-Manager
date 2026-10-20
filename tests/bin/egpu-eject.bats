@@ -678,7 +678,9 @@ eject_with_numbering() {
   egpu_present amd
   run_plugin_script egpu-eject amd
   assert_success
-  assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
+  assert_called "id -u deck"
+  assert_called "setpriv --reuid=64999 --regid=64999 --init-groups env XDG_RUNTIME_DIR=$ROOT/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
+  assert_called "timeout -s KILL 2 setpriv --reuid=64999 --regid=64999 --init-groups env XDG_RUNTIME_DIR=$ROOT/run/user/64999 systemctl --user daemon-reload"
 }
 
 @test "egpu_enable write fails: friendly line, no shell error in the log, the drop wait decides" {
@@ -690,4 +692,310 @@ eject_with_numbering() {
   [[ "$LOG" == *"asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..."* ]]
   [[ "$LOG" == *"WARNING: Hardware did not seem to drop from the PCIe bus."* ]]
   [[ "$LOG" != *"write error"* && "$LOG" != *"Permission denied"* ]]
+}
+
+# Step 0, exp 2: with the display manager stopped the user manager can already be gone, and the
+# user daemon-reload only logged "Failed to connect to user scope bus via local transport".
+@test "no user bus: no user daemon-reload, the system one still runs" {
+  set_os steamos
+  egpu_present amd
+  rm -f "$ROOT/run/user/64999/bus"
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert_called "systemctl daemon-reload"
+  refute_called "systemctl --user daemon-reload"
+  [[ "$LOG" == *"user manager not running; no reload needed"* ]]
+}
+
+@test "user manager not active, or the bus isn't a socket: no user daemon-reload" {
+  set_os steamos
+  egpu_present amd
+  timeline manager "0 inactive"
+  run_plugin_script egpu-eject amd
+  assert_success
+  refute_called "systemctl --user daemon-reload"
+  [[ "$LOG" == *"user manager not running; no reload needed"* ]]
+
+  : > "$SHIM_LOG"
+  rm -f "$SHIM_STATE/timeline/manager" "$ROOT/run/user/64999/bus"
+  touch "$ROOT/run/user/64999/bus"
+  run_plugin_script egpu-eject amd
+  assert_success
+  refute_called "systemctl --user daemon-reload"
+  [[ "$LOG" == *"user manager not running; no reload needed"* ]]
+}
+
+@test "user bus present: the user daemon-reload still runs" {
+  set_os cachyos
+  no_steamos_readonly
+  egpu_present amd
+  run_plugin_script egpu-eject amd
+  assert_success
+  assert_called "timeout -s KILL 2 setpriv --reuid=64999 --regid=64999 --init-groups env XDG_RUNTIME_DIR=$ROOT/run/user/64999 systemctl --user daemon-reload"
+  refute_called "sudo"
+  [[ "$LOG" != *"no reload needed"* ]]
+}
+
+# Pass 4: a user manager that started with the eGPU variables (a boot with the XG Mobile active)
+# keeps them in its initial environment; unset-environment can't remove them. If the display
+# manager comes back within logind's UserStopDelay, or an SSH login is open, that manager survives
+# the eject and Game Mode starts with them, so egpu-eject stops it (xgm_restart_dirty_user_manager).
+# The variables as the S3 capture showed them (show-environment sorts and quotes).
+S3_ENV=(
+  "GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1"
+  "MESA_VK_DEVICE_SELECT=10de:2717"
+  "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json"
+  "VK_LOADER_LAYERS_DISABLE=\$'*'"
+  "WLR_DRM_DEVICES=/dev/dri/card0:/dev/dri/card1"
+)
+S3_NAMES="GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES VK_LOADER_LAYERS_DISABLE WLR_DRM_DEVICES"
+RESTART_LINE="eGPU variables can't be removed from the running user manager (it started with them): $S3_NAMES; restarting it so the next login starts clean"
+STOP_MANAGER="systemctl stop --no-block user@64999.service"
+
+# The line number of the first eject log line containing the text, or 0.
+log_line() { grep -Fn -- "$1" "$LOG_DIR/eject_$2.log" | head -n 1 | cut -d: -f1 | grep . || echo 0; }
+# The line number of the first (shim_first) or last (shim_last) shim log line equal to the text, or 0.
+shim_first() { grep -Fxn -- "$1" "$SHIM_LOG" | head -n 1 | cut -d: -f1 | grep . || echo 0; }
+shim_last() { grep -Fxn -- "$1" "$SHIM_LOG" | tail -n 1 | cut -d: -f1 | grep . || echo 0; }
+# How many shim log lines equal the text, between lines <from> and <to>.
+count_between() { sed -n "$2,$3p" "$SHIM_LOG" | grep -cFx -- "$1" || true; }
+
+# assert_ascending <label> <n>...: every n is > 0 and greater than the one before.
+assert_ascending() {
+  local label="$1" prev=0 n
+  shift
+  for n in "$@"; do
+    [ "$n" -gt "$prev" ] || fail "$label: expected ascending line numbers > 0, got: $*"
+    prev=$n
+  done
+}
+
+# An NVIDIA eGPU enabled at boot: /etc/environment had the variables when the user manager started.
+dirty_manager_eject_setup() {
+  os_like_hardware "$1"
+  nvidia_driver installed
+  egpu_present nvidia
+  record_egpu_pci
+  user_initial_env "${S3_ENV[@]}"
+  export XGM_WAIT_POLL=0.01 XGM_RESTART_CAP=1
+}
+
+@test "pass 4 S3 (SteamOS Game Mode eject, the manager survives): stopped, the DM started once it's gone" {
+  dirty_manager_eject_setup steamos
+  # The capture: the old login session closed, only the Class=manager session was left.
+  timeline sessions "0 2:manager:active"
+  manager_after stop "0 deactivating" "3 inactive"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+
+  assert_ascending "eject log" \
+    "$(log_line "eGPU variables left in user manager: $S3_NAMES" nvidia)" \
+    "$(log_line "$RESTART_LINE" nvidia)" \
+    "$(log_line "old user manager stopped after 0.03s" nvidia)" \
+    "$(log_line "Starting sddm.service..." nvidia)"
+  local stop start
+  stop=$(shim_first "$STOP_MANAGER")
+  start=$(shim_first "systemctl start sddm.service")
+  assert_ascending "shim log" "$(shim_last "setpriv --reuid=64999 --regid=64999 --init-groups env XDG_RUNTIME_DIR=$ROOT/run/user/64999 systemctl --user show-environment")" \
+    "$stop" "$(shim_first "systemctl daemon-reload")" "$start"
+  # It waited the 3 polls until the manager was inactive before going on.
+  assert_equal "$(count_between "sleep 0.01" "$stop" "$start")" 3
+  assert_equal "$(grep -cFx "$STOP_MANAGER" "$SHIM_LOG")" 1
+  refute_called "systemctl start user@64999.service"
+  refute_called "systemctl kill"
+  refute_called "systemctl --user kill"
+  # It ended as systemd shows it: inactive, with the same InvocationID.
+  assert_equal "$(tl_manager_state) $(tl_manager_id)" "inactive inv0"
+  # Nothing reloads the stopped manager.
+  refute_called "systemctl --user daemon-reload"
+  [[ "$LOG" == *"user manager not running; no reload needed"* ]]
+  assert_equal "$(manager_env_of user)" ""
+  assert [ ! -e "$SHIM_STATE/env/user_initial" ]
+}
+
+@test "the stopped manager ends failed, with the same InvocationID: gone, the DM starts" {
+  dirty_manager_eject_setup cachyos
+  manager_after stop "0 deactivating" "2 failed"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_equal "$(tl_manager_state) $(tl_manager_id)" "failed inv0"
+  assert_ascending "eject log" \
+    "$(log_line "old user manager stopped after 0.02s" nvidia)" \
+    "$(log_line "Starting plasmalogin.service..." nvidia)"
+  refute_called "systemctl kill"
+  refute_called "systemctl --user daemon-reload"
+}
+
+@test "pass 4 CachyOS, Game Mode eject with an SSH login open: the manager is stopped anyway" {
+  dirty_manager_eject_setup cachyos
+  # Session 5 is the SSH login (Class=user); it keeps the manager alive past UserStopDelay.
+  timeline sessions "0 1:user:active 2:manager:active 5:user:active"
+  manager_after stop "0 deactivating" "1 inactive"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "$STOP_MANAGER" "systemctl start plasmalogin.service"
+  [[ "$LOG" == *"$RESTART_LINE"* ]]
+  [[ "$LOG" == *"old user manager stopped after 0.01s"* ]]
+  assert_equal "$(tl_manager_state) $(tl_manager_id)" "inactive inv0"
+  refute_called "loginctl"
+}
+
+@test "pass 4 C3 (CachyOS desktop Eject icon, a fast eject): stopped before the DM start, the cleanup then finds a clean new manager" {
+  dirty_manager_eject_setup cachyos
+  timeline sessions "0 1:user:active 2:manager:active"
+  # The eject took 8 s: the old manager is gone at once, and the DM's new login brings up a new one.
+  manager_after stop "0 inactive" "1 active:new"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "$STOP_MANAGER" "systemctl start plasmalogin.service"
+  [[ "$LOG" == *"old user manager stopped after 0.00s"* ]]
+
+  # The desktop Eject link's cleanup (main.py) with the sessions from before the eject.
+  timeline sessions "0 3:user:active 4:manager:active"
+  assert_equal "$(tl_manager_state) $(tl_manager_id)" "active new"
+  run_script clean-session-env xgmtest "$LOG_DIR" "1 2"
+  assert_success
+  run cat "$LOG_DIR/desktop_eject_request.log"
+  assert_line "user session ready after 0.00s (session 3)"
+  assert_line "eGPU variables found in user manager: none"
+  assert_line "eGPU variables left in user manager: none"
+}
+
+@test "a clean manager (only set-environment variables, which unset removes): not stopped" {
+  os_like_hardware steamos
+  nvidia_driver installed
+  egpu_present nvidia
+  record_egpu_pci
+  manager_env user "${S3_ENV[@]}"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"eGPU variables found in user manager: $S3_NAMES"* ]]
+  [[ "$LOG" == *"eGPU variables left in user manager: none"* ]]
+  refute_called "systemctl stop --no-block user@"
+  refute_called "systemctl stop user@"
+  [[ "$LOG" != *"restarting it"* && "$LOG" != *"old user manager"* ]]
+}
+
+@test "the user manager isn't running: nothing to stop" {
+  dirty_manager_eject_setup steamos
+  timeline manager "0 inactive"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_called "systemctl stop --no-block user@"
+  [[ "$LOG" != *"restarting it"* && "$LOG" != *"old user manager"* ]]
+  assert_called "systemctl start sddm.service"
+}
+
+@test "the user manager is active but its environment can't be read: stopped" {
+  dirty_manager_eject_setup steamos
+  user_manager_down
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "$STOP_MANAGER" "systemctl start sddm.service"
+  [[ "$LOG" == *"the user manager's environment can't be read (couldn't read it: Failed to connect to bus: No such file or directory); restarting it so the next login starts clean"* ]]
+  [[ "$LOG" != *"it started with them"* ]]
+  [[ "$LOG" == *"old user manager stopped after 0.00s"* ]]
+}
+
+@test "the stopped manager hangs: its stuck units after XGM_HUNG_AFTER, then the manager XGM_HUNG_AFTER later, once each" {
+  dirty_manager_eject_setup steamos
+  export XGM_HUNG_AFTER=0.05 XGM_RESTART_CAP=1
+  manager_after stop "0 deactivating"
+  stuck_unit xdg-document-portal.service
+  doc_mounted
+  run_plugin_script egpu-eject nvidia
+  assert_success
+
+  local stop fuse unit_kill manager_kill start
+  stop=$(shim_first "$STOP_MANAGER")
+  fuse=$(shim_first "fusermount3 -uz $ROOT/run/user/64999/doc")
+  unit_kill=$(shim_first "systemctl --user kill -s KILL -- xdg-document-portal.service")
+  manager_kill=$(shim_first "systemctl kill -s KILL user@64999.service")
+  start=$(shim_first "systemctl start sddm.service")
+  assert_ascending "stop, fusermount3, unit kill, manager kill, DM start" "$stop" "$fuse" "$unit_kill" "$manager_kill" "$start"
+  assert_equal "$(count_between "sleep 0.01" "$stop" "$fuse")" 5
+  assert_equal "$(count_between "sleep 0.01" "$unit_kill" "$manager_kill")" 5
+  assert_equal "$(grep -cFx "systemctl kill -s KILL user@64999.service" "$SHIM_LOG")" 1
+  assert_equal "$(grep -c "^systemctl --user kill" "$SHIM_LOG")" 1
+  run cat "$LOG_DIR/eject_nvidia.log"
+  assert_line "old user manager still stopping after 0.05s; ending its stuck units"
+  assert_line "killed stuck unit: xdg-document-portal.service"
+  assert_line "old user manager still stopping; killing it"
+  assert_line --regexp '^old user manager stopped after 0\.1[0-9]s$'
+}
+
+@test "the stopped manager is replaced between list-units and the unit kills: nothing killed" {
+  dirty_manager_eject_setup steamos
+  export XGM_HUNG_AFTER=0.05 XGM_RESTART_CAP=1
+  manager_after stop "0 deactivating"
+  manager_after list-units "0 active:new"
+  stuck_unit xdg-document-portal.service
+  stuck_unit app-steam@autostart.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called "systemctl --user list-units --state=deactivating --no-legend --plain"
+  refute_called "systemctl --user kill"
+  refute_called "systemctl kill"
+  run cat "$LOG_DIR/eject_nvidia.log"
+  assert_line "old user manager gone; not killing xdg-document-portal.service"
+  assert_line "old user manager stopped after 0.06s"
+}
+
+@test "the stopped manager is replaced right before the step-2 kill: the new one isn't killed" {
+  dirty_manager_eject_setup steamos
+  export XGM_HUNG_AFTER=0.05 XGM_RESTART_CAP=1
+  manager_after stop "0 deactivating"
+  # Shows of user@64999: 1 in the cleanup, 2 before the stop, 3-13 the polls of ticks 0-10 (step 1
+  # at tick 5 has no units, so no recheck); the 14th is step 2's recheck, which finds a new manager.
+  manager_after show:13 "0 deactivating:new"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_called "systemctl kill"
+  run cat "$LOG_DIR/eject_nvidia.log"
+  assert_line "old user manager still stopping after 0.05s; ending its stuck units"
+  assert_line "old user manager gone; not killing user@64999.service"
+  refute_line "old user manager still stopping; killing it"
+  assert_line "old user manager stopped after 0.11s"
+}
+
+@test "the stopped manager outlives the kill: gives up at XGM_RESTART_CAP, the DM still starts" {
+  dirty_manager_eject_setup steamos
+  export XGM_HUNG_AFTER=0.05 XGM_RESTART_CAP=0.2
+  manager_after stop "0 deactivating"
+  manager_after kill "0 deactivating"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_equal "$(grep -cFx "systemctl kill -s KILL user@64999.service" "$SHIM_LOG")" 1
+  assert_equal "$(count_between "sleep 0.01" "$(shim_first "$STOP_MANAGER")" "$(shim_first "systemctl start sddm.service")")" 20
+  assert_ascending "eject log" \
+    "$(log_line "user manager still running after 0.2s; continuing (a reboot clears the eGPU variables)" nvidia)" \
+    "$(log_line "Starting sddm.service..." nvidia)"
+  [[ "$LOG" != *"old user manager stopped"* ]]
+  # Still the old, dirty manager: its environment is still there, and nothing reloads it.
+  assert_equal "$(tl_manager_state) $(tl_manager_id)" "deactivating inv0"
+  grep -qx "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json" "$SHIM_STATE/env/user_initial" \
+    || fail "the stopping manager's initial environment was dropped"
+  refute_called "systemctl --user daemon-reload"
+  [[ "$LOG" == *"user manager not running; no reload needed"* ]]
+}
+
+@test "bazzite: the user manager is never stopped" {
+  set_os bazzite-nvidia
+  no_steamos_readonly
+  egpu_present nvidia
+  record_egpu_pci
+  user_initial_env "${S3_ENV[@]}"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_called "systemctl stop --no-block user@"
+  [[ "$LOG" != *"restarting it"* ]]
+}
+
+@test "safety stop (exit 7): the eGPU stays active, so the user manager isn't stopped" {
+  dirty_manager_eject_setup cachyos
+  gpu_holders unkillable
+  run_plugin_script egpu-eject nvidia
+  assert_equal "$status" 7
+  refute_called "systemctl stop --no-block user@"
+  [[ "$LOG" != *"restarting it"* ]]
 }

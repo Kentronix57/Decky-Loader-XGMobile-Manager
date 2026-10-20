@@ -60,6 +60,35 @@ if [ "$(cat "$EGPU_PCI/vendor" 2>/dev/null)" != "0x10de" ]; then
   exit 0
 fi
 
+# nvidia is loaded by systemd-modules-load, but nvidia-drm registers the eGPU's DRM card a few
+# seconds later, asynchronously: at boot it can still be missing here. Wait for it, up to
+# XGM_CARD_WAIT s (10): with `udevadm wait` on its by-path link (systemd 251+), else by polling sysfs.
+CARD_WAIT="${XGM_CARD_WAIT:-10}"
+egpu_card_present() { compgen -G "$EGPU_PCI/drm/card[0-9]*" > /dev/null; }
+if egpu_card_present; then
+  echo "eGPU DRM card already present"
+else
+  START=$(_xgm_now_cs)
+  LAST=$START
+  SLEPT=0
+  if udevadm wait --help > /dev/null 2>&1; then
+    udevadm wait --timeout="$CARD_WAIT" "$ROOT/dev/dri/by-path/pci-$(basename "$EGPU_PCI")-card" > /dev/null 2>&1
+  else
+    while ! egpu_card_present; do
+      NOW=$(_xgm_now_cs)
+      # At least the poll just slept has passed: if the clock shows less (NTP stepped it back),
+      # move START back by the difference, so the time already waited still counts.
+      [ $((LAST + SLEPT - NOW)) -gt 0 ] && START=$((START - (LAST + SLEPT - NOW)))
+      LAST=$NOW
+      [ $((NOW - START)) -lt "$(_xgm_cs "$CARD_WAIT")" ] || break
+      sleep 0.25
+      SLEPT=25
+    done
+  fi
+  WAITED=$(_xgm_since "$START")
+  egpu_card_present && echo "eGPU DRM card appeared after $(_xgm_secs "$WAITED")s"
+fi
+
 # The eGPU's card node, and the iGPU's: any other card, the boot VGA device preferred.
 EGPU_CARD=""
 IGPU_CARD=""
@@ -74,7 +103,7 @@ for card in $ROOT/sys/class/drm/card*; do
 done
 
 if [ -z "$EGPU_CARD" ] || [ -z "$IGPU_CARD" ]; then
-  echo "WARNING: Failed to detect both GPUs on the PCIe bus. Sync aborted."
+  echo "WARNING: the eGPU's DRM card didn't appear within ${CARD_WAIT}s (or no iGPU card); sync aborted."
   exit 1
 fi
 

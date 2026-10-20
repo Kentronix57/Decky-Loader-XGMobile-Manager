@@ -17,6 +17,8 @@ load "$XGM_REPO/node_modules/bats-assert/load"
 source "$XGM_REPO/tests/audit/audit.bash"
 # shellcheck source=fake_gpu.bash
 source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
+# shellcheck source=timeline.bash
+source "$XGM_REPO/tests/bin/helpers/timeline.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
 SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install)
@@ -77,8 +79,16 @@ make_root() {
     "$ROOT/usr/local/bin" "$ROOT/usr/bin" "$ROOT/usr/lib/systemd/system" "$ROOT/home/xgmtest" \
     "$ROOT/sys/module" "$ROOT/run/user/64999"
   # The primary user is "xgmtest" (see shims/ps), a name that can't exist on a real host. Its uid
-  # (shims/id) is 64999, and it has a runtime dir, as when a session is running.
+  # (shims/id) is 64999, and it has a runtime dir with a user bus, as when a session is running.
+  # The bus is a real socket (egpu-eject checks -S): a hard link to a template the bus timeline
+  # reuses. Bound from inside the dir, since socket paths are limited to 108 bytes.
+  (cd "$SHIM_STATE" && python3 -c 'import socket; socket.socket(socket.AF_UNIX).bind("bus.sock")') \
+    || fail "couldn't create the template bus socket"
+  ln -f "$SHIM_STATE/bus.sock" "$ROOT/run/user/64999/bus"
   : > "$SHIM_LOG"
+  # The fake wall clock the waits read (XGM_FAKE_CLOCK); the sleep shim moves it forward. It starts
+  # at 1000 s so that a clock_step back stays positive, like a real one.
+  echo 1000 > "$SHIM_STATE/clock"
 
   local tool path
   for tool in "${SANDBOX_TOOLS[@]}"; do
@@ -106,6 +116,8 @@ make_root() {
 
   # steamos-readonly is on PATH by default; no_steamos_readonly removes it (CachyOS, Bazzite).
   ln -s "$XGM_OPTIONAL_SHIMS/steamos-readonly" "$OPTBIN/steamos-readonly"
+  # setpriv (util-linux) is on PATH by default; no_setpriv removes it.
+  ln -s "$XGM_OPTIONAL_SHIMS/setpriv" "$OPTBIN/setpriv"
 
   set_os steamos
   set_product "RC71L"
@@ -248,6 +260,19 @@ egpu_present() {
   env PATH="$SYSBIN" XGM_ROOT="$ROOT" SHIM_LOG=/dev/null SHIM_STATE="$SHIM_STATE" "$SYSBIN/bash" "$XGM_SHIMS/sleep"
 }
 
+# egpu_card_later [n]: the eGPU is on the bus but nvidia-drm hasn't registered its DRM card yet
+# (as at boot). It appears n sleep calls from now (shims/sleep), or during a `udevadm wait`
+# (udevadm_wait). Without n, only udevadm wait makes it appear.
+egpu_card_later() {
+  fake_gpu_drm_remove "$FAKE_EGPU_PCI_ADDR"
+  rm -f "$SHIM_STATE/egpu_card_at"
+  [ -n "${1:-}" ] && echo $(($(tl_tick) + $1)) > "$SHIM_STATE/egpu_card_at"
+  return 0
+}
+
+# udevadm_wait appears|timeout|missing: what `udevadm wait` does (shims/udevadm).
+udevadm_wait() { echo "$1" > "$SHIM_STATE/udevadm_wait"; }
+
 # gpu_holders <n|ignore-term|unkillable>: the next n fuser checks find the eGPU nodes in use
 # (any fuser -k frees them); or they're in use until fuser -k -KILL (ignore-term); or they stay in
 # use whatever happens. See shims/fuser.
@@ -270,6 +295,14 @@ manager_env() {
   printf '%s\n' "$@" >> "$SHIM_STATE/env/$scope"
 }
 
+# user_initial_env NAME=value...: variables the user manager started with (from /etc/environment
+# at boot). show-environment lists them, but unset-environment can't remove them; only stopping
+# or killing user@64999.service does (shims/systemctl).
+user_initial_env() {
+  mkdir -p "$SHIM_STATE/env"
+  printf '%s\n' "$@" >> "$SHIM_STATE/env/user_initial"
+}
+
 # manager_env_of <system|user>: that manager's environment now, one NAME=value per line.
 manager_env_of() { cat "$SHIM_STATE/env/$1" 2>/dev/null || true; }
 
@@ -280,6 +313,44 @@ user_manager_down() { touch "$SHIM_STATE/user_manager_down"; }
 # (shims/systemctl): right away (the default), never, after <n> inactive checks, or after <n>
 # checks that answer "activating".
 session_ready() { echo "$1" > "$SHIM_STATE/session_ready"; }
+
+# timeline <key> "<tick> <value>"...: scripts how a piece of the user session changes over time
+# (helpers/timeline.bash has the keys). Every sleep call is one tick; tick 0 is the start. The
+# runtime dir and bus keys are applied to the tree right away for tick 0.
+timeline() {
+  local key="$1"
+  shift
+  mkdir -p "$SHIM_STATE/timeline"
+  printf '%s\n' "$@" > "$SHIM_STATE/timeline/$key"
+  tl_apply_fs "$ROOT"
+}
+
+# manager_after <event> "<ticks later> <state>[:<id>]"...: what user@64999.service does after an
+# event (shims/systemctl): kill (`systemctl kill -s KILL user@64999.service`), stop (`systemctl
+# stop user@64999.service`), unit-kill (a stuck
+# unit killed), list-units (its deactivating units listed) or show:<n> (the n-th `show` of it).
+# Without it, a killed or stopped manager is inactive and the other events change nothing.
+manager_after() {
+  local event="${1//-/_}"
+  event="${event//:/_}"
+  shift
+  mkdir -p "$SHIM_STATE/timeline"
+  printf '%s\n' "$@" > "$SHIM_STATE/timeline/manager.after_$event"
+}
+
+# clock_step <tick> <seconds>: the fake clock jumps by <seconds> (negative: back, as NTP can step
+# it) when that tick is reached.
+clock_step() { echo "$1 $2" >> "$SHIM_STATE/clock_steps"; }
+
+# manager_call_cost <seconds>: every systemctl call to user@64999 takes that long (fake clock)
+# while it's deactivating, as a hung manager's calls run into their timeout.
+manager_call_cost() { echo "$1" > "$SHIM_STATE/manager_call_cost"; }
+
+# stuck_unit <unit>: a unit the stopping user manager can't stop, until it's killed.
+stuck_unit() { echo "$1" >> "$SHIM_STATE/stuck_units"; }
+
+# The document portal's FUSE mount at run/user/64999/doc (shims/findmnt), until fusermount3 -u.
+doc_mounted() { touch "$SHIM_STATE/doc_mounted"; }
 
 # steam_user <name>: the user Steam runs as (shims/ps), instead of xgmtest.
 steam_user() { echo "$1" > "$SHIM_STATE/steam_user"; }
@@ -294,6 +365,9 @@ sync_service_installed() {
 
 supergfxd_active() { touch "$SHIM_STATE/active/supergfxd.service"; }
 
+# Takes setpriv off PATH: the user manager calls fall back to sudo -u.
+no_setpriv() { rm -f "$OPTBIN/setpriv"; }
+
 # Takes steamos-readonly off PATH, as on CachyOS and Bazzite.
 no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
 
@@ -302,7 +376,8 @@ enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergf
 
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
-# LANG=C unless $SANDBOX_LANG is set. Sets bats' $status/$output, and
+# LANG=C unless $SANDBOX_LANG is set, the fake clock (XGM_FAKE_CLOCK), and XGM_WAIT_POLL,
+# XGM_WAIT_CAP, XGM_HUNG_AFTER, XGM_RESTART_CAP and XGM_CARD_WAIT if set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR. LOG_DIR is emptied first,
 # unless KEEP_LOG_DIR=1 (tests that seed it, e.g. migrate-logs).
 run_script() {
@@ -310,13 +385,20 @@ run_script() {
   shift
   [ -n "${ROOT:-}" ] || fail "run_script: call make_root first"
   [ "${KEEP_LOG_DIR:-0}" = "1" ] || find "$LOG_DIR" -mindepth 1 -delete
+  # The wait tunables (bin/xgm-common.sh, bin/egpu-sync) pass through when a test sets them.
+  local var tunables=()
+  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER XGM_RESTART_CAP XGM_CARD_WAIT; do
+    [ -n "${!var:-}" ] && tunables+=("$var=${!var}")
+  done
   run env -i \
+    "${tunables[@]}" \
     HOME="$BATS_TEST_TMPDIR/home" \
     LANG="${SANDBOX_LANG:-C}" \
     PATH="$XGM_SHIMS:$OPTBIN:$SYSBIN" \
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \
     SHIM_STATE="$SHIM_STATE" \
+    XGM_FAKE_CLOCK="$SHIM_STATE/clock" \
     SHIM_SANDBOX="$BATS_TEST_TMPDIR" \
     SHIM_REAL_CHMOD="$SYSBIN/chmod" \
     FAKE_SUPERGFX_RC="${FAKE_SUPERGFX_RC:-0}" \

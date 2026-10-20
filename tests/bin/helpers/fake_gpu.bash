@@ -54,3 +54,37 @@ fake_gpu_remove() {
   done
   rm -rf "$pci" "$ROOT/sys/bus/pci/devices/$1"
 }
+
+# fake_gpu_drm_add <pci address> <cardN> <renderDN>: the driver registers the device's DRM nodes
+# (sys/class/drm entries, the PCI dir's drm/ entries, /dev/dri nodes and the by-path card link).
+# fake_gpu_drm_remove <pci address>: they're gone again, the PCI device stays (driver not bound yet).
+fake_gpu_drm_add() {
+  local pci node
+  pci=$(fake_gpu_pci_dir "$1")
+  mkdir -p "$pci/drm/$2" "$pci/drm/$3" "$ROOT/dev/dri/by-path"
+  for node in "$2" "$3"; do
+    mkdir -p "$ROOT/sys/class/drm/$node"
+    ln -sfn "$pci" "$ROOT/sys/class/drm/$node/device"
+    touch "$ROOT/dev/dri/$node"
+  done
+  ln -sfn "../$2" "$ROOT/dev/dri/by-path/pci-$1-card"
+}
+
+fake_gpu_drm_remove() {
+  local pci entry
+  pci=$(fake_gpu_pci_dir "$1")
+  for entry in "$ROOT"/sys/class/drm/*; do
+    [ -L "$entry/device" ] || continue
+    if [ "$(readlink "$entry/device")" = "$pci" ]; then
+      rm -rf "$entry" "$ROOT/dev/dri/${entry##*/}"
+    fi
+  done
+  rm -rf "$pci/drm" "$ROOT/dev/dri/by-path/pci-$1-card"
+}
+
+# fake_egpu_card_appear: the eGPU's DRM nodes appear, with the numbers in $SHIM_STATE/egpu_nodes.
+fake_egpu_card_appear() {
+  local card render _fb
+  read -r card render _fb < "$SHIM_STATE/egpu_nodes" 2>/dev/null || { card=card1; render=renderD129; }
+  fake_gpu_drm_add "$FAKE_EGPU_PCI_ADDR" "$card" "$render"
+}

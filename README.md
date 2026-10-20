@@ -49,7 +49,7 @@ This plugin manages the complex hardware handshakes, dynamically compiles and in
 | Hardware | SteamOS | Bazzite | CachyOS | Notes |
 | :--- | :--- | :--- | :--- | :--- |
 | **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🟢 Tested & Working | 🟡 Experimental | Full DKMS driver compilation supported on SteamOS. CachyOS installs its packaged drivers with pacman. BazziteOS cannot recover from sleep/hibernate. |
-| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | 🟡 Experimental | Untested, but should follow all the same rules as the 4090. |
+| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | 🟡 Experimental | Community report (Bazzite, see #25). Should follow all the same rules as the 4090. |
 | **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | 🟡 Experimental | Uses native `amdgpu` kernel drivers. |
 
 ---
@@ -123,13 +123,13 @@ If the installer reports pending updates, update the system (in Game Mode: Setti
 * **To Disconnect:** Click **Eject XG Mobile**. Wait for the UI to restart and return to the handheld screen and the light on the XG Mobile connector is white before unlocking the cable.
 
 ### Power
-The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit: on the RTX 4090, Balanced is 120 W and Performance is 150 W. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
+The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit. Measured on the RTX 4090: Quiet 60 W, Balanced 120 W, Performance 150 W. The RTX 3080 showed 120 W on Balanced and 150 W on Performance; Quiet is expected to be 60 W there too (not measured yet). It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
 
 **Recommended:** for full XG Mobile power with a cool CPU, pick **Performance** and cap the CPU with Steam's TDP slider or a TDP plugin. Measured on SteamOS with the RTX 4090: Performance plus SimpleDeckyTDP's slider at **15 W** kept the XG Mobile at ~149 W while the Ally's CPU drew 11–15 W.
 
 #### Using SimpleDeckyTDP
 To control the XG Mobile's power and the Ally's CPU separately, in SimpleDeckyTDP turn **off** "Enable Asus Platform Profile Management" and keep "Use Asus WMI for TDP" **on**. Then:
-* this plugin's dropdown alone sets the ASUS profile, and through it the XG Mobile's power limit (Balanced ≈ 120 W, Performance ≈ 150 W on the RTX 4090)
+* this plugin's dropdown alone sets the ASUS profile, and through it the XG Mobile's power limit (Balanced ≈ 120 W, Performance ≈ 150 W on the RTX 4090 and RTX 3080)
 * SimpleDeckyTDP's slider alone sets the CPU limits (asus-armoury `ppt_pl1_spl` / `ppt_pl2_sppt` / `ppt_pl3_fppt`; at a lower setting, for example, it writes 7/15/15)
 
 Why: with "Platform Profile Management" on, SimpleDeckyTDP picks the ASUS profile itself from its TDP slider, so moving the CPU slider also changes the XG Mobile's power and overrides the dropdown.
@@ -200,7 +200,7 @@ If you wish to contribute or build the plugin from your own development environm
 * **Boot Loop after SteamOS Update:** If you update SteamOS *without* running the Reset script first, the system may try to load orphaned kernel modules. Run the Reset script from recovery or TTY to fix.
 * **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesn't affect performance, but is actively being investigated.
 * **Power Profile overwritten by other TDP controllers:** Other TDP controls (like SimpleDeckyTDP and HHD) will override the setting of the Power Profile. Use the dropdown in this app to monitor what the current power profile is (this plugin pings the xg mobile every 3 seconds to determine the current Power Profile setting).
-* **Steam's performance overlay shows 0 °C / 0 MHz for the XG Mobile on SteamOS:** On SteamOS, Steam's performance overlay shows 0 °C and 0 MHz for the XG Mobile (its load and power are correct). Use the plugin's panel for the XG Mobile's temperature.
+* **Steam's performance overlay shows 0 °C / 0 MHz for the XG Mobile on SteamOS:** On SteamOS, Steam's performance overlay shows 0 °C and 0 MHz for the XG Mobile, and no XG Mobile wattage (its load is correct). The plugin's Performance Monitor and `nvidia-smi` show the temperature and power correctly.
 * **Set Desktop to Default on BazziteOS:** Setting desktop mode to persistent is not currently possible on BazziteOS. With the deck image of bazzite, they have made it over-write the desktop persistence on a reboot. This is still under investigation
 
 ---
@@ -219,6 +219,18 @@ Your OS and version (e.g., Bazzite, SteamOS 3.5.19)
 The exact model of your XG Mobile (4090, 3080, 6850M)
 
 The output of your corresponding logs. (IE. enable, eject, etc.)
+
+### Stuck in Desktop Mode after the Eject desktop icon
+If the XG Mobile was ejected but the Ally stays in Desktop Mode, open Konsole and run:
+
+```bash
+steamos-session-select gamescope
+```
+
+On SteamOS, "Return to Gaming Mode" also goes back, but only once: it doesn't clear "Set Desktop to Default", so Desktop Mode stays the default.
+
+### Black screen in Game Mode after an eject
+On older builds, an eject after booting with the XG Mobile active could leave Game Mode on a black screen. Over SSH (or a TTY), logged in as the handheld's user, run `sudo systemctl stop user@$(id -u).service`, or reboot.
 
 ### Where the logs are
 Every log is in `~/homebrew/logs/xgmobile-manager/activity/`. Decky's own logs for the plugin stay one level up, in `~/homebrew/logs/xgmobile-manager/`; Decky deletes all but the newest 4 log files there every time the plugin loads, so ours are kept in the subfolder. Open them in **Activity Logs**, or attach them from that folder (on Bazzite, `~` is `/var/home/<user>`):

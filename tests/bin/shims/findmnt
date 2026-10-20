@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Test shim: records the call. The document portal's FUSE mount is there while
+# $SHIM_STATE/doc_mounted exists (doc_mounted), until fusermount3 unmounts it.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ -e "$SHIM_STATE/doc_mounted" ]; then
+  echo "${*: -1} portal fuse.portal rw,nosuid,nodev,relatime"
+  exit 0
+fi
+exit 1

@@ -6,8 +6,36 @@
 # $SHIM_STATE/user_manager_down every --user call fails as if the user manager isn't running.
 # `--user is-active graphical-session.target` follows $SHIM_STATE/session_ready: now (default),
 # never, N (inactive for the first N checks, then active) or activating:N (activating for the
-# first N checks, then active).
+# first N checks, then active), unless a "graphical" timeline is set (helpers/timeline.bash).
+# The user manager (user@64999.service) follows the timelines too: `show -p ActiveState -p
+# InvocationID [--value] user@64999.service` prints the "manager" timeline (active by default),
+# and every --user call fails unless it's active or deactivating (the old manager still answers).
+# `--user list-jobs` prints one job per the "jobs" timeline, and `--user list-units
+# --state=deactivating` lists the units in $SHIM_STATE/stuck_units until `--user kill -s KILL
+# <unit>` ends them. `kill -s KILL user@64999.service` ends the manager: from then on it follows
+# timeline/manager.after_kill, or is inactive. Other events switch it the same way, if their file
+# is set: after_unit_kill, after_list_units, and after_show_<n> (after the n-th show of it).
+# The user manager's initial environment ($SHIM_STATE/env/user_initial: what it started with from
+# /etc/environment) shows in `--user show-environment` with the set-environment variables, but
+# `unset-environment` only removes the latter, as on systemd. `stop [--no-block]
+# user@64999.service` ends the manager like the kill (timeline/manager.after_stop, or inactive).
+# After either one, both environments stay while it's still stopping, and go once it's inactive
+# or failed or has a new InvocationID: the next manager starts from the clean file.
+# While the manager is deactivating, every call to it (--user, or naming user@64999.service)
+# moves the fake clock forward by $SHIM_STATE/manager_call_cost seconds, if set.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+# shellcheck source=../helpers/timeline.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
+tl_manager_env_exit
+if [ -e "$SHIM_STATE/manager_call_cost" ] && { [[ " $* " == *" --user "* ]] || [[ " $* " == *" user@64999.service "* ]]; } \
+  && [ "$(tl_manager_state)" = "deactivating" ]; then
+  tl_clock_add "$(cat "$SHIM_STATE/manager_call_cost")"
+fi
+props=() prev=""
+for arg in "$@"; do
+  [ "$prev" = "-p" ] && props+=("$arg")
+  prev="$arg"
+done
 user=0 verb="" units=()
 for arg in "$@"; do
   case "$arg" in
@@ -18,13 +46,21 @@ for arg in "$@"; do
 done
 scope=system
 [ "$user" -eq 1 ] && scope=user
-if [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/user_manager_down" ]; then
+manager_up=1
+case "$(tl_manager_state)" in active|deactivating) ;; *) manager_up=0 ;; esac
+if [ "$user" -eq 1 ] && { [ -e "$SHIM_STATE/user_manager_down" ] || [ "$manager_up" -eq 0 ]; }; then
   echo "Failed to connect to bus: No such file or directory" >&2
   exit 1
 fi
 envfile="$SHIM_STATE/env/$scope"
 case "$verb" in
   show-environment)
+    if [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/env/user_initial" ]; then
+      # A set-environment value overrides the initial one.
+      while IFS= read -r line; do
+        grep -q "^${line%%=*}=" "$envfile" 2>/dev/null || printf '%s\n' "$line"
+      done < "$SHIM_STATE/env/user_initial"
+    fi
     cat "$envfile" 2>/dev/null
     exit 0 ;;
   set-environment|unset-environment)
@@ -36,7 +72,59 @@ case "$verb" in
       mv "$envfile.new" "$envfile"
     done
     exit 0 ;;
+  show)
+    if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      for prop in "${props[@]}"; do
+        case "$prop" in
+          ActiveState) value=$(tl_manager_state) ;;
+          InvocationID) value=$(tl_manager_id) ;;
+          *) value="" ;;
+        esac
+        if [[ " $* " == *" --value "* ]]; then echo "$value"; else echo "$prop=$value"; fi
+      done
+      shows=$(( $(cat "$SHIM_STATE/manager_shows" 2>/dev/null || echo 0) + 1 ))
+      echo "$shows" > "$SHIM_STATE/manager_shows"
+      tl_manager_event "show_$shows"
+    fi
+    exit 0 ;;
+  list-jobs)
+    if [ "$user" -eq 1 ]; then
+      for ((i = 1; i <= $(tl_value jobs 0); i++)); do
+        echo "$i gamescope-session.target start waiting"
+      done
+    fi
+    exit 0 ;;
+  list-units)
+    if [ "$user" -eq 1 ] && [[ " $* " == *" --state=deactivating "* ]]; then
+      while IFS= read -r unit; do
+        [ -n "$unit" ] && echo "$unit loaded deactivating stop-sigterm $unit"
+      done < <(cat "$SHIM_STATE/stuck_units" 2>/dev/null)
+      tl_manager_event list_units
+    fi
+    exit 0 ;;
+  stop)
+    if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      tl_manager_id > "$SHIM_STATE/env_drop_on_exit"
+      tl_restart manager "$SHIM_STATE/timeline/manager.after_stop"
+    fi
+    exit 0 ;;
+  kill)
+    if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
+      tl_manager_id > "$SHIM_STATE/env_drop_on_exit"
+      tl_restart manager "$SHIM_STATE/timeline/manager.after_kill"
+    elif [ "$user" -eq 1 ] && [ -e "$SHIM_STATE/stuck_units" ]; then
+      grep -vFx -- "${units[-1]}" "$SHIM_STATE/stuck_units" > "$SHIM_STATE/stuck_units.new"
+      mv "$SHIM_STATE/stuck_units.new" "$SHIM_STATE/stuck_units"
+      tl_manager_event unit_kill
+    fi
+    exit 0 ;;
   is-active)
+    if [ "$user" -eq 1 ] && [ "${units[-1]}" = "graphical-session.target" ] && [ -e "$SHIM_STATE/timeline/graphical" ]; then
+      state=$(tl_value graphical active)
+      echo "$state"
+      [ "$state" = "active" ] && exit 0
+      exit 3
+    fi
     if [ "$user" -eq 1 ] && [ "${units[-1]}" = "graphical-session.target" ]; then
       ready=$(cat "$SHIM_STATE/session_ready" 2>/dev/null || echo now)
       waiting=inactive

@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Test shim: records the call, drops the options (-s SIGNAL, -k DURATION, --...) and the
+# duration, then runs the command without a time limit.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -s|-k) shift 2 ;;
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+shift
+exec "$@"

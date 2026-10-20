@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Test shim: on PATH by default; no_setpriv takes it off. Records the call, drops the options (--reuid=..., --regid=..., --init-groups), then
+# runs the rest as the current (non-root) user, still on the shim PATH.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+exec "$@"
