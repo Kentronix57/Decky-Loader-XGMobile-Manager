@@ -133,7 +133,8 @@ Installer and first-run testing needs a "clean" OS. Reinstalling is slow, so use
 
 | Tool | Status | Purpose |
 |---|---|---|
-| `build.sh` | ✅ | Builds `xgmobile-manager.zip` |
+| `build.sh` | ✅ | Builds `xgmobile-manager.zip` (uses `--frozen-lockfile` in CI) |
+| Release workflow (`.github/workflows/release.yml`) | ✅ | Pushing a `v*` tag that matches `package.json` runs Tier 0, then `build.sh`, checks every tracked `bin/` and `assets/services/` file made it into the zip, and creates a **draft** release with `xgmobile-manager.zip`. Tags with a suffix (`-beta-1`) become pre-releases. Hardware tiers still happen before you publish the draft. |
 | No-hardware test harness (`tests/`) | ✅ | Tier 0 pytest + bats + vitest suites, run in CI via `bash tests/run-all.sh` |
 | `bin/migrate-logs` | ✅ | Moves logs older versions left in `~/homebrew/logs` (`xgmobile_manager_*.log`, `xgmobile_*.log`, failed DKMS builds) into the plugin log folder `~/homebrew/logs/xgmobile-manager/activity/` (a subfolder because Decky prunes `*.log` files at the top of its plugin log dir on every load), and updates old desktop shortcuts. Run on every plugin load; idempotent. |
 | `deploy.sh` | Planned | Build, copy to the Ally over SSH, restart `plugin_loader` |
