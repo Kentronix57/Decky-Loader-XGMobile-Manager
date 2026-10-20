@@ -24,7 +24,6 @@ EJECTDESKTOP_LOG = os.path.join(LOG_DIR, "xgmobile_manager_desktop_eject_request
 TRANSITION_LOG = os.path.join(LOG_DIR, "xgmobile_manager_transition.log")
 HYBRID_LOG = os.path.join(LOG_DIR, "xgmobile_manager_supergfxd_hybrid.log")
 INTEGRATED_LOG = os.path.join(LOG_DIR, "xgmobile_manager_supergfxd_integrated.log")
-#REPAIR_LOG = os.path.join(LOG_DIR, "xgmobile_manager_repair.log")
 DEBUG_LOG = os.path.join(LOG_DIR, "xgmobile_manager_debug.log")
 INSTALL_LOG = os.path.join(LOG_DIR, "xgmobile_manager_install.log")
 UNINSTALL_LOG = os.path.join(LOG_DIR, "xgmobile_manager_uninstall.log")
@@ -109,11 +108,16 @@ SCRIPT_META = {
   },
 }
 
+# Exit 9 from every script that sources bin/xgm-common.sh, when that file is missing.
+_MISSING_HELPER = ("Plugin files are incomplete (xgm-common.sh missing).",
+                   "Reinstall XG Mobile Manager from the latest release, then try again.")
+
 _SUPERGFX_ERRORS = {
   1: ("supergfxctl failed to switch GPU modes.",
       "Press Restart Supergfxd, then try again. If it still fails, share this log in a GitHub issue."),
   2: ("supergfxctl isn't installed on this system.",
       "Install supergfxctl (asusctl) for your distro, then try again. Bazzite includes it by default."),
+  9: _MISSING_HELPER,
 }
 
 # script -> exit code -> (message, hint)
@@ -131,8 +135,11 @@ SCRIPT_ERROR_CATALOG = {
         "The XG Mobile was switched on but no new GPU showed up in /dev/dri in time. Eject, unlock and re-lock the cable, then try again. If it keeps happening, share the Enable Log on GitHub."),
     6: ("No NVIDIA GPU found on the PCIe bus.",
         "Enable stopped because no NVIDIA device was detected. If your XG Mobile is AMD, turn off NVIDIA Mode. Otherwise re-lock the cable and retry."),
+    9: _MISSING_HELPER,
   },
-  "egpu-eject": {},
+  "egpu-eject": {
+    9: _MISSING_HELPER,
+  },
   "install-nvidia.sh": {
     10: ("NVIDIA drivers already match your kernel. No reboot needed.", ""),
     2: ("Unsupported OS. The driver installer is SteamOS-only.",
@@ -151,6 +158,7 @@ SCRIPT_ERROR_CATALOG = {
   "create-shortcuts": {
     2: ("NVIDIA driver isn't installed, so shortcuts weren't created.",
         "Run Advanced → Install NVIDIA Drivers first, or turn off NVIDIA Mode if your XG Mobile is AMD."),
+    9: _MISSING_HELPER,
   },
   "uninstall.sh": {
     1: ("Reset isn't needed on Bazzite or CachyOS.",
@@ -571,10 +579,6 @@ class Plugin:
     
     return await self._execute_script("supergfx-integrated", INTEGRATED_LOG, vendor, os_type, LOG_DIR, DATA_DIR)
 
-  async def repair_services(self):
-    vendor = await self.get_setting("gpu_vendor", "nvidia")
-    return await self._execute_script("repair-services", REPAIR_LOG, vendor)
-
   async def install_nvidia(self):
     if not self.get_os_type() == "steamos":
       log("SteamOS not detected: Blocking DKMS driver installation.")
@@ -808,7 +812,7 @@ class Plugin:
     return LOG_MAP[log_type][0]
 
   async def get_live_logs(self, log_type="install"):
-    """Called by the frontend every 500ms. log_type can be 'repair' or 'install' or 'uninstall'."""
+    """Called by the frontend every 500ms. log_type is a LOG_MAP key, e.g. 'install' or 'uninstall'."""
     path = self._resolve_log_path(log_type)
     
     if not os.path.exists(path):

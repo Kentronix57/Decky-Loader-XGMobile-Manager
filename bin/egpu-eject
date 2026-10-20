@@ -4,6 +4,8 @@ OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
 ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 SUPERGFX_TRIG=0
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
@@ -12,6 +14,8 @@ mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_eject_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Eject ($VENDOR) Started at $(date) ---"
+DM_SERVICE=$(xgm_dm_service)
+echo "Display manager: $DM_SERVICE"
 
 if systemctl is-active --quiet supergfxd.service; then 
   echo "Supergfxd Detected. Stopping supergfxd to avoid panic during switch..."
@@ -21,8 +25,8 @@ fi
 
 # Stop UI
 # We must kill the session before we pull the rug out from the hardware
-echo "Stopping SDDM..."
-systemctl stop sddm
+echo "Stopping $DM_SERVICE..."
+systemctl stop "$DM_SERVICE"
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   echo "Sanitizing /etc/environment..."
@@ -38,14 +42,14 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
     # De-Fanging Configs
     echo "De-fanging NVIDIA configs to protect AMD Handheld Mode..."
-    steamos-readonly disable
+    xgm_ro_disable
     mkdir -p $DATA_DIR/configs_backup
     mv $ROOT/usr/share/glvnd/egl_vendor.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
     mv $ROOT/usr/share/vulkan/implicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
     mv $ROOT/usr/share/vulkan/explicit_layer.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
     mv $ROOT/usr/share/vulkan/icd.d/*nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
     mv $ROOT/usr/share/X11/xorg.conf.d/10-nvidia* $DATA_DIR/configs_backup/ 2>/dev/null || true
-    steamos-readonly enable
+    xgm_ro_enable
   
     # Environment Cleanup (System-Wide)
     # We unset the exact variables we set in the enable script
@@ -162,7 +166,8 @@ if [ "$SUCCESS" -eq 0 ]; then
   echo "WARNING: Hardware did not seem to drop from /dev/dri/. Proceeding anyway to restore UI."
 fi
 
-systemctl start sddm #--no-block
+echo "Starting $DM_SERVICE..."
+systemctl start "$DM_SERVICE" #--no-block
 
 #if [ $SUPERGFX_TRIG == 1 ]; then
 #  echo "Restarting supergfxctl..."

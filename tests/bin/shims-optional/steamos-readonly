@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test shim: on PATH by default; no_steamos_readonly takes it off. Records the call. With
+# $SHIM_STATE/steamos_readonly_fatal present, it kills the calling script so a test that wrongly
+# gets past a pre-flight check can't go any further.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ -e "$SHIM_STATE/steamos_readonly_fatal" ]; then
+  echo "SHIM: steamos-readonly reached in fatal mode, killing caller" >&2
+  kill -9 "$PPID"
+  exit 99
+fi

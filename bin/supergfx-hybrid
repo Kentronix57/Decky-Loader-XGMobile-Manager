@@ -3,8 +3,13 @@ VENDOR=$1 # Capture 'nvidia' or 'amd' from the plugin
 OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 
 exec > "$LOG_DIR/xgmobile_manager_supergfxd_hybrid.log" 2>&1
+
+DM_SERVICE=$(xgm_dm_service)
+echo "Display manager: $DM_SERVICE"
 
 # --- SUPERGFXCTL NATIVE PATH ---
 if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet supergfxd.service; then # && [[ "$OS_TYPE" == *"bazzite"* || "$OS_TYPE" == "cachyos" ]]; then
@@ -14,8 +19,8 @@ if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet 
 
   if supergfxctl -m Hybrid; then
     echo "supergfxctl hardware switch successful"
-    echo "Executing SDDM restart to apply hardware switch..."
-    systemctl restart sddm --no-block
+    echo "Executing $DM_SERVICE restart to apply hardware switch..."
+    systemctl restart "$DM_SERVICE" --no-block
     #( sleep 2 && systemctl restart sddm ) >/dev/null 2>&1 &
     #disown
   

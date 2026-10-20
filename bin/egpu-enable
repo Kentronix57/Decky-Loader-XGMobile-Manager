@@ -4,6 +4,8 @@ OS_TYPE=$2
 LOG_DIR=$3
 DATA_DIR=$4
 ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 SUPERGFX_TRIG=0
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
@@ -12,6 +14,21 @@ mkdir -p "$DATA_DIR/configs"
 exec > "$LOG_DIR/xgmobile_manager_enable_${VENDOR}.log" 2>&1
 
 echo "--- XG Mobile Enable ($VENDOR) Started at $(date) ---"
+DM_SERVICE=$(xgm_dm_service)
+echo "Display manager: $DM_SERVICE"
+
+# If the script exits while the display manager is stopped, start it again so the screen
+# doesn't stay black. Keeps the original exit code.
+DM_STOPPED=0
+restore_dm() {
+  local rc=$?
+  if [ "$DM_STOPPED" -eq 1 ]; then
+    echo "Restoring $DM_SERVICE after early exit or interruption..."
+    systemctl start "$DM_SERVICE"
+  fi
+  exit "$rc"
+}
+trap restore_dm EXIT
 
 # Hardware Lock Check
 CONNECTED=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_connected || echo "0")
@@ -29,7 +46,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
       exit 2
     fi
     if [ ! -f "$DATA_DIR/configs_backup/nvidia_icd.json" ] && [ ! -f "$ROOT/usr/share/vulkan/icd.d/nvidia_icd.json" ]; then
-      if [ -f "$ROOT/home/deck/xgmobile_configs_backup/nvidia_icd.json" ]; then
+      if [ -f "$ROOT/home/$PRIMARY_USER/xgmobile_configs_backup/nvidia_icd.json" ]; then
         echo "CRITICAL ERROR: NVIDIA Vulkan configs detected in old folder location due to v0.2.0 migration."
         echo "Please use the 'Install NVIDIA Drivers' button in the plugin to regenerate them."
         exit 3
@@ -56,7 +73,7 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
 
   if [ "$NEEDS_REPAIR" -eq 1 ]; then
     echo "System files missing. Initiating self-repair..."
-    steamos-readonly disable
+    xgm_ro_disable
   
     # Restore global terminal commands
     ln -sf "$REPO_ROOT/bin/egpu-enable" $ROOT/usr/local/bin/egpu-enable
@@ -76,18 +93,18 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
     else
       systemctl daemon-reload
     fi
-    steamos-readonly enable
+    xgm_ro_enable
     echo "Self-repair complete."
   fi
 fi
 
 if [ -L $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ] || [ -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix ]; then
   echo "Purging obsolete legacy egpu-resume-fix..."
-  steamos-readonly disable
+  xgm_ro_disable
   rm -f $ROOT/usr/lib/systemd/system-sleep/egpu-resume-fix
   rm -f $ROOT/etc/systemd/system/egpu-resume-fix.service
   rm -f $ROOT/etc/systemd/system/egpu-boot-guardian.service
-  steamos-readonly enable
+  xgm_ro_enable
 fi
 
 if systemctl is-active --quiet supergfxd.service; then 
@@ -126,7 +143,7 @@ while [ -z "$EGPU_CARD" ] && [ $COUNT -lt 15 ]; do
   echo "Waiting for eGPU card... ($COUNT)"
   CURRENT_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
   for card in $CURRENT_CARDS; do
-    if ! echo "$EXISTING_CARDS" | grep -q "$card"; then
+    if ! echo "$EXISTING_CARDS" | grep -qxF -- "$card"; then
       EGPU_CARD=$card
       break
     fi
@@ -161,9 +178,10 @@ fi
 #  sudo -u $PRIMARY_USER $DECK_BUS systemctl --user set-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1
 #fi
   # STOP UI
-# We must stop sddm so we can unload the driver modules
-echo "Stopping SDDM..."
-systemctl stop sddm
+# We must stop the display manager so we can unload the driver modules
+echo "Stopping $DM_SERVICE..."
+systemctl stop "$DM_SERVICE"
+DM_STOPPED=1
 
  
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
@@ -179,13 +197,13 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     echo "Dynamic Hardware Lock: $NVIDIA_ID"
 
     echo "Re-fanging NVIDIA configs for active session..."
-    steamos-readonly disable
+    xgm_ro_disable
     mv $DATA_DIR/configs_backup/10_nvidia* $ROOT/usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/*icd* $ROOT/usr/share/vulkan/icd.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
     mv $DATA_DIR/configs_backup/10-nvidia* $ROOT/usr/share/X11/xorg.conf.d/ 2>/dev/null || true
-    steamos-readonly enable
+    xgm_ro_enable
 
     # This is what forces the NVIDIA card into Wayland mode
     echo "Loading NVIDIA modules..."
@@ -249,7 +267,7 @@ EOF"
     chmod +x "$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh"
 
     # Final Reload & Start
-    echo "Daemon-reload and start SDDM..."
+    echo "Daemon-reload and start $DM_SERVICE..."
     systemctl daemon-reload
     sudo -u $PRIMARY_USER $DECK_BUS systemctl --user daemon-reload
 
@@ -271,7 +289,8 @@ EOF"
   fi
 fi
 echo "Refreshing DRM session..."
-systemctl start sddm #--no-block
+systemctl start "$DM_SERVICE" #--no-block
+DM_STOPPED=0
 
 #if [ $SUPERGFX_TRIG == 1 ]; then
 #  echo "Restarting supergfxctl..."
