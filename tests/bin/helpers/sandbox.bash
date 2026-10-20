@@ -19,7 +19,7 @@ source "$XGM_REPO/tests/audit/audit.bash"
 source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
-SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf)
+SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee)
 
 refuse_root() {
   if [ "$EUID" -eq 0 ]; then
@@ -61,7 +61,7 @@ make_root() {
   # Scripts use $ROOT unquoted, so the path must not contain spaces or glob characters.
   [[ "$ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || fail "unsafe sandbox path for unquoted \$ROOT: $ROOT"
 
-  LOG_DIR="$BATS_TEST_TMPDIR/homebrew/logs"
+  LOG_DIR="$BATS_TEST_TMPDIR/homebrew/logs/xgmobile-manager/activity"
   DATA_DIR="$BATS_TEST_TMPDIR/homebrew/data/xgmobile-manager"
   SHIM_LOG="$BATS_TEST_TMPDIR/shim.log"
   SHIM_STATE="$BATS_TEST_TMPDIR/shim-state"
@@ -283,12 +283,13 @@ enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergf
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
 # LANG=C unless $SANDBOX_LANG is set. Sets bats' $status/$output, and
-# $LOG to the contents of every log file the run wrote to LOG_DIR.
+# $LOG to the contents of every log file the run wrote to LOG_DIR. LOG_DIR is emptied first,
+# unless KEEP_LOG_DIR=1 (tests that seed it, e.g. migrate-logs).
 run_script() {
   local name="$1"
   shift
   [ -n "${ROOT:-}" ] || fail "run_script: call make_root first"
-  find "$LOG_DIR" -mindepth 1 -delete
+  [ "${KEEP_LOG_DIR:-0}" = "1" ] || find "$LOG_DIR" -mindepth 1 -delete
   run env -i \
     HOME="$BATS_TEST_TMPDIR/home" \
     LANG="${SANDBOX_LANG:-C}" \

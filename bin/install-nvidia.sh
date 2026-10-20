@@ -129,9 +129,9 @@ cleanup_on_exit() {
 
     # PRESERVE LOGS FIRST
     if [ -d "$DATA_DIR/system/var/lib/dkms" ]; then
-      echo "Saving failed compiler logs to $LOG_DIR/..."
-      mkdir -p $LOG_DIR/
-      mv $DATA_DIR/system/var/lib/dkms/nvidia* $LOG_DIR/ 2>/dev/null || true
+      echo "Saving failed compiler logs to $LOG_DIR/dkms/..."
+      mkdir -p "$LOG_DIR/dkms/"
+      mv $DATA_DIR/system/var/lib/dkms/nvidia* "$LOG_DIR/dkms/" 2>/dev/null || true
     fi
 
     # DYNAMIC SMART RESTORE

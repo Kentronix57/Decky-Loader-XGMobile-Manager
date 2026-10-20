@@ -6,7 +6,7 @@ DATA_DIR=$4
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
 
-exec > "$LOG_DIR/xgmobile_manager_supergfxd_integrated.log" 2>&1
+exec > "$LOG_DIR/supergfxd_integrated.log" 2>&1
 
 DM_SERVICE=$(xgm_dm_service)
 echo "Display manager: $DM_SERVICE"

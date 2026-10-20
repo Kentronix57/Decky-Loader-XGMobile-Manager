@@ -59,6 +59,16 @@ xgm_primary_user() {
   echo "${user:-deck}"
 }
 
+# The plugin's log folder: the activity/ subfolder of the one Decky uses for
+# DECKY_PLUGIN_LOG_DIR, <homebrew>/logs/<plugin folder name>/activity (Decky deletes all but the
+# newest 4 *.log files at its top level on every plugin load). Resolved from this file's location
+# (<homebrew>/plugins/<plugin>/bin), for callers that don't get a log dir (egpu-sync at boot).
+xgm_log_dir() {
+  local plugin
+  plugin=$(readlink -m "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/..")
+  readlink -m "$plugin/../../logs/$(basename "$plugin")/activity"
+}
+
 # The host OS, with the same rules as main.py get_os_type: steamos | cachyos | bazzite |
 # bazzite-nvidia | unsupported. For callers that don't get the OS as an argument (egpu-sync at boot).
 xgm_os_type() {
