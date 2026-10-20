@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test shim: succeeds only when the sandbox says the NVIDIA driver is installed.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ "$(cat "$SHIM_STATE/nvidia_driver" 2>/dev/null)" = "installed" ]; then
+  echo "filename:       /lib/modules/6.11.11-valve12-1-neptune-611/updates/dkms/nvidia.ko.zst"
+  echo "version:        610.43.02"
+  exit 0
+fi
+echo "modinfo: ERROR: Module nvidia not found." >&2
+exit 1

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test shim: only on PATH when a test calls enable_supergfxctl. Exits with $FAKE_SUPERGFX_RC.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+exit "${FAKE_SUPERGFX_RC:-0}"

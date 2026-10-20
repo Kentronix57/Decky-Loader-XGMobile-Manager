@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Test shim: `pacman -Si <pkg>` prints a Version line from $SHIM_STATE/pacman_version (nothing
+# and exit 1 when unset). Everything else just succeeds.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ "$1" = "-Si" ]; then
+  version=$(cat "$SHIM_STATE/pacman_version" 2>/dev/null)
+  if [ -z "$version" ]; then
+    echo "error: package '$2' was not found" >&2
+    exit 1
+  fi
+  echo "Repository      : jupiter-main"
+  echo "Name            : $2"
+  echo "Version         : $version"
+fi
+exit 0

@@ -1,18 +1,19 @@
 #!/bin/bash
 LOG_DIR=$1
 DATA_DIR=$2
+ROOT="${XGM_ROOT:-}"
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 echo "--- SURGICAL XG MOBILE UNINSTALLER ---"
 
 # Check if the OS is Bazzite
-if grep -qi "bazzite" /etc/os-release; then
+if grep -qi "bazzite" $ROOT/etc/os-release; then
     echo "ERROR: BazziteOS detected. This plugin's driver installation is built for SteamOS (Arch)."
     echo "Bazzite natively handles the XG Mobile via supergfxctl. No need to reset driver environment."
     exit 1
 fi
 
-if grep -qi "cachy" /etc/os-release; then
+if grep -qi "cachy" $ROOT/etc/os-release; then
     echo "ERROR: CachyOS detected. This plugin's driver installation is built for SteamOS (Arch)."
     echo "CachyOS natively handles the XG Mobile via supergfxctl. No need to reset driver environment."
     exit 1

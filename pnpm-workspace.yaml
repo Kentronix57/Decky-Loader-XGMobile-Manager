@@ -3,3 +3,8 @@ peerDependencyRules:
     - react
     - react-dom
     - decky-frontend-lib
+# esbuild's postinstall only re-verifies its prebuilt binary; vitest works without it.
+allowBuilds:
+  esbuild: false
+ignoredBuiltDependencies:
+  - esbuild

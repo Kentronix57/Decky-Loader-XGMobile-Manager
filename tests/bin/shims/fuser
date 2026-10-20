@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Test shim: records the call, does nothing.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"

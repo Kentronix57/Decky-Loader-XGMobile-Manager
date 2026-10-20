@@ -1,11 +1,12 @@
 #!/bin/bash
 VENDOR=$1
 OS_TYPE=$2
+ROOT="${XGM_ROOT:-}"
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 [ -z "$PRIMARY_USER" ] && PRIMARY_USER="deck"
 
 # Check if the ASUS WMI interface says the eGPU is actually connected
-ACTIVE=$(cat /sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || echo "0")
+ACTIVE=$(cat $ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable 2>/dev/null || echo "0")
 
 if [ "$ACTIVE" -eq 0 ]; then
     echo "Failsafe triggered: XG Mobile is not physically connected."
@@ -13,7 +14,7 @@ if [ "$ACTIVE" -eq 0 ]; then
     systemctl disable xgmobile-boot-sync.service 2>/dev/null
     
     # Optionally: Clean up the kwin env file here just to be safe
-    rm -f /home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh
+    rm -f $ROOT/home/deck/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh
     
     exit 0
 fi
@@ -29,7 +30,7 @@ fi
 
 if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
   # Foolproof detection of exact DRM nodes based on hardware vendor ID
-  for card in /sys/class/drm/card*; do
+  for card in $ROOT/sys/class/drm/card*; do
     HW_VENDOR=$(cat $card/device/vendor 2>/dev/null)
     if [ "$HW_VENDOR" == "0x10de" ]; then # NVIDIA ID
       EGPU_CARD="/dev/dri/$(basename $card)"
@@ -47,11 +48,11 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 
   # 1. Update the System-Wide Environment
   steamos-readonly disable 2>/dev/null || true
-  sed -i 's|WLR_DRM_DEVICES=.*|WLR_DRM_DEVICES='$EGPU_CARD':'$IGPU_CARD'|' /etc/environment
+  sed -i 's|WLR_DRM_DEVICES=.*|WLR_DRM_DEVICES='$EGPU_CARD':'$IGPU_CARD'|' $ROOT/etc/environment
   steamos-readonly enable 2>/dev/null || true
 
   # 2. Update the Isolated Plasma Environment
-  PLASMA_ENV_DIR="/home/$PRIMARY_USER/.config/plasma-workspace/env"
+  PLASMA_ENV_DIR="$ROOT/home/$PRIMARY_USER/.config/plasma-workspace/env"
   sudo -u $PRIMARY_USER bash -c "cat > '$PLASMA_ENV_DIR/xgmobile-nvidia-kwin.sh' << EOF
 #!/bin/bash
 export KWIN_DRM_DEVICES=$EGPU_CARD:$IGPU_CARD

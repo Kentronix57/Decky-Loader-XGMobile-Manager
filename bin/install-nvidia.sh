@@ -1,6 +1,7 @@
 #!/bin/bash
 LOG_DIR=$1
 DATA_DIR=$2
+ROOT="${XGM_ROOT:-}"
 #PRIMARY_USER=$(echo "$LOG_DIR" | cut -d/ -f3)
 PRIMARY_USER=$(ps -o user= -C steam | head -n 1 | xargs)
 echo "Checking NVIDIA driver status..."
@@ -12,7 +13,7 @@ if modinfo nvidia >/dev/null 2>&1; then
   exit 10
 fi
 
-if ! grep -qi "steamos" /etc/os-release; then
+if ! grep -qi "steamos" $ROOT/etc/os-release; then
     echo "ERROR: Unsupported OS detected. This driver installation script is built exclusively for SteamOS (Arch)."
     echo "If you are using Bazzite, please switch to the 'bazzite-nvidia-deck' image, which has the drivers natively built-in."
     exit 2
