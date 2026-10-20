@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# Test shim: succeeds only when the sandbox says the NVIDIA driver is installed.
+# Test shim. `modinfo nvidia` (the running kernel) succeeds only when the sandbox says the NVIDIA
+# driver is installed. `modinfo -k <kver> nvidia` succeeds only if $SHIM_STATE/modinfo_k/<kver>
+# exists (nvidia_module_for <kver>).
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-if [ "$(cat "$SHIM_STATE/nvidia_driver" 2>/dev/null)" = "installed" ]; then
+if [ "$1" = "-k" ]; then
+  if [ -e "$SHIM_STATE/modinfo_k/$2" ]; then
+    echo "filename:       /lib/modules/$2/extramodules/nvidia.ko.zst"
+    echo "version:        615.78.08"
+    exit 0
+  fi
+elif [ "$(cat "$SHIM_STATE/nvidia_driver" 2>/dev/null)" = "installed" ]; then
   echo "filename:       /lib/modules/6.11.11-valve12-1-neptune-611/updates/dkms/nvidia.ko.zst"
   echo "version:        610.43.02"
   exit 0

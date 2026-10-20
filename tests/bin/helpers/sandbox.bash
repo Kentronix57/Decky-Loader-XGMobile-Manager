@@ -179,6 +179,45 @@ set_lspci() { echo "$1" > "$SHIM_STATE/lspci"; }
 # nvidia | amdgpu | none
 set_lsmod() { echo "$1" > "$SHIM_STATE/lsmod"; }
 
+# pacman packages (shims/pacman). pacman_repo <pkg> none | <record>...: what `pacman -Si` finds in
+# the sync database, one record per argument in repo priority order. A record is <version>
+# (repo "cachyos") or <repo>=<version>. pacman_local <pkg> <version|none>: what `pacman -Q`
+# reports as installed. Once pacman_repo is used, `pacman -Si` only finds packages set this way.
+pacman_repo() {
+  local pkg="$1" rec
+  shift
+  mkdir -p "$SHIM_STATE/pacman_repo"
+  rm -f "$SHIM_STATE/pacman_repo/$pkg"
+  [ "$1" = "none" ] && return 0
+  for rec in "$@"; do
+    if [[ "$rec" == *=* ]]; then
+      echo "${rec%%=*} ${rec#*=}"
+    else
+      echo "cachyos $rec"
+    fi
+  done > "$SHIM_STATE/pacman_repo/$pkg"
+}
+
+pacman_local() {
+  mkdir -p "$SHIM_STATE/pacman_local"
+  if [ "$2" = "none" ]; then rm -f "$SHIM_STATE/pacman_local/$1"; else echo "$2" > "$SHIM_STATE/pacman_local/$1"; fi
+}
+
+# Exit code of `pacman -S` (default 0).
+pacman_install_rc() { echo "$1" > "$SHIM_STATE/pacman_install_rc"; }
+
+# installed_kernel <kver> <pkgbase> [version]: a kernel package with its module dir and pkgbase
+# file, installed at <version> (default 7.2.9-2), and the same version in the sync database.
+installed_kernel() {
+  mkdir -p "$ROOT/usr/lib/modules/$1"
+  echo "$2" > "$ROOT/usr/lib/modules/$1/pkgbase"
+  pacman_local "$2" "${3:-7.2.9-2}"
+  pacman_repo "$2" "${3:-7.2.9-2}"
+}
+
+# nvidia_module_for <kver>: `modinfo -k <kver> nvidia` succeeds.
+nvidia_module_for() { mkdir -p "$SHIM_STATE/modinfo_k"; touch "$SHIM_STATE/modinfo_k/$1"; }
+
 # An already-enabled eGPU (for running eject/sync on their own).
 egpu_present() {
   egpu_appears "$1"
@@ -195,7 +234,8 @@ no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
 enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergfxctl"; }
 
 # run_script <bin name> [args...]
-# Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH. Sets bats' $status/$output, and
+# Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
+# LANG=C unless $SANDBOX_LANG is set. Sets bats' $status/$output, and
 # $LOG to the contents of every log file the run wrote to LOG_DIR.
 run_script() {
   local name="$1"
@@ -204,7 +244,7 @@ run_script() {
   find "$LOG_DIR" -mindepth 1 -delete
   run env -i \
     HOME="$BATS_TEST_TMPDIR/home" \
-    LANG=C \
+    LANG="${SANDBOX_LANG:-C}" \
     PATH="$XGM_SHIMS:$OPTBIN:$SYSBIN" \
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \

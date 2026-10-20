@@ -46,11 +46,11 @@ This plugin manages the complex hardware handshakes, dynamically compiles and in
 
 ## 📊 Compatibility Matrix
 
-| Hardware | SteamOS | Bazzite | Notes |
-| :--- | :--- | :--- | :--- |
-| **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🟢 Tested & Working | Full DKMS driver compilation supported. BazziteOS cannot recover from sleep/hibernate. |
-| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | Untested, but should follow all the same rules as the 4090. |
-| **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | Uses native `amdgpu` kernel drivers. |
+| Hardware | SteamOS | Bazzite | CachyOS | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| **NVIDIA XG Mobile (4090)** | 🟢 Tested & Working | 🟢 Tested & Working | 🟡 Experimental | Full DKMS driver compilation supported on SteamOS. CachyOS installs its packaged drivers with pacman. BazziteOS cannot recover from sleep/hibernate. |
+| **NVIDIA XG Mobile (3080)** | 🟡 Experimental | 🟡 Experimental | 🟡 Experimental | Untested, but should follow all the same rules as the 4090. |
+| **AMD XG Mobile (6850M XT)** | 🟡 Experimental | 🟢 Tested & Working | 🟡 Experimental | Uses native `amdgpu` kernel drivers. |
 
 ---
 
@@ -89,6 +89,8 @@ curl -sL "https://raw.githubusercontent.com/Kentronix57/Decky-Loader-XGMobile-Ma
 ```
 *(Note: Restart your Device after installation to ensure the UI loads).*
 
+*(Note: The terminal commands in this README assume `bash`. CachyOS's default shell is `fish`: type `bash` first, then run the command.)*
+
 ---
 
 ## 📖 How To Use
@@ -99,7 +101,16 @@ curl -sL "https://raw.githubusercontent.com/Kentronix57/Decky-Loader-XGMobile-Ma
 3. Select your Vendor Mode (NVIDIA or AMD). If AMD, skip to Daily Use. NVIDIA users on SteamOS, please continue.
 4. **SteamOS NVIDIA ONLY:** Make sure you are on the latest SteamOS update. Click Install NVIDIA Drivers. A live terminal will appear. Do not turn off your device. This downloads ~1.8GB of data and compiles the Linux kernel modules. Reboot when prompted.
 5. **Bazzite ONLY:** No installation is required. The Advanced menu will intentionally hide the driver installer to protect your immutable OS.
+5. **CachyOS NVIDIA ONLY:** See [CachyOS](#cachyos) below.
 6. Click Create Desktop Icons to make Desktop Shortcuts for Enabling and Ejecting the XG Mobile
+
+### CachyOS
+CachyOS only installs NVIDIA drivers when it detects an NVIDIA GPU, and the XG Mobile is usually off during the OS install, so they're often missing. Enable then fails with "NVIDIA driver isn't installed".
+1. Install [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) and this plugin.
+2. Open the plugin → Advanced → **Install NVIDIA Drivers**. This needs an internet connection. It installs CachyOS's own packages with pacman: the prebuilt NVIDIA module for your kernel (e.g. `linux-cachyos-deckify-nvidia-open`) when the repo has one, `nvidia-open-dkms` otherwise, plus the NVIDIA userspace.
+3. Reboot when prompted.
+
+If the installer reports pending updates, run `sudo pacman -Syu` in a terminal, reboot, then run it again. After that, the drivers update with the rest of the system through `sudo pacman -Syu`, not through the plugin. There is no "Update Tax" and no Reset Driver Environment on CachyOS.
 
 ### Daily Use
 

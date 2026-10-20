@@ -62,4 +62,6 @@ teardown() {
   run_script uninstall.sh "$LOG_DIR" "$DATA_DIR"
   assert_failure 1
   assert_output --partial "CachyOS detected"
+  assert_output --partial "Remove them with pacman"
+  refute_output --partial "supergfxctl"
 }

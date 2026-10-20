@@ -197,13 +197,40 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
     echo "Dynamic Hardware Lock: $NVIDIA_ID"
 
     echo "Re-fanging NVIDIA configs for active session..."
-    xgm_ro_disable
-    mv $DATA_DIR/configs_backup/10_nvidia* $ROOT/usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/*icd* $ROOT/usr/share/vulkan/icd.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
-    mv $DATA_DIR/configs_backup/10-nvidia* $ROOT/usr/share/X11/xorg.conf.d/ 2>/dev/null || true
-    xgm_ro_enable
+    if [[ "$OS_TYPE" == *"cachyos"* ]]; then
+      # On CachyOS eject no longer moves these pacman-owned files out, so this only repairs files an
+      # older plugin version moved. A file the package has put back since wins: the backup copy is
+      # dropped instead of overwriting it. No explicit_layer.d pass: nvidia-utils ships its layer
+      # in implicit_layer.d, and a second *layer* pass would put leftover copies there.
+      refang_cachyos() {
+        local f
+        for f in $DATA_DIR/configs_backup/$1; do
+          [ -e "$f" ] || continue
+          if [ -e "$2/$(basename "$f")" ]; then
+            rm -f "$f"
+          else
+            mv -n "$f" "$2/" 2>/dev/null || true
+          fi
+        done
+      }
+      refang_cachyos "10_nvidia*" $ROOT/usr/share/glvnd/egl_vendor.d
+      refang_cachyos "*icd*" $ROOT/usr/share/vulkan/icd.d
+      refang_cachyos "*layer*" $ROOT/usr/share/vulkan/implicit_layer.d
+      refang_cachyos "10-nvidia*" $ROOT/usr/share/X11/xorg.conf.d
+    else
+      xgm_ro_disable
+      mv $DATA_DIR/configs_backup/10_nvidia* $ROOT/usr/share/glvnd/egl_vendor.d/ 2>/dev/null || true
+      mv $DATA_DIR/configs_backup/*icd* $ROOT/usr/share/vulkan/icd.d/ 2>/dev/null || true
+      mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/implicit_layer.d/ 2>/dev/null || true
+      mv $DATA_DIR/configs_backup/*layer* $ROOT/usr/share/vulkan/explicit_layer.d/ 2>/dev/null || true
+      mv $DATA_DIR/configs_backup/10-nvidia* $ROOT/usr/share/X11/xorg.conf.d/ 2>/dev/null || true
+      xgm_ro_enable
+    fi
+
+    # nouveau grabs the eGPU if its blacklist hasn't applied yet; harmless when it isn't loaded.
+    if [[ "$OS_TYPE" == *"cachyos"* ]]; then
+      modprobe -r nouveau 2>/dev/null || true
+    fi
 
     # This is what forces the NVIDIA card into Wayland mode
     echo "Loading NVIDIA modules..."
