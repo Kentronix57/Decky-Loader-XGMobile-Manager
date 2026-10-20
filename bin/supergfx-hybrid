@@ -24,5 +24,9 @@ if command -v supergfxctl >/dev/null 2>&1; then #if systemctl is-active --quiet 
   else 
     echo "WARNING: supergfxctl crashed or failed to respond."
     echo "Please copy the logs and upload them to github for assistance."
+    exit 1
   fi
+else
+  echo "ERROR: supergfxctl is not installed on this system."
+  exit 2
 fi

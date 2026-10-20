@@ -10,9 +10,10 @@ import {
   Focusable,
   Dropdown
 } from "@decky/ui";
-import { call, toaster } from "@decky/api";
+import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
+import { notifyError, notifyResult, toActionResult } from "../lib/notify";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -42,6 +43,7 @@ export const QuickAccessContent = () => {
   const [selectedDesktopDefault, setSelectedDesktopDefault] = useState("0");
   const [osType, setOsType] = useState("steamos");
   const [powerProfile, setPowerProfile] = useState("Unknown");
+  const [statusError, setStatusError] = useState("");
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && (osType.includes('bazzite') || osType === 'cachyos');
 
   // 1. Initial Load: Fetch Vendor Setting once
@@ -64,7 +66,7 @@ export const QuickAccessContent = () => {
         const device = await call("get_device_type") as string;
         setDeviceType(device);
       } catch (e) { 
-        console.error("Init Error:", e); 
+        notifyError("XG Mobile Manager", e, "load plugin settings");
       }
     };
     init();
@@ -75,7 +77,10 @@ export const QuickAccessContent = () => {
     const poll = async () => {
       try {
         const currentStatus = await call("get_gpu_status") as any;
-        if (currentStatus) setGpuStatus(currentStatus);
+        if (currentStatus && typeof currentStatus === "object") {
+          setGpuStatus(currentStatus);
+          setStatusError(currentStatus.error ?? "");
+        }
         if (currentStatus?.active) {
           const stats = await call("get_telemetry") as any;
           if (stats) setTelemetry(stats);
@@ -92,28 +97,32 @@ export const QuickAccessContent = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleAction = async (method: string, label: string) => {
+  const handleAction = async (method: string, label: string, actionPhrase: string) => {
     if (isLoading) return;
     setIsLoading(true);
     setStatusText(label);
-    toaster.toast({ title: "XG Mobile", body: `Starting: ${label}...` });
 
     try {
       if (selectedDesktopMode === "1" && method === "enable_egpu") {
-        //toaster.toast({ title: "Debug", body: "1. React is calling Python..." });
-        
-        const flagResult = await call("set_desktop_transition_flag") as string;
-        
-        toaster.toast({ title: "DesktopMode", body: `Setting Desktop Flag: ${flagResult}` });
-        
-        //await new Promise(resolve => setTimeout(resolve, 3000));
+        // A failed flag write is only a warning; the enable still runs.
+        const flagRes = toActionResult(await call("set_desktop_transition_flag"), "Desktop Mode");
+        if (!flagRes.ok) notifyResult(flagRes);
       }
-      const result = await call(method);
-      toaster.toast({ title: "XG Mobile", body: `${label} Result: ${result}` });
-      const newStatus = await call("get_gpu_status") as any;
-      setGpuStatus(newStatus);
+      const res = toActionResult(await call(method), label);
+      notifyResult(res);
     } catch (e) {
-      toaster.toast({ title: "Error", body: "Action failed." });
+      notifyError("XG Mobile", e, actionPhrase);
+    }
+
+    // Separate try: a failed refresh must never contradict a successful action.
+    try {
+      const newStatus = await call("get_gpu_status") as any;
+      if (newStatus && typeof newStatus === "object") {
+        setGpuStatus(newStatus);
+        setStatusError(newStatus.error ?? "");
+      }
+    } catch (e) {
+      console.error("Status refresh error:", e);
     } finally {
       setIsLoading(false);
       setStatusText("");
@@ -128,19 +137,10 @@ export const QuickAccessContent = () => {
     showModal(<LiveLogViewerModal logType="install" />);
 
     try {
-      const result = (await call("install_nvidia")) as string;
-      if (result.includes("ALREADY_INSTALLED")) {
-        toaster.toast({ 
-          title: "NVIDIA Setup", 
-          body: "Drivers are already installed. No reboot required.", 
-          duration: 4000 
-        });
-      } else if (result.includes("Failed") || result.includes("Error")) {
-        toaster.toast({ 
-          title: "NVIDIA Setup", 
-          body: "Installation failed. Check the logs.", 
-          duration: 5000 
-        });
+      const res = toActionResult(await call("install_nvidia"), "NVIDIA Install");
+      if (res.status !== "success") {
+        // Covers both "already_installed" and errors; only a real install earns the reboot prompt.
+        notifyResult(res);
       } else {
         showModal(
           <ConfirmModal
@@ -153,9 +153,10 @@ export const QuickAccessContent = () => {
         );
       }
     } catch (e) {
-      toaster.toast({ title: "Error", body: "Plugin communication failed." });
+      notifyError("NVIDIA Install", e, "install the NVIDIA drivers");
     } finally {
       setIsLoading(false);
+      setStatusText("");
     }
   };
 
@@ -163,41 +164,61 @@ export const QuickAccessContent = () => {
     if (isLoading) return;
     setIsLoading(true);
     setStatusText("Restarting Daemon");
-    toaster.toast({ title: "Flow Controls", body: "Restarting supergfxd..." });
 
     try {
-      const result = await call("restart_supergfxd") as string;
-      if (result === "Success") {
-        toaster.toast({ title: "Flow Controls", body: "Daemon restarted successfully." });
-      } else {
-        toaster.toast({ title: "Error", body: result });
-      }
+      notifyResult(toActionResult(await call("restart_supergfxd"), "Restart supergfxd"));
     } catch (e) {
-      toaster.toast({ title: "Error", body: "Action failed." });
+      notifyError("Flow Controls", e, "restart supergfxd");
     } finally {
       setIsLoading(false);
       setStatusText("");
     }
   };
   const toggleVendor = async (val: boolean) => {
+    const prevVendor = selectedVendor;
     const newVendor = val ? "nvidia" : "amd";
     setSelectedVendor(newVendor);
-    await call("set_setting", "gpu_vendor", newVendor ) as string;
+    try {
+      await call("set_setting", "gpu_vendor", newVendor ) as string;
+    } catch (e) {
+      setSelectedVendor(prevVendor);
+      notifyError("Settings", e, "save this setting");
+    }
   };
   const toggleDesktopMode = async (val: boolean) => {
+    const prevDesktopMode = selectedDesktopMode;
+    const prevDesktopDefault = selectedDesktopDefault;
     const newDesktopMode = val ? "1" : "0";
     setSelectedDesktopMode(newDesktopMode);
-    await call("set_setting", "desktop_mode", newDesktopMode ) as string;
+    try {
+      await call("set_setting", "desktop_mode", newDesktopMode ) as string;
+    } catch (e) {
+      setSelectedDesktopMode(prevDesktopMode);
+      notifyError("Settings", e, "save this setting");
+      return;
+    }
     //If they turned off the BootToDesktop, lets turn off DesktopDefault as well. 
     if (newDesktopMode === "0") {
       setSelectedDesktopDefault(newDesktopMode);
-      await call("set_setting", "desktop_default", newDesktopMode ) as string;
+      try {
+        await call("set_setting", "desktop_default", newDesktopMode ) as string;
+      } catch (e) {
+        // desktop_mode was saved; only the desktop_default write failed
+        setSelectedDesktopDefault(prevDesktopDefault);
+        notifyError("Settings", e, "save this setting");
+      }
     }
   };
   const toggleDesktopDefault = async (val: boolean) => {
+    const prevDesktopDefault = selectedDesktopDefault;
     const newDesktopDefault = val ? "1" : "0";
     setSelectedDesktopDefault(newDesktopDefault);
-    await call("set_setting", "desktop_default", newDesktopDefault ) as string;
+    try {
+      await call("set_setting", "desktop_default", newDesktopDefault ) as string;
+    } catch (e) {
+      setSelectedDesktopDefault(prevDesktopDefault);
+      notifyError("Settings", e, "save this setting");
+    }
   };
 
   const onResetClick = () => {
@@ -211,9 +232,9 @@ export const QuickAccessContent = () => {
             setIsLoading(true);
             showModal(<LiveLogViewerModal logType="uninstall" />);
             try {
-              const result = await call("uninstall_nvidia") as string;
-              if (result !== "Success") {
-                toaster.toast({ title: "Reset Error", body: result });
+              const res = toActionResult(await call("uninstall_nvidia"), "Reset Driver Environment");
+              if (!res.ok) {
+                notifyResult(res);
               } else {
                 showModal(
                   <ConfirmModal
@@ -226,7 +247,7 @@ export const QuickAccessContent = () => {
                 );
               }
             } catch (e) {
-              toaster.toast({ title: "Error", body: "Backend unreachable." });
+              notifyError("Reset Driver Environment", e, "reset the driver environment");
             } finally {
               setIsLoading(false);
             }
@@ -322,10 +343,17 @@ export const QuickAccessContent = () => {
                 { data: "Performance", label: "Performance" }
               ]}
               onChange={async (option: any) => {
+                const prevProfile = powerProfile;
                 const newProfile = option.data;
                 setPowerProfile(newProfile);
-                await call("set_power_profile", { profile: newProfile });
-                toaster.toast({ title: "ASUS Profile", body: `Set to ${newProfile}` });
+                try {
+                  const res = toActionResult(await call("set_power_profile", { profile: newProfile }), "ASUS Power Profile");
+                  if (!res.ok) setPowerProfile(prevProfile);
+                  notifyResult(res);
+                } catch (e) {
+                  setPowerProfile(prevProfile);
+                  notifyError("ASUS Power Profile", e, "change the power profile");
+                }
               }}
             />
           )}
@@ -334,6 +362,13 @@ export const QuickAccessContent = () => {
 
       {/* SECTION 2: Controls */}
       <PanelSection title="Controls">
+        {statusError !== "" && (
+          <PanelSectionRow>
+            <div style={{ color: "#ffab40", fontSize: "12px", fontStyle: "italic", padding: "4px 0" }}>
+              Can't read XG Mobile connection state: {statusError} Make sure this is an ASUS device with the asus-nb-wmi driver loaded.
+            </div>
+          </PanelSectionRow>
+        )}
         {isLoading ? (
           <PanelSectionRow>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -347,7 +382,7 @@ export const QuickAccessContent = () => {
               <ButtonItem
                 layout="below"
                 disabled={!gpuStatus.connected || gpuStatus.active || isLoading}
-                onClick={() => handleAction("enable_egpu", "Enabling")}
+                onClick={() => handleAction("enable_egpu", "Enabling", "enable the XG Mobile")}
               >
                 {gpuStatus.active ? "XG Mobile is Active" : "Enable XG Mobile"}
               </ButtonItem>
@@ -357,7 +392,7 @@ export const QuickAccessContent = () => {
               <ButtonItem
                 layout="below"
                 disabled={!gpuStatus.active || isLoading}
-                onClick={() => handleAction("eject_egpu", "Ejecting")}
+                onClick={() => handleAction("eject_egpu", "Ejecting", "eject the XG Mobile")}
               >
                 {gpuStatus.active ? "Eject XG Mobile" : "XG Mobile is not Active"}
               </ButtonItem>
@@ -421,7 +456,7 @@ export const QuickAccessContent = () => {
             layout="below"
             description="Create Desktop shortcuts for enabling and ejecting the XG Mobile. Run this after selecting Vender type and running Install NVIDIA Drivers if needed."
             disabled={isLoading}
-            onClick={() => handleAction("create_desktop_shortcuts", "Creating Shortcuts")}
+            onClick={() => handleAction("create_desktop_shortcuts", "Creating Shortcuts", "create desktop shortcuts")}
           >
             Create Desktop Shortcuts
           </ButtonItem>
@@ -461,7 +496,7 @@ export const QuickAccessContent = () => {
               <ButtonItem
                 layout="below"
                 disabled={isLoading}
-                onClick={() => handleAction("hybrid_supergfxctl", "Switching to Hybrid")}
+                onClick={() => handleAction("hybrid_supergfxctl", "Switching to Hybrid", "switch to Hybrid mode")}
               >
                 Send Supergfxctl Hybrid command - beta
               </ButtonItem>
@@ -471,7 +506,7 @@ export const QuickAccessContent = () => {
               <ButtonItem
                 layout="below"
                 disabled={isLoading}
-                onClick={() => handleAction("integrated_supergfxctl", "Switching to Integrated")}
+                onClick={() => handleAction("integrated_supergfxctl", "Switching to Integrated", "switch to Integrated mode")}
               >
                 Send Supergfxctl Integrated command - beta
               </ButtonItem>
