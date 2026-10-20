@@ -14,6 +14,7 @@ import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
 import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
+import { Telemetry, mainButton, maintenanceRows, statusLine, telemetryCells } from "../lib/panelLayout";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -24,6 +25,55 @@ const statsStyle: React.CSSProperties = {
   backgroundColor: "rgba(0,0,0,0.2)",
   borderRadius: "4px",
   marginBottom: "10px"
+};
+
+const infoParagraph: React.CSSProperties = { marginBottom: "10px" };
+
+// Kept as one string (a Tier 0 test pins it verbatim); shown as three paragraphs.
+const POWER_INFO = `Sets the Ally's ASUS profile, which also sets the XG Mobile's power limit (on the RTX 4090: Quiet 60 W, Balanced 120 W, Performance 150 W). Steam's performance setting changes the same profile. Use Steam's TDP slider to limit the Ally CPU. For full XG Mobile power with a cool CPU, pick Performance and cap the CPU with Steam's TDP slider or a TDP plugin. If a TDP plugin manages the ASUS profile (e.g. SimpleDeckyTDP's "Enable Asus Platform Profile Management"), turn that off so this setting and the CPU limit stay separate.`;
+
+// The full text behind the panel's ⓘ buttons
+const showPowerInfo = () => {
+  showModal(
+    <ConfirmModal
+      strTitle="How power limits work"
+      strDescription={
+        <>
+          {POWER_INFO.split(/ (?=Use Steam's TDP slider|If a TDP plugin)/).map((paragraph) => (
+            <div key={paragraph} style={infoParagraph}>{paragraph}</div>
+          ))}
+          <div style={{ opacity: 0.85 }}>
+            Measured on the RTX 4090. The RTX 3080 showed the same 120 W / 150 W; Quiet is expected to be 60 W there too.
+          </div>
+        </>
+      }
+      strOKButtonText="OK"
+      bAlertDialog={true}
+    />
+  );
+};
+
+const showDesktopInfo = () => {
+  showModal(
+    <ConfirmModal
+      strTitle="About Desktop Mode"
+      strDescription={
+        <>
+          <div style={infoParagraph}>
+            <b>DesktopMode on Enable:</b> Turn on to reboot straight into Desktop Mode when running the Enable. Recommended for 4K and Ultrawide resolutions with NVIDIA GPUs.
+          </div>
+          <div style={infoParagraph}>
+            <b>Set Desktop to Default:</b> Turn on to set Desktop Mode to Default when running the XG Mobile. You MUST run the Eject Desktop Link to revert to GameMode.
+          </div>
+          <div>
+            Use the Eject XG Mobile desktop icon to get back to Game Mode. If you're ever stuck in Desktop Mode, open Konsole and run <code>steamos-session-select gamescope</code>.
+          </div>
+        </>
+      }
+      strOKButtonText="OK"
+      bAlertDialog={true}
+    />
+  );
 };
 
 export const QuickAccessContent = () => {
@@ -37,13 +87,15 @@ export const QuickAccessContent = () => {
   
   // Dynamic State from Backend
   const [gpuStatus, setGpuStatus] = useState({ connected: false, active: false, vendor: "none" });
-  const [telemetry, setTelemetry] = useState({ temp: "--", power: "--", vram: "--", util: "--" });
+  const [telemetry, setTelemetry] = useState<Telemetry>({ temp: "--", power: "--", vram: "--", util: "--" });
   const [selectedVendor, setSelectedVendor] = useState("nvidia");
   const [selectedDesktopMode, setSelectedDesktopMode] = useState("0");
   const [selectedDesktopDefault, setSelectedDesktopDefault] = useState("0");
   const [osType, setOsType] = useState("steamos");
   const [powerProfile, setPowerProfile] = useState("Unknown");
   const [statusError, setStatusError] = useState("");
+  const [statusLoaded, setStatusLoaded] = useState(false);
+  const [showMaintenance, setShowMaintenance] = useState(false);
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
 
   // 1. Initial Load: Fetch Vendor Setting once
@@ -88,7 +140,13 @@ export const QuickAccessContent = () => {
   useEffect(() => {
     const poll = async () => {
       try {
-        const currentStatus = await call("get_gpu_status") as any;
+        let currentStatus: any;
+        try {
+          currentStatus = await call("get_gpu_status");
+        } finally {
+          // First answer (or failure) is in: stop showing "Checking…"
+          setStatusLoaded(true);
+        }
         if (currentStatus && typeof currentStatus === "object") {
           setGpuStatus(currentStatus);
           setStatusError(currentStatus.error ?? "");
@@ -301,35 +359,41 @@ export const QuickAccessContent = () => {
       </PanelSection>
     );
   }
+  const button = mainButton(gpuStatus, isLoading);
+  const status = statusLine(gpuStatus, statusLoaded);
+  const rows = maintenanceRows(osType, deviceType);
+
   return (
     <Focusable>
-      {/* SECTION 1: Telemetry Dashboard (Only show if connected/active) */}
-      {(gpuStatus.active) && (
-        <PanelSection title="Performance Monitor">
-          <div style={statsStyle}>
-            <div>
-              <small>Temperature</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.temp}</div>
-            </div>
-            <div>
-              <small>Power Draw</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.power}</div>
-            </div>
-            <div>
-              <small>VRAM Usage</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.vram}</div>
-            </div>
-            <div>
-              <small>GPU Load</small>
-              <div style={{ fontSize: "1.2em", fontWeight: "bold" }}>{telemetry.util}</div>
-            </div>
+      <PanelSection>
+        {/* STATUS LINE */}
+        <PanelSectionRow>
+          <div style={{ fontSize: "14px", color: status.color, opacity: status.dimmed ? 0.6 : 1, padding: "4px 0" }}>
+            ● {status.text}
           </div>
-        </PanelSection>
-      )}
+        </PanelSectionRow>
+        {statusError !== "" && (
+          <PanelSectionRow>
+            <div style={{ color: "#ffab40", fontSize: "12px", fontStyle: "italic", padding: "4px 0" }}>
+              Can't read XG Mobile connection state: {statusError} Make sure this is an ASUS device with the asus-nb-wmi driver loaded.
+            </div>
+          </PanelSectionRow>
+        )}
 
-      {/* OS WARNING: WRONG BAZZITE IMAGE */}
-      {(osType === "bazzite") && (selectedVendor === "nvidia") && (
-        <PanelSection title="System Warning">
+        {/* Telemetry Dashboard (Only show if active) */}
+        {(gpuStatus.active) && (
+          <div style={statsStyle}>
+            {telemetryCells(telemetry).map((cell) => (
+              <div key={cell.label}>
+                <small>{cell.label}</small>
+                <div style={{ fontSize: "1.2em", fontWeight: "bold", color: cell.color }}>{cell.text}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* OS WARNING: WRONG BAZZITE IMAGE */}
+        {(osType === "bazzite") && (selectedVendor === "nvidia") && (
           <PanelSectionRow>
             <div style={{ color: "#ff5555", fontSize: "14px", marginBottom: "10px" }}>
               <strong>Wrong OS Image Detected!</strong><br/>
@@ -337,11 +401,51 @@ export const QuickAccessContent = () => {
               The NVIDIA XG Mobile will not function correctly on this installation. Please install the correct version or select AMD.
             </div>
           </PanelSectionRow>
-        </PanelSection>
-      )}
+        )}
+
+        {/* MAIN BUTTON: Enable or Eject */}
+        {isLoading ? (
+          <PanelSectionRow>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Spinner />
+              <span style={{ marginLeft: "10px" }}>{statusText}...</span>
+            </div>
+          </PanelSectionRow>
+        ) : (
+          <>
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                disabled={button.disabled}
+                onClick={() => handleAction(button.action, button.statusLabel, button.actionPhrase)}
+              >
+                {button.label}
+              </ButtonItem>
+            </PanelSectionRow>
+
+            {showSleepWarning && (
+              <PanelSectionRow>
+                <div style={{
+                  backgroundColor: 'rgba(255, 0, 0, 0.15)',
+                  border: '1px solid #ff4444',
+                  padding: '12px',
+                  borderRadius: '6px',
+                  color: '#ffdddd',
+                  fontSize: '13px',
+                  lineHeight: '1.4'
+                }}>
+                  <b>⚠️ CRITICAL SLEEP WARNING</b><br/>
+                  Due to NVIDIA firmware limitations on this OS, putting the device to sleep right now will cause a fatal hardware crash requiring a hard reboot. <br/><br/>
+                  <b>You must Eject the eGPU before sleeping.</b>
+                </div>
+              </PanelSectionRow>
+            )}
+          </>
+        )}
+      </PanelSection>
 
       {/* UNIVERSAL ASUS WMI CONTROLS */}
-      <PanelSection title="ASUS Hardware Controls">
+      <PanelSection title="Power">
         <PanelSectionRow>
           <div style={{ marginBottom: "6px", fontSize: "14px", opacity: 0.8 }}>
             ASUS Power Profile (Ally + XG Mobile)
@@ -374,163 +478,132 @@ export const QuickAccessContent = () => {
             />
           )}
           <div style={{ marginTop: "6px", fontSize: "12px", opacity: 0.7 }}>
-            Sets the Ally's ASUS profile, which also sets the XG Mobile's power limit (on the RTX 4090: Balanced 120 W, Performance 150 W). Steam's performance setting changes the same profile. Use Steam's TDP slider to limit the Ally CPU. For full XG Mobile power with a cool CPU, pick Performance and cap the CPU with Steam's TDP slider or a TDP plugin. If a TDP plugin manages the ASUS profile (e.g. SimpleDeckyTDP's "Enable Asus Platform Profile Management"), turn that off so this setting and the CPU limit stay separate.
+            XG Mobile limit: Quiet 60 W · Balanced 120 W · Performance 150 W (RTX 4090 and RTX 3080)
           </div>
         </PanelSectionRow>
-      </PanelSection>
-
-      {/* SECTION 2: Controls */}
-      <PanelSection title="Controls">
-        {statusError !== "" && (
-          <PanelSectionRow>
-            <div style={{ color: "#ffab40", fontSize: "12px", fontStyle: "italic", padding: "4px 0" }}>
-              Can't read XG Mobile connection state: {statusError} Make sure this is an ASUS device with the asus-nb-wmi driver loaded.
-            </div>
-          </PanelSectionRow>
-        )}
-        {isLoading ? (
-          <PanelSectionRow>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Spinner />
-              <span style={{ marginLeft: "10px" }}>{statusText}...</span>
-            </div>
-          </PanelSectionRow>
-        ) : (
-          <>
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                disabled={!gpuStatus.connected || gpuStatus.active || isLoading}
-                onClick={() => handleAction("enable_egpu", "Enabling", "enable the XG Mobile")}
-              >
-                {gpuStatus.active ? "XG Mobile is Active" : "Enable XG Mobile"}
-              </ButtonItem>
-            </PanelSectionRow>
-
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                disabled={!gpuStatus.active || isLoading}
-                onClick={() => handleAction("eject_egpu", "Ejecting", "eject the XG Mobile")}
-              >
-                {gpuStatus.active ? "Eject XG Mobile" : "XG Mobile is not Active"}
-              </ButtonItem>
-            </PanelSectionRow>
-
-            {showSleepWarning && (
-              <PanelSectionRow>
-                <div style={{
-                  backgroundColor: 'rgba(255, 0, 0, 0.15)',
-                  border: '1px solid #ff4444',
-                  padding: '12px',
-                  borderRadius: '6px',
-                  color: '#ffdddd',
-                  fontSize: '13px',
-                  lineHeight: '1.4'
-                }}>
-                  <b>⚠️ CRITICAL SLEEP WARNING</b><br/>
-                  Due to NVIDIA firmware limitations on this OS, putting the device to sleep right now will cause a fatal hardware crash requiring a hard reboot. <br/><br/>
-                  <b>You must Eject the eGPU before sleeping.</b>
-                </div>
-              </PanelSectionRow>
-            )}
-            <PanelSectionRow>
-              <ToggleField
-                label="NVIDIA Mode"
-                description="Turn off for AMD XG Mobile units"
-                // Disable if the hardware is active
-                disabled={gpuStatus.active || isLoading}
-                checked={selectedVendor === "nvidia"}
-                onChange={toggleVendor}
-              />
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <ToggleField
-                label="DesktopMode on Enable"
-                description="Turn on to reboot straight into Desktop Mode when running the Enable. Recommended for 4K and Ultrawide resolutions with NVIDIA GPUs."
-                // Disable if the hardware is active
-                disabled={gpuStatus.active || isLoading}
-                checked={selectedDesktopMode === "1"}
-                onChange={toggleDesktopMode}
-              />
-            </PanelSectionRow>
-            <PanelSectionRow>
-              <ToggleField
-                label="Set Desktop to Default"
-                description="Turn on to set Desktop Mode to Default when running the XG Mobile. You MUST run the Eject Desktop Link to revert to GameMode."
-                // Disable if the hardware is active
-                disabled={gpuStatus.active || isLoading || selectedDesktopMode === "0"}
-                checked={selectedDesktopDefault === "1"}
-                onChange={toggleDesktopDefault}
-              />
-            </PanelSectionRow>
-          </>
-        )}
-      </PanelSection>
-
-      {/* SECTION 3: Maintenance */}
-      <PanelSection title="Advanced">
         <PanelSectionRow>
-          <ButtonItem
-            layout="below"
-            description="Create Desktop shortcuts for enabling and ejecting the XG Mobile. Run this after selecting Vender type and running Install NVIDIA Drivers if needed."
-            disabled={isLoading}
-            onClick={() => handleAction("create_desktop_shortcuts", "Creating Shortcuts", "create desktop shortcuts")}
-          >
-            Create Desktop Shortcuts
+          <ButtonItem layout="below" onClick={showPowerInfo}>
+            ⓘ How power limits work
           </ButtonItem>
         </PanelSectionRow>
-        {/* Render Install button ONLY on SteamOS and CachyOS */}
-        {(osType === "steamos" || osType === "cachyos") && (
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              disabled={gpuStatus.active || isLoading}
-              onClick={handleInstall} 
-            >
-              Install NVIDIA Drivers
-            </ButtonItem>
-          </PanelSectionRow>
-        )}
-        {/* Render Reset button ONLY on SteamOS */}
-        {osType === "steamos" && (
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              disabled={gpuStatus.active || isLoading}
-              onClick={onResetClick}
-            >
-              <span style={{ color: "#ff5555" }}>Reset Driver Environment</span>
-            </ButtonItem>
-          </PanelSectionRow>
-        )}
+      </PanelSection>
 
-        {/* SUPERGFXCTL CONTROLS */}
-        {deviceType === "laptop" && (//{hasSupergfxctl && (
-          <PanelSection title="Flow Laptop Controls">
-            <PanelSectionRow>
-              <ButtonItem layout="below" onClick={() => enableSuperGfxd()}>
-                Restart Supergfxd
-              </ButtonItem>
-              <ButtonItem
-                layout="below"
-                disabled={isLoading}
-                onClick={() => handleAction("hybrid_supergfxctl", "Switching to Hybrid", "switch to Hybrid mode")}
-              >
-                Send Supergfxctl Hybrid command - beta
-              </ButtonItem>
-            </PanelSectionRow>
+      {/* OPTIONS */}
+      <PanelSection title="Options">
+        <PanelSectionRow>
+          <ToggleField
+            label="NVIDIA Mode"
+            description="Off for AMD XG Mobile units"
+            // Disable if the hardware is active
+            disabled={gpuStatus.active || isLoading}
+            checked={selectedVendor === "nvidia"}
+            onChange={toggleVendor}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="DesktopMode on Enable"
+            description="Restart into Desktop Mode after Enable"
+            // Disable if the hardware is active
+            disabled={gpuStatus.active || isLoading}
+            checked={selectedDesktopMode === "1"}
+            onChange={toggleDesktopMode}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ToggleField
+            label="Set Desktop to Default"
+            description="Stay in Desktop Mode until you Eject"
+            // Disable if the hardware is active
+            disabled={gpuStatus.active || isLoading || selectedDesktopMode === "0"}
+            checked={selectedDesktopDefault === "1"}
+            onChange={toggleDesktopDefault}
+          />
+        </PanelSectionRow>
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={showDesktopInfo}>
+            ⓘ About Desktop Mode
+          </ButtonItem>
+        </PanelSectionRow>
 
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                disabled={isLoading}
-                onClick={() => handleAction("integrated_supergfxctl", "Switching to Integrated", "switch to Integrated mode")}
-              >
-                Send Supergfxctl Integrated command - beta
-              </ButtonItem>
-            </PanelSectionRow>
-          </PanelSection>
+        {/* SETUP & MAINTENANCE (collapsed by default; same section, so no untitled section break) */}
+        <PanelSectionRow>
+          <ButtonItem layout="below" onClick={() => setShowMaintenance(!showMaintenance)}>
+            {showMaintenance ? "▾" : "▸"} Setup & Maintenance
+          </ButtonItem>
+        </PanelSectionRow>
+        {showMaintenance && (
+          <>
+            {rows.includes("shortcuts") && (
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  description="Create Desktop shortcuts for enabling and ejecting the XG Mobile. Run this after selecting vendor type and running Install NVIDIA Drivers if needed."
+                  disabled={isLoading}
+                  onClick={() => handleAction("create_desktop_shortcuts", "Creating Shortcuts", "create desktop shortcuts")}
+                >
+                  Create Desktop Shortcuts
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {/* Install: SteamOS and CachyOS only */}
+            {rows.includes("install") && (
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  disabled={gpuStatus.active || isLoading}
+                  onClick={handleInstall} 
+                >
+                  Install NVIDIA Drivers
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+            {/* Reset: SteamOS only */}
+            {rows.includes("reset") && (
+              <PanelSectionRow>
+                <ButtonItem
+                  layout="below"
+                  disabled={gpuStatus.active || isLoading}
+                  onClick={onResetClick}
+                >
+                  <span style={{ color: "#ff5555" }}>Reset Driver Environment</span>
+                </ButtonItem>
+              </PanelSectionRow>
+            )}
+
+            {/* SUPERGFXCTL CONTROLS (Flow laptops) */}
+            {rows.includes("flow") && (
+              <>
+                <PanelSectionRow>
+                  <div style={{ fontSize: "14px", opacity: 0.8, padding: "4px 0" }}>
+                    Flow Laptop Controls
+                  </div>
+                </PanelSectionRow>
+                <PanelSectionRow>
+                  <ButtonItem layout="below" onClick={() => enableSuperGfxd()}>
+                    Restart Supergfxd
+                  </ButtonItem>
+                  <ButtonItem
+                    layout="below"
+                    disabled={isLoading}
+                    onClick={() => handleAction("hybrid_supergfxctl", "Switching to Hybrid", "switch to Hybrid mode")}
+                  >
+                    Send Supergfxctl Hybrid command - beta
+                  </ButtonItem>
+                </PanelSectionRow>
+
+                <PanelSectionRow>
+                  <ButtonItem
+                    layout="below"
+                    disabled={isLoading}
+                    onClick={() => handleAction("integrated_supergfxctl", "Switching to Integrated", "switch to Integrated mode")}
+                  >
+                    Send Supergfxctl Integrated command - beta
+                  </ButtonItem>
+                </PanelSectionRow>
+              </>
+            )}
+          </>
         )}
 
         {/* Universal Debug Tools */}
@@ -542,18 +615,11 @@ export const QuickAccessContent = () => {
             View Activity Logs
           </ButtonItem>
         </PanelSectionRow>
-      </PanelSection>
 
-      <PanelSection title="About">
-        <PanelSectionRow>
-          <div style={{ display: "flex", justifyContent: "space-between", opacity: 0.6, fontSize: "0.8em" }}>
-            <span>Version</span>
-            <span>{pluginVersion}</span>
-          </div>
-        </PanelSectionRow>
+        {/* About */}
         <PanelSectionRow>
           <div style={{ opacity: 0.6, fontSize: "0.8em" }}>
-            Created by Kentronix
+            {pluginVersion !== "Loading..." && `v${pluginVersion} · `}Created by Kentronix
           </div>
         </PanelSectionRow>
       </PanelSection>

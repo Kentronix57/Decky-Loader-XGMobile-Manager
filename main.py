@@ -48,6 +48,10 @@ PENDING_RESULT_PATH = os.path.join(DATA_DIR, "last_result.json")
 EJECT_CANCELLED_MARKER = os.path.join(DATA_DIR, "last_eject_cancelled")  # written by egpu-eject (exit 7)
 PENDING_RESULT_MAX_AGE = 600  # seconds
 PENDING_RESULT_SCRIPTS = ("egpu-enable", "egpu-eject")
+# get-gpu-stats' numeric keys, all unknown (the telemetry fallbacks)
+TELEMETRY_UNKNOWN = {"temp_c": None, "util_pct": None, "vram_mb": None, "vram_total_mb": None,
+                     "power_w": None, "power_limit_w": None}
+TELEMETRY_TIMEOUT = 5  # seconds; polled every 3 s, so a hung nvidia-smi must not pile up
 
 os.makedirs(os.path.join(DATA_DIR, "configs"), exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -1137,22 +1141,26 @@ class Plugin:
     clean_env = os.environ.copy()
     clean_env.pop("LD_LIBRARY_PATH", None)
 
+    # Polled every few seconds: run it off the event loop
     try:
-      result = subprocess.run(
-          [script_path],
+      result = await asyncio.to_thread(
+          subprocess.run,
+          [script_path, DATA_DIR],
           capture_output=True,
           text=True,
-          env=clean_env
+          encoding="utf-8",
+          env=clean_env,
+          timeout=TELEMETRY_TIMEOUT
       )
       
       if result.returncode == 0:
           return json.loads(result.stdout)
       else:
-          return {"vendor": "none", "temp": "Err", "util": "Err", "vram": "Err", "power": "Err"}
+          return {"vendor": "none", "temp": "Err", "util": "Err", "vram": "Err", "power": "Err", **TELEMETRY_UNKNOWN}
           
     except Exception as e:
       log(f"Telemetry Fetch Error: {e}")
-      return {"vendor": "none", "temp": "--", "util": "--", "vram": "--", "power": "--"}
+      return {"vendor": "none", "temp": "--", "util": "--", "vram": "--", "power": "--", **TELEMETRY_UNKNOWN}
 
   # --- LOGGING & REPAIR ---
 
