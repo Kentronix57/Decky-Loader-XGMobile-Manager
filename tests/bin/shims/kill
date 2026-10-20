@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Test shim for `env kill -<SIGNAL> <pid>...` (egpu-eject signals the eGPU holders by PID; the
+# shell builtin would signal real processes on the host). A service holder's PID
+# (gpu_service_holder) stops holding the eGPU; any other PID is the session holder
+# (gpu_holders), which reacts like a `fuser -k` with the same signal. See helpers/holders.bash.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+# shellcheck source=../helpers/holders.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/holders.bash"
+signal=TERM pids=()
+for arg in "$@"; do
+  case "$arg" in
+    -*) signal="${arg#-}" ;;
+    *) pids+=("$arg") ;;
+  esac
+done
+for pid in "${pids[@]}"; do
+  if hl_is_service_pid "$pid"; then
+    hl_service_drop 1 "$pid"
+  else
+    hl_session_signal "$signal"
+  fi
+done
+exit 0

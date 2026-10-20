@@ -23,9 +23,14 @@
 # or failed or has a new InvocationID: the next manager starts from the clean file.
 # While the manager is deactivating, every call to it (--user, or naming user@64999.service)
 # moves the fake clock forward by $SHIM_STATE/manager_call_cost seconds, if set.
+# `stop <unit>` (system manager) ends that unit's eGPU service holders (helpers/holders.bash),
+# unless $SHIM_STATE/stop_ignored/<unit> exists.
+# `start <unit>` fails, with an error on stderr, if $SHIM_STATE/start_fails/<unit> exists.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 # shellcheck source=../helpers/timeline.bash
 . "$(dirname "$(readlink -f "$0")")/../helpers/timeline.bash"
+# shellcheck source=../helpers/holders.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/holders.bash"
 tl_manager_env_exit
 if [ -e "$SHIM_STATE/manager_call_cost" ] && { [[ " $* " == *" --user "* ]] || [[ " $* " == *" user@64999.service "* ]]; } \
   && [ "$(tl_manager_state)" = "deactivating" ]; then
@@ -102,7 +107,22 @@ case "$verb" in
       tl_manager_event list_units
     fi
     exit 0 ;;
+  start)
+    if [ "$user" -eq 0 ]; then
+      for unit in "${units[@]}"; do
+        if [ -e "$SHIM_STATE/start_fails/$unit" ]; then
+          echo "Job for $unit failed because the control process exited with error code." >&2
+          exit 1
+        fi
+      done
+    fi
+    exit 0 ;;
   stop)
+    if [ "$user" -eq 0 ]; then
+      for unit in "${units[@]}"; do
+        [ -e "$SHIM_STATE/stop_ignored/$unit" ] || hl_service_drop 2 "$unit"
+      done
+    fi
     if [ "$user" -eq 0 ] && [ "${units[-1]}" = "user@64999.service" ]; then
       tl_manager_id > "$SHIM_STATE/env_drop_on_exit"
       tl_restart manager "$SHIM_STATE/timeline/manager.after_stop"

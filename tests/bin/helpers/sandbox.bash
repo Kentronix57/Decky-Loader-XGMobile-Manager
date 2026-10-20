@@ -273,10 +273,31 @@ egpu_card_later() {
 # udevadm_wait appears|timeout|missing: what `udevadm wait` does (shims/udevadm).
 udevadm_wait() { echo "$1" > "$SHIM_STATE/udevadm_wait"; }
 
-# gpu_holders <n|ignore-term|unkillable>: the next n fuser checks find the eGPU nodes in use
-# (any fuser -k frees them); or they're in use until fuser -k -KILL (ignore-term); or they stay in
-# use whatever happens. See shims/fuser.
+# gpu_holders <n|ignore-term|unkillable>: the session holder (PID 4242). The next n fuser checks
+# find the eGPU nodes in use (any signal to 4242, or fuser -k, frees them); or they're in use until
+# SIGKILL (ignore-term); or they stay in use whatever happens. See shims/fuser and shims/kill.
 gpu_holders() { echo "$1" > "$SHIM_STATE/gpu_holders"; }
+
+# gpu_service_holder <pid> <unit>: a process of system service <unit> (cgroup
+# 0::/system.slice/<unit>) holds the eGPU nodes until `systemctl stop <unit>`, or until it's
+# signalled (shims/kill) or fuser -k'd. See helpers/holders.bash.
+gpu_service_holder() {
+  holder_cgroup "$1" "0::/system.slice/$2"
+  echo "$1 $2" >> "$SHIM_STATE/service_holders"
+}
+
+# holder_cgroup <pid> <cgroup line>: $ROOT/proc/<pid>/cgroup, e.g. for the session holder (4242,
+# which has none by default, as if it had exited).
+holder_cgroup() {
+  mkdir -p "$ROOT/proc/$1"
+  echo "$2" > "$ROOT/proc/$1/cgroup"
+}
+
+# start_fails <unit>: `systemctl start <unit>` fails (shims/systemctl).
+start_fails() { mkdir -p "$SHIM_STATE/start_fails"; touch "$SHIM_STATE/start_fails/$1"; }
+
+# stop_ignored <unit>: `systemctl stop <unit>` leaves its eGPU service holders running.
+stop_ignored() { mkdir -p "$SHIM_STATE/stop_ignored"; touch "$SHIM_STATE/stop_ignored/$1"; }
 
 # module_stuck <module>: `modprobe -r <module>` fails as "in use" and its sys/module dir stays.
 module_stuck() { echo "$1" >> "$SHIM_STATE/module_stuck"; }

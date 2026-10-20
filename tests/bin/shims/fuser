@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Test shim, driven by $SHIM_STATE/gpu_holders (gpu_holders in helpers/sandbox.bash):
+# Test shim, driven by $SHIM_STATE/gpu_holders (gpu_holders in helpers/sandbox.bash), the session
+# holder (PID 4242, "gamescope-wl"):
 #   <n>          the next n checks (calls without -k) find the files in use, then they're free.
 #                Any -k kills the holders: every later check finds the files free.
 #   ignore-term  in use until a -k with SIGKILL (-KILL, or no signal: fuser's default).
 #   unkillable   always in use, even after -k.
 #   (missing)    never in use.
-# Exits 0 when the files are in use, 1 otherwise, like fuser. With -v, lists a fake holder per
-# file on stderr.
+# and by $SHIM_STATE/service_holders (gpu_service_holder): system service processes that keep the
+# files in use until their unit is stopped (shims/systemctl) or they're killed (-k, shims/kill).
+# Exits 0 when the files are in use, 1 otherwise, like fuser. Prints each holder's PID once per
+# file on stdout; with -v, lists them per file on stderr instead.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-state="$SHIM_STATE/gpu_holders"
-holders=$(cat "$state" 2>/dev/null || echo 0)
+# shellcheck source=../helpers/holders.bash
+. "$(dirname "$(readlink -f "$0")")/../helpers/holders.bash"
+holders=$(cat "$HOLDERS_STATE" 2>/dev/null || echo 0)
 kill=0 verbose=0 signal=KILL files=()
 for arg in "$@"; do
   case "$arg" in
@@ -18,23 +22,36 @@ for arg in "$@"; do
     *) files+=("$arg") ;;
   esac
 done
-busy=0
+session=0
 case "$holders" in
-  unkillable|ignore-term) busy=1 ;;
-  *) [ "$holders" -gt 0 ] 2>/dev/null && busy=1 ;;
+  unkillable|ignore-term) session=1 ;;
+  *) [ "$holders" -gt 0 ] 2>/dev/null && session=1 ;;
 esac
+services=$(hl_services)
+busy=$session
+[ -n "$services" ] && busy=1
 if [ "$busy" -eq 1 ] && [ "$verbose" -eq 1 ]; then
   echo "                     USER        PID ACCESS COMMAND" >&2
-  for f in "${files[@]}"; do echo "$f:      xgmtest    4242 F.... gamescope-wl" >&2; done
+  for f in "${files[@]}"; do
+    [ "$session" -eq 1 ] && echo "$f:      xgmtest    4242 F.... gamescope-wl" >&2
+    while read -r pid unit; do
+      [ -n "$pid" ] && echo "$f:      root       $pid F.... ${unit%.service}" >&2
+    done <<< "$services"
+  done
+elif [ "$busy" -eq 1 ] && [ "$kill" -eq 0 ]; then
+  for f in "${files[@]}"; do
+    [ "$session" -eq 1 ] && printf ' %5d' 4242
+    while read -r pid _; do
+      [ -n "$pid" ] && printf ' %5d' "$pid"
+    done <<< "$services"
+  done
+  echo
 fi
 if [ "$kill" -eq 1 ]; then
-  case "$holders" in
-    unkillable) ;;
-    ignore-term) [ "$signal" = "KILL" ] && echo 0 > "$state" ;;
-    *) echo 0 > "$state" ;;
-  esac
-elif [ "$busy" -eq 1 ] && [[ "$holders" =~ ^[0-9]+$ ]]; then
-  echo $((holders - 1)) > "$state"
+  hl_session_signal "$signal"
+  rm -f "$SERVICE_HOLDERS"
+elif [ "$session" -eq 1 ] && [[ "$holders" =~ ^[0-9]+$ ]]; then
+  echo $((holders - 1)) > "$HOLDERS_STATE"
 fi
 [ "$busy" -eq 1 ] && exit 0
 exit 1

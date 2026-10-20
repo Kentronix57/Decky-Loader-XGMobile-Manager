@@ -96,15 +96,79 @@ wait_for_release() {
   return 0
 }
 
-# Logs which processes hold the eGPU nodes, then sends them the signal (TERM or KILL).
-kill_holders() {
+# The PIDs holding the eGPU nodes, one per line (fuser prints the PIDs on stdout, the rest on
+# stderr).
+holder_pids() {
   local nodes
+  mapfile -t nodes < <(gpu_nodes)
+  [ "${#nodes[@]}" -gt 0 ] || return 0
+  fuser "${nodes[@]}" 2>/dev/null | grep -oE '[0-9]+' | sort -un
+}
+
+# pid_unit <pid>: the system service the process runs in, from its cgroup
+# (0::/system.slice/<name>.service[/...]), or nothing: a user session process, or one that has
+# already exited.
+pid_unit() {
+  sed -n 's|^[0-9]*:[^:]*:/system\.slice/\([^/]*\.service\)\(/.*\)\{0,1\}$|\1|p' "$ROOT/proc/$1/cgroup" 2>/dev/null | head -n 1
+}
+
+# The system services holding the eGPU nodes, one per line. Never the display manager (already
+# stopped) or the service this script runs in (Decky's).
+holder_units() {
+  local pid unit self
+  self=$(pid_unit "$$")
+  for pid in $(holder_pids); do
+    unit=$(pid_unit "$pid")
+    [ -n "$unit" ] && [ "$unit" != "$DM_SERVICE" ] && [ "$unit" != "$self" ] && echo "$unit"
+  done | sort -u
+}
+
+# A system service that holds the eGPU is stopped and started again after the eject, never
+# signalled: a clean exit on SIGTERM doesn't make systemd restart it. Known case: Bazzite's
+# cardwired.service, which its Game Mode session needs to launch Steam (killed, it left Game Mode
+# in a login loop until the next reboot).
+RESTART_UNITS=()
+stop_holder_units() {
+  local unit
+  while IFS= read -r unit; do
+    [ -n "$unit" ] || continue
+    echo "$unit (a system service) holds the eGPU; stopping it and starting it again after the eject"
+    systemctl stop "$unit" || echo "couldn't stop $unit; it's left running and isn't signalled"
+    RESTART_UNITS+=("$unit")
+  done < <(holder_units)
+}
+
+restart_holder_units() {
+  local unit err
+  for unit in "${RESTART_UNITS[@]}"; do
+    if err=$(systemctl start "$unit" 2>&1); then
+      echo "restarted $unit"
+    else
+      echo "couldn't restart $unit: $(printf '%s\n' "${err:-systemctl failed}" | tail -n 1)"
+    fi
+  done
+}
+
+# Logs which processes hold the eGPU nodes, then sends them the signal (TERM or KILL), except the
+# ones in a service stop_holder_units stopped. By PID through env: the shell builtin can't be
+# replaced by the test shim.
+kill_holders() {
+  local nodes pid unit targets=()
   mapfile -t nodes < <(gpu_nodes)
   [ "${#nodes[@]}" -gt 0 ] || return 0
   echo "Processes still using the eGPU:"
   fuser -v "${nodes[@]}" 2>&1 || true
-  echo "Sending SIG$1 to them..."
-  fuser -k "-$1" "${nodes[@]}" >/dev/null 2>&1 || true
+  for pid in $(holder_pids); do
+    unit=$(pid_unit "$pid")
+    if [ -n "$unit" ] && [[ " ${RESTART_UNITS[*]} " == *" $unit "* ]]; then
+      echo "Not signalling PID $pid: it belongs to $unit, which is started again after the eject."
+      continue
+    fi
+    targets+=("$pid")
+  done
+  [ "${#targets[@]}" -gt 0 ] || return 0
+  echo "Sending SIG$1 to them (PID ${targets[*]})..."
+  env kill "-$1" "${targets[@]}" >/dev/null 2>&1 || true
 }
 
 nvidia_drm_refcnt() { cat "$ROOT/sys/module/nvidia_drm/refcnt" 2>/dev/null || echo "not loaded"; }
@@ -149,10 +213,13 @@ if [ "$RELEASE" -eq 1 ]; then
   # the driver. Only the eGPU's own nodes: the iGPU's stay untouched.
   echo "Waiting for processes using the eGPU to exit..."
   if ! wait_for_release 10; then
-    kill_holders TERM
-    if ! wait_for_release 5; then
-      kill_holders KILL
-      wait_for_release 2
+    stop_holder_units
+    if [ "${#RESTART_UNITS[@]}" -eq 0 ] || ! wait_for_release 2; then
+      kill_holders TERM
+      if ! wait_for_release 5; then
+        kill_holders KILL
+        wait_for_release 2
+      fi
     fi
   fi
 
@@ -186,6 +253,7 @@ if [ "$RELEASE" -eq 1 ]; then
       echo "Restarting supergfxd..."
       systemctl start supergfxd.service 2>/dev/null || true
     fi
+    restart_holder_units
     date +%s > "$CANCEL_MARKER"
     echo "Starting $DM_SERVICE..."
     systemctl start "$DM_SERVICE"
@@ -279,6 +347,7 @@ if [ "$SUCCESS" -eq 0 ]; then
   echo "WARNING: Hardware did not seem to drop from the PCIe bus. Proceeding anyway to restore UI."
 fi
 
+restart_holder_units
 echo "Starting $DM_SERVICE..."
 systemctl start "$DM_SERVICE" #--no-block
 
