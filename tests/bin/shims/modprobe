@@ -1,3 +1,26 @@
 #!/usr/bin/env bash
-# Test shim: records the call, does nothing.
+# Test shim. Loaded modules are dirs in the sandbox's sys/module. `modprobe <module> [params]`
+# creates its dir, `modprobe -a <module>...` creates one per module; `modprobe -r <module>...` removes them, but fails like a module in use for any
+# module listed in $SHIM_STATE/module_stuck (module_stuck in helpers/sandbox.bash).
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+[ -n "${XGM_ROOT:-}" ] || exit 0
+if [ "$1" = "-r" ]; then
+  shift
+  for module in "$@"; do
+    if grep -qxF -- "$module" "$SHIM_STATE/module_stuck" 2>/dev/null; then
+      echo "modprobe: FATAL: Module $module is in use." >&2
+      exit 1
+    fi
+    rm -rf "$XGM_ROOT/sys/module/$module"
+  done
+  exit 0
+fi
+all=0
+[ "$1" = "-a" ] && all=1
+for arg in "$@"; do
+  case "$arg" in
+    -*) ;;
+    *) mkdir -p "$XGM_ROOT/sys/module/$arg"; [ "$all" -eq 1 ] || break ;;
+  esac
+done
+exit 0

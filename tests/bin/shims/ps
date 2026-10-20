@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Test shim: the Steam process belongs to "xgmtest", a user that cannot exist on a real host,
-# so a path built from $PRIMARY_USER never points at a real home directory.
+# so a path built from $PRIMARY_USER never points at a real home directory. Prints the user in
+# $SHIM_STATE/steam_user instead if set (steam_user), and nothing (Steam not running, as at boot)
+# when $SHIM_STATE/steam_not_running exists.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
-echo "xgmtest"
+[ -e "$SHIM_STATE/steam_not_running" ] && exit 1
+cat "$SHIM_STATE/steam_user" 2>/dev/null || echo "xgmtest"

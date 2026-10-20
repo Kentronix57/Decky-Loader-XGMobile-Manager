@@ -13,7 +13,7 @@ import {
 import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
-import { notifyError, notifyResult, toActionResult } from "../lib/notify";
+import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -44,7 +44,7 @@ export const QuickAccessContent = () => {
   const [osType, setOsType] = useState("steamos");
   const [powerProfile, setPowerProfile] = useState("Unknown");
   const [statusError, setStatusError] = useState("");
-  const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && (osType.includes('bazzite') || osType === 'cachyos');
+  const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
 
   // 1. Initial Load: Fetch Vendor Setting once
   useEffect(() => {
@@ -70,6 +70,18 @@ export const QuickAccessContent = () => {
       }
     };
     init();
+
+    // Enable/eject restart the display manager, which can kill this panel before their result
+    // arrives (e.g. "Eject was cancelled"). The backend keeps the last failure; show it once.
+    const showPendingResult = async () => {
+      try {
+        const pending = await call("get_pending_result");
+        if (isActionResult(pending)) notifyResult(pending);
+      } catch (e) {
+        console.error("Pending result check failed:", e);
+      }
+    };
+    showPendingResult();
   }, []);
 
   // 2. The Polling Loop: Only fetches hardware/telemetry
@@ -110,6 +122,10 @@ export const QuickAccessContent = () => {
       }
       const res = toActionResult(await call(method), label);
       notifyResult(res);
+      if (method === "enable_egpu" || method === "eject_egpu") {
+        // Shown just now: drop the backend's copy so it isn't shown again on the next open.
+        await call("get_pending_result").catch(() => undefined);
+      }
     } catch (e) {
       notifyError("XG Mobile", e, actionPhrase);
     }

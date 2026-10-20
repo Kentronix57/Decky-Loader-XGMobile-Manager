@@ -1,3 +1,40 @@
 #!/usr/bin/env bash
-# Test shim: records the call, does nothing.
+# Test shim, driven by $SHIM_STATE/gpu_holders (gpu_holders in helpers/sandbox.bash):
+#   <n>          the next n checks (calls without -k) find the files in use, then they're free.
+#                Any -k kills the holders: every later check finds the files free.
+#   ignore-term  in use until a -k with SIGKILL (-KILL, or no signal: fuser's default).
+#   unkillable   always in use, even after -k.
+#   (missing)    never in use.
+# Exits 0 when the files are in use, 1 otherwise, like fuser. With -v, lists a fake holder per
+# file on stderr.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+state="$SHIM_STATE/gpu_holders"
+holders=$(cat "$state" 2>/dev/null || echo 0)
+kill=0 verbose=0 signal=KILL files=()
+for arg in "$@"; do
+  case "$arg" in
+    -TERM|-KILL) signal="${arg#-}" ;;
+    -*) [[ "$arg" == *k* ]] && kill=1; [[ "$arg" == *v* ]] && verbose=1 ;;
+    *) files+=("$arg") ;;
+  esac
+done
+busy=0
+case "$holders" in
+  unkillable|ignore-term) busy=1 ;;
+  *) [ "$holders" -gt 0 ] 2>/dev/null && busy=1 ;;
+esac
+if [ "$busy" -eq 1 ] && [ "$verbose" -eq 1 ]; then
+  echo "                     USER        PID ACCESS COMMAND" >&2
+  for f in "${files[@]}"; do echo "$f:      xgmtest    4242 F.... gamescope-wl" >&2; done
+fi
+if [ "$kill" -eq 1 ]; then
+  case "$holders" in
+    unkillable) ;;
+    ignore-term) [ "$signal" = "KILL" ] && echo 0 > "$state" ;;
+    *) echo 0 > "$state" ;;
+  esac
+elif [ "$busy" -eq 1 ] && [[ "$holders" =~ ^[0-9]+$ ]]; then
+  echo $((holders - 1)) > "$state"
+fi
+[ "$busy" -eq 1 ] && exit 0
+exit 1
