@@ -89,7 +89,6 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]];  then
       echo "Restoring NVIDIA sleep services..."
       systemctl daemon-reload
       systemctl enable nvidia-persistenced nvidia-powerd nvidia-suspend.service nvidia-hibernate.service nvidia-resume.service 2>/dev/null
-      systemctl start nvidia-persistenced 2>/dev/null
     else
       systemctl daemon-reload
     fi
@@ -131,6 +130,19 @@ if systemctl is-active --quiet supergfxd.service; then
   SUPERGFX_TRIG=1
 fi
 
+# nvidia-persistenced and nvidia-powerd need the eGPU and its loaded modules: started earlier, they
+# find no GPU and exit ("Allocate Root client failed"). nvidia-powerd is Dynamic Boost, which
+# lifts the XG Mobile from its default power limit to its max under load (115 W -> 150 W on the
+# 4090). So they're stopped before the modules reload (they'd hold /dev/nvidia*) and started after.
+stop_nvidia_services() {
+  systemctl stop nvidia-powerd nvidia-persistenced 2>/dev/null || true
+}
+start_nvidia_services() {
+  echo "Starting NVIDIA services (persistence, Dynamic Boost)..."
+  systemctl enable nvidia-persistenced nvidia-powerd 2>/dev/null
+  systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null
+}
+
 # Used for all OSes for consistency
 # Hardware Activation
 EXISTING_CARDS=$(ls $ROOT/dev/dri/card* 2>/dev/null)
@@ -146,11 +158,11 @@ sleep 2
 if [[ "$OS_TYPE" == *"bazzite"* ]]; then
   if [ "$VENDOR" == "nvidia" ]; then
     echo "Loading NVIDIA drivers into kernel to generate DRM nodes..."
-    systemctl enable nvidia-persistenced nvidia-powerd 2>/dev/null
-    systemctl start nvidia-persistenced nvidia-powerd 2>/dev/null
+    stop_nvidia_services
     modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia 2>/dev/null || true
     modprobe nvidia_drm modeset=1 fbdev=1
     modprobe -a nvidia nvidia_modeset nvidia_uvm
+    start_nvidia_services
   fi
 fi
 
@@ -261,9 +273,11 @@ if [[ "$OS_TYPE" == "steamos" || "$OS_TYPE" == *"cachyos"* ]]; then
 
     # This is what forces the NVIDIA card into Wayland mode
     echo "Loading NVIDIA modules..."
+    stop_nvidia_services
     modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia
     modprobe nvidia_drm modeset=1 fbdev=1
     modprobe -a nvidia nvidia_modeset nvidia_uvm
+    start_nvidia_services
 
     # PERSISTENT DRIVER SETTINGS
     # We write the modeset to a config file so the kernel loads it at boot
