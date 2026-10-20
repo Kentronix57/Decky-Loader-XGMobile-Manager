@@ -23,6 +23,18 @@ assert_env_symmetry() {
   done < <(grep -E '^systemctl (--user )?set-environment ' "$SHIM_LOG")
 }
 
+# No eGPU variable is left in either systemd manager (shims/systemctl tracks them), and the log
+# says so.
+assert_managers_clean() {
+  local scope
+  for scope in system user; do
+    run grep -E '^(MESA_VK_DEVICE_SELECT|VK_ICD_FILENAMES|WLR_DRM_DEVICES|VK_LOADER_LAYERS_DISABLE|GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT|KWIN_DRM_DEVICES|GBM_BACKEND|__GLX_VENDOR_LIBRARY_NAME)=' "$SHIM_STATE/env/$scope"
+    assert_output ""
+    [[ "$LOG" == *"eGPU variables left in $scope manager: none"* ]] || fail "no 'left in $scope manager: none' line in the eject log"
+  done
+  [[ "$LOG" == *"eGPU variables left in /etc/environment: none"* ]] || fail "no /etc/environment line in the eject log"
+}
+
 # All five variables egpu-enable can inject are unset in both systemd managers, whatever subset
 # enable actually set (a user manager can hold values from an older plugin version).
 assert_full_unset() {
@@ -90,6 +102,7 @@ symmetry_nvidia() {
   assert [ ! -e "$ROOT/home/xgmtest/.config/plasma-workspace/env/xgmobile-nvidia-kwin.sh" ]
   assert [ ! -e "$ROOT/etc/modprobe.d/nvidia-egpu.conf" ]
   assert_full_unset
+  assert_managers_clean
   assert_called "modprobe -r nvidia"
   refute_called "systemctl disable xgmobile-boot-sync.service"
   [[ "$LOG" == *"Success! eGPU 0000:01:00.0 dropped from the PCIe bus."* ]]
@@ -107,6 +120,7 @@ symmetry_amd() {
   assert_env_symmetry
   assert_called "systemctl unset-environment WLR_DRM_DEVICES"
   assert_full_unset
+  assert_managers_clean
   refute_called "modprobe"
   refute_called "systemctl disable xgmobile-boot-sync.service"
   [[ "$LOG" == *"Success! eGPU 0000:01:00.0 dropped from the PCIe bus."* ]]
@@ -130,6 +144,25 @@ symmetry_amd() {
 
 @test "symmetry: enable then eject, cachyos/amd" {
   symmetry_amd cachyos
+}
+
+# Pass 2, CachyOS: the persistent Plasma desktop had imported the eGPU variables into the user
+# manager (and the Plasma env file's three), and gamescope started with them after the eject.
+@test "cachyos: eGPU variables a Plasma session imported into the user manager are unset, before/after logged" {
+  os_like_hardware cachyos
+  nvidia_driver installed
+  egpu_present nvidia
+  record_egpu_pci
+  manager_env user "LANG=en_US.UTF-8" "MESA_VK_DEVICE_SELECT=10de:2717" "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json" \
+    "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" "VK_LOADER_LAYERS_DISABLE=*" "GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT=1" \
+    "KWIN_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" "GBM_BACKEND=nvidia-drm" "__GLX_VENDOR_LIBRARY_NAME=nvidia"
+  echo "VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json" >> "$ROOT/etc/environment"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_equal "$(manager_env_of user)" "LANG=en_US.UTF-8"
+  assert_managers_clean
+  [[ "$LOG" == *"eGPU variables found in user manager: MESA_VK_DEVICE_SELECT VK_ICD_FILENAMES WLR_DRM_DEVICES VK_LOADER_LAYERS_DISABLE GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT KWIN_DRM_DEVICES GBM_BACKEND __GLX_VENDOR_LIBRARY_NAME"* ]]
+  [[ "$LOG" == *"eGPU variables found in system manager: none"* ]]
 }
 
 @test "eGPU PCI device drops: success logged without the 15 s wait, sddm restarted, egpu_enable cleared" {
@@ -646,4 +679,15 @@ eject_with_numbering() {
   run_plugin_script egpu-eject amd
   assert_success
   assert_called "sudo -u deck XDG_RUNTIME_DIR=/run/user/64999 systemctl --user unset-environment WLR_DRM_DEVICES"
+}
+
+@test "egpu_enable write fails: friendly line, no shell error in the log, the drop wait decides" {
+  egpu_present amd
+  record_egpu_pci
+  chmod 444 "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+  run_plugin_script egpu-eject amd
+  assert_success
+  [[ "$LOG" == *"asus-nb-wmi reported an error switching the eGPU off (usually harmless); checking that the eGPU dropped..."* ]]
+  [[ "$LOG" == *"WARNING: Hardware did not seem to drop from the PCIe bus."* ]]
+  [[ "$LOG" != *"write error"* && "$LOG" != *"Permission denied"* ]]
 }

@@ -31,6 +31,42 @@ log_names() { find "$LOG_DIR" -mindepth 1 -printf '%P\n' | sort; }
   assert_equal "$(readlink "$LOG_DIR/eject_latest.log")" "$LOG_DIR/eject_nvidia.log"
 }
 
+# keeps_previous_log <kind> <vendor>: run twice, the first run's log is <kind>_<vendor>.prev.log
+# (an older .prev is replaced), and the _latest link points at the second run's.
+keeps_previous_log() {
+  local kind="$1" vendor="$2" first
+  echo "an older run" > "$LOG_DIR/${kind}_${vendor}.prev.log"
+  run_plugin_script "egpu-$kind" "$vendor"
+  assert_success
+  first="$(cat "$LOG_DIR/${kind}_${vendor}.log")"
+  [[ "$first" == *"Started at"* ]] || fail "first run wrote no log"
+  echo "marker: first run" >> "$LOG_DIR/${kind}_${vendor}.log"
+
+  # Back to the state the first run started from.
+  if [ "$kind" = "eject" ]; then
+    egpu_present "$vendor"
+  else
+    echo 0 > "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable"
+    env PATH="$SYSBIN" XGM_ROOT="$ROOT" SHIM_LOG=/dev/null SHIM_STATE="$SHIM_STATE" "$SYSBIN/bash" "$XGM_SHIMS/sleep"
+  fi
+  KEEP_LOG_DIR=1 run_plugin_script "egpu-$kind" "$vendor"
+  assert_success
+  assert_equal "$(cat "$LOG_DIR/${kind}_${vendor}.prev.log")" "$first"$'\n'"marker: first run"
+  [[ "$(cat "$LOG_DIR/${kind}_${vendor}.log")" != *"marker: first run"* ]] || fail "the second run's log holds the first run's"
+  assert_equal "$(readlink "$LOG_DIR/${kind}_latest.log")" "$LOG_DIR/${kind}_${vendor}.log"
+  assert_equal "$(log_names)" "$(printf '%s\n' "${kind}_latest.log" "${kind}_${vendor}.log" "${kind}_${vendor}.prev.log" | sort)"
+}
+
+@test "egpu-enable run twice: the first run's log is kept as enable_<vendor>.prev.log" {
+  egpu_appears amd
+  KEEP_LOG_DIR=1 keeps_previous_log enable amd
+}
+
+@test "egpu-eject run twice: the first run's log is kept as eject_<vendor>.prev.log" {
+  egpu_present nvidia
+  KEEP_LOG_DIR=1 keeps_previous_log eject nvidia
+}
+
 @test "supergfx-hybrid / supergfx-integrated: supergfxd_<mode>.log" {
   enable_supergfxctl
   run_plugin_script supergfx-hybrid nvidia
