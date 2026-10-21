@@ -286,8 +286,8 @@ gpu_service_holder() {
   echo "$1 $2" >> "$SHIM_STATE/service_holders"
 }
 
-# holder_cgroup <pid> <cgroup line>: $ROOT/proc/<pid>/cgroup, e.g. for the session holder (4242,
-# which has none by default, as if it had exited).
+# holder_cgroup <pid|self> <cgroup line>: $ROOT/proc/<pid>/cgroup, e.g. for the session holder
+# (4242, which has none by default, as if it had exited), or self: the eject's own.
 holder_cgroup() {
   mkdir -p "$ROOT/proc/$1"
   echo "$2" > "$ROOT/proc/$1/cgroup"
@@ -298,6 +298,9 @@ start_fails() { mkdir -p "$SHIM_STATE/start_fails"; touch "$SHIM_STATE/start_fai
 
 # stop_ignored <unit>: `systemctl stop <unit>` leaves its eGPU service holders running.
 stop_ignored() { mkdir -p "$SHIM_STATE/stop_ignored"; touch "$SHIM_STATE/stop_ignored/$1"; }
+
+# stop_fails <unit>: `systemctl stop <unit>` fails, and its eGPU service holders stay.
+stop_fails() { mkdir -p "$SHIM_STATE/stop_fails"; touch "$SHIM_STATE/stop_fails/$1"; }
 
 # module_stuck <module>: `modprobe -r <module>` fails as "in use" and its sys/module dir stays.
 module_stuck() { echo "$1" >> "$SHIM_STATE/module_stuck"; }

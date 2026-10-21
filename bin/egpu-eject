@@ -105,53 +105,71 @@ holder_pids() {
   fuser "${nodes[@]}" 2>/dev/null | grep -oE '[0-9]+' | sort -un
 }
 
-# pid_unit <pid>: the system service the process runs in, from its cgroup
-# (0::/system.slice/<name>.service[/...]), or nothing: a user session process, or one that has
-# already exited.
+# pid_unit <pid|self>: the system service the process runs in, from its cgroup
+# (0::/system.slice/<name>.service[/...], or a template instance under its slice:
+# system.slice/system-<name>.slice/<name>@<instance>.service), or nothing: a user session
+# process, or one that has already exited.
 pid_unit() {
-  sed -n 's|^[0-9]*:[^:]*:/system\.slice/\([^/]*\.service\)\(/.*\)\{0,1\}$|\1|p' "$ROOT/proc/$1/cgroup" 2>/dev/null | head -n 1
+  sed -n -e 's|^[0-9]*:[^:]*:/system\.slice/\([^/]*\.service\)\(/.*\)\{0,1\}$|\1|p' \
+    -e 's|^[0-9]*:[^:]*:/system\.slice/system-[^/]*\.slice/\([^/]*@[^/]*\.service\)\(/.*\)\{0,1\}$|\1|p' \
+    "$ROOT/proc/$1/cgroup" 2>/dev/null | head -n 1
 }
 
-# The system services holding the eGPU nodes, one per line. Never the display manager (already
-# stopped) or the service this script runs in (Decky's).
+# The system services holding the eGPU nodes that are stopped instead of signalled, one per line.
+# Never the display manager (already stopped), the service this script runs in (Decky's: sed
+# reads its own cgroup, the same as the script's), or core and GPU services that must not be
+# stopped from here: their holders get the TERM/KILL like any other process.
 holder_units() {
   local pid unit self
-  self=$(pid_unit "$$")
+  self=$(pid_unit self)
   for pid in $(holder_pids); do
     unit=$(pid_unit "$pid")
-    [ -n "$unit" ] && [ "$unit" != "$DM_SERVICE" ] && [ "$unit" != "$self" ] && echo "$unit"
+    [ -n "$unit" ] && [ "$unit" != "$DM_SERVICE" ] && [ "$unit" != "$self" ] || continue
+    case "$unit" in
+      systemd-*.service|dbus*.service|polkit.service|nvidia-persistenced.service|nvidia-powerd.service|supergfxd.service) continue ;;
+    esac
+    echo "$unit"
   done | sort -u
 }
 
 # A system service that holds the eGPU is stopped and started again after the eject, never
 # signalled: a clean exit on SIGTERM doesn't make systemd restart it. Known case: Bazzite's
 # cardwired.service, which its Game Mode session needs to launch Steam (killed, it left Game Mode
-# in a login loop until the next reboot).
+# in a login loop until the next reboot). A unit whose stop fails or times out is left running,
+# and isn't signalled or started either.
 RESTART_UNITS=()
+LEFT_UNITS=()
 stop_holder_units() {
   local unit
   while IFS= read -r unit; do
     [ -n "$unit" ] || continue
     echo "$unit (a system service) holds the eGPU; stopping it and starting it again after the eject"
-    systemctl stop "$unit" || echo "couldn't stop $unit; it's left running and isn't signalled"
-    RESTART_UNITS+=("$unit")
+    if timeout 15 systemctl stop -- "$unit"; then
+      RESTART_UNITS+=("$unit")
+    else
+      echo "couldn't stop $unit; it's left running and isn't signalled"
+      LEFT_UNITS+=("$unit")
+    fi
   done < <(holder_units)
 }
 
 restart_holder_units() {
   local unit err
   for unit in "${RESTART_UNITS[@]}"; do
-    if err=$(systemctl start "$unit" 2>&1); then
+    if err=$(systemctl start -- "$unit" 2>&1); then
       echo "restarted $unit"
     else
       echo "couldn't restart $unit: $(printf '%s\n' "${err:-systemctl failed}" | tail -n 1)"
     fi
   done
+  for unit in "${LEFT_UNITS[@]}"; do
+    echo "$unit was left running"
+  done
 }
 
 # Logs which processes hold the eGPU nodes, then sends them the signal (TERM or KILL), except the
-# ones in a service stop_holder_units stopped. By PID through env: the shell builtin can't be
-# replaced by the test shim.
+# ones in a service stop_holder_units handled. By PID through env first (the shell builtin can't
+# be replaced by the test shim), then the builtin; errors go to the log.
 kill_holders() {
   local nodes pid unit targets=()
   mapfile -t nodes < <(gpu_nodes)
@@ -160,15 +178,15 @@ kill_holders() {
   fuser -v "${nodes[@]}" 2>&1 || true
   for pid in $(holder_pids); do
     unit=$(pid_unit "$pid")
-    if [ -n "$unit" ] && [[ " ${RESTART_UNITS[*]} " == *" $unit "* ]]; then
-      echo "Not signalling PID $pid: it belongs to $unit, which is started again after the eject."
+    if [ -n "$unit" ] && [[ " ${RESTART_UNITS[*]} ${LEFT_UNITS[*]} " == *" $unit "* ]]; then
+      echo "Not signalling PID $pid: it belongs to $unit, which isn't signalled from here."
       continue
     fi
     targets+=("$pid")
   done
   [ "${#targets[@]}" -gt 0 ] || return 0
   echo "Sending SIG$1 to them (PID ${targets[*]})..."
-  env kill "-$1" "${targets[@]}" >/dev/null 2>&1 || true
+  env kill "-$1" "${targets[@]}" 2>&1 || kill "-$1" "${targets[@]}" 2>&1 || true
 }
 
 nvidia_drm_refcnt() { cat "$ROOT/sys/module/nvidia_drm/refcnt" 2>/dev/null || echo "not loaded"; }
@@ -214,7 +232,7 @@ if [ "$RELEASE" -eq 1 ]; then
   echo "Waiting for processes using the eGPU to exit..."
   if ! wait_for_release 10; then
     stop_holder_units
-    if [ "${#RESTART_UNITS[@]}" -eq 0 ] || ! wait_for_release 2; then
+    if [ "$((${#RESTART_UNITS[@]} + ${#LEFT_UNITS[@]}))" -eq 0 ] || ! wait_for_release 2; then
       kill_holders TERM
       if ! wait_for_release 5; then
         kill_holders KILL

@@ -543,10 +543,10 @@ assert_log_order() {
   assert_success
   refute_signalled 1508
   refute_called "kill"
-  assert_called_before "systemctl stop cardwired.service" "modprobe -r nvidia_drm"
-  assert_called_before "modprobe -r nvidia_drm" "systemctl start cardwired.service"
-  assert_called_before "systemctl start cardwired.service" "systemctl start sddm.service"
-  assert_equal "$(calls_matching 'systemctl start cardwired.service' | wc -l)" 1
+  assert_called_before "systemctl stop -- cardwired.service" "modprobe -r nvidia_drm"
+  assert_called_before "modprobe -r nvidia_drm" "systemctl start -- cardwired.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
+  assert_equal "$(calls_matching 'systemctl start -- cardwired.service' | wc -l)" 1
   assert_log_order \
     "cardwired.service (a system service) holds the eGPU; stopping it and starting it again after the eject" \
     "dropped from the PCIe bus" \
@@ -561,7 +561,7 @@ assert_log_order() {
   holder_cgroup 1508 "0::/system.slice/cardwired.service/worker"
   run_plugin_script egpu-eject nvidia
   assert_success
-  assert_called "systemctl stop cardwired.service"
+  assert_called "systemctl stop -- cardwired.service"
   refute_signalled 1508
 }
 
@@ -586,11 +586,11 @@ assert_log_order() {
   holder_cgroup 4242 "0::/user.slice/user-1000.slice/session-2.scope"
   run_plugin_script egpu-eject nvidia
   assert_success
-  assert_called_before "systemctl stop cardwired.service" "kill -TERM 4242"
+  assert_called_before "systemctl stop -- cardwired.service" "kill -TERM 4242"
   assert_called_before "kill -TERM 4242" "kill -KILL 4242"
   assert_called_before "kill -KILL 4242" "modprobe -r nvidia_drm"
   refute_signalled 1508
-  assert_called_before "systemctl start cardwired.service" "systemctl start sddm.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
   [[ "$LOG" == *"restarted cardwired.service"* ]]
 }
 
@@ -603,7 +603,7 @@ assert_log_order() {
   assert_cancelled sddm.service
   refute_signalled 1508
   [[ "$LOG" == *"Not signalling PID 1508: it belongs to cardwired.service"* ]]
-  assert_called_before "systemctl start cardwired.service" "systemctl start sddm.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
 }
 
 @test "safety stop (exit 7): the stopped service is started again before the DM" {
@@ -617,8 +617,8 @@ assert_log_order() {
   assert_cancelled sddm.service
   assert_called "kill -KILL 4242"
   refute_signalled 1508
-  assert_called_before "systemctl stop cardwired.service" "systemctl start cardwired.service"
-  assert_called_before "systemctl start cardwired.service" "systemctl start sddm.service"
+  assert_called_before "systemctl stop -- cardwired.service" "systemctl start -- cardwired.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
   assert_log_order "restarted cardwired.service" "Starting sddm.service..."
 }
 
@@ -629,7 +629,7 @@ assert_log_order() {
   run_plugin_script egpu-eject nvidia
   assert_success
   [[ "$LOG" == *"couldn't restart cardwired.service: Job for cardwired.service failed because the control process exited with error code."* ]]
-  assert_called_before "systemctl start cardwired.service" "systemctl start sddm.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
 }
 
 @test "a holder whose cgroup is gone (it exited): no service stopped, no errors" {
@@ -639,12 +639,68 @@ assert_log_order() {
   gpu_holders 100
   run_plugin_script egpu-eject nvidia
   assert_success
-  refute_called "systemctl stop cardwired.service"
-  refute_called "systemctl start cardwired.service"
+  refute_called "systemctl stop -- cardwired.service"
+  refute_called "systemctl start -- cardwired.service"
   assert_called "kill -TERM 1508 4242"
   [[ "$LOG" != *"No such file"* ]]
   [[ "$LOG" != *"cgroup"* ]]
   [[ "$LOG" != *"(a system service)"* ]]
+}
+
+@test "service holder: the stop runs under a 15 s timeout" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called "timeout 15 systemctl stop -- cardwired.service"
+}
+
+@test "the service can't be stopped: left running, never signalled or started, exit 7" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  stop_fails cardwired.service
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  refute_signalled 1508
+  refute_called "systemctl start -- cardwired.service"
+  [[ "$LOG" == *"couldn't stop cardwired.service; it's left running and isn't signalled"* ]]
+  [[ "$LOG" != *"restarted cardwired.service"* ]]
+  assert_log_order "cardwired.service was left running" "Starting sddm.service..."
+}
+
+@test "template instance holder: system-<name>.slice/<name>@<instance>.service is stopped and started again" {
+  egpu_present nvidia
+  gpu_service_holder 1600 "gpu-agent@card1.service"
+  holder_cgroup 1600 "0::/system.slice/system-gpu\x2dagent.slice/gpu-agent@card1.service"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called "timeout 15 systemctl stop -- gpu-agent@card1.service"
+  assert_called_before "systemctl start -- gpu-agent@card1.service" "systemctl start sddm.service"
+  refute_signalled 1600
+}
+
+@test "a core service holder (systemd-logind): signalled, never stopped or started" {
+  egpu_present nvidia
+  gpu_service_holder 700 systemd-logind.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "kill -TERM 700" "modprobe -r nvidia_drm"
+  refute_called "timeout 15 systemctl stop -- systemd-logind.service"
+  refute_called "systemctl stop -- systemd-logind.service"
+  refute_called "systemctl start -- systemd-logind.service"
+  [[ "$LOG" != *"(a system service)"* ]]
+}
+
+@test "a holder in the service the eject runs in (Decky's): never stopped" {
+  egpu_present nvidia
+  holder_cgroup self "0::/system.slice/plugin_loader.service"
+  gpu_service_holder 800 plugin_loader.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_called "timeout 15 systemctl stop -- plugin_loader.service"
+  refute_called "systemctl stop -- plugin_loader.service"
+  assert_called "kill -TERM 800"
 }
 
 @test "the display manager's own process still holding: signalled, not stopped again" {

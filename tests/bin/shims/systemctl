@@ -24,7 +24,8 @@
 # While the manager is deactivating, every call to it (--user, or naming user@64999.service)
 # moves the fake clock forward by $SHIM_STATE/manager_call_cost seconds, if set.
 # `stop <unit>` (system manager) ends that unit's eGPU service holders (helpers/holders.bash),
-# unless $SHIM_STATE/stop_ignored/<unit> exists.
+# unless $SHIM_STATE/stop_ignored/<unit> exists; with $SHIM_STATE/stop_fails/<unit> it fails
+# instead, and the holders stay.
 # `start <unit>` fails, with an error on stderr, if $SHIM_STATE/start_fails/<unit> exists.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 # shellcheck source=../helpers/timeline.bash
@@ -120,6 +121,10 @@ case "$verb" in
   stop)
     if [ "$user" -eq 0 ]; then
       for unit in "${units[@]}"; do
+        if [ -e "$SHIM_STATE/stop_fails/$unit" ]; then
+          echo "Job for $unit canceled." >&2
+          exit 1
+        fi
         [ -e "$SHIM_STATE/stop_ignored/$unit" ] || hl_service_drop 2 "$unit"
       done
     fi
