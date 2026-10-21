@@ -261,7 +261,7 @@ nvidia_configs_installed() {
   assert_success
   cmp "$BATS_TEST_TMPDIR/environment.before" "$ROOT/etc/environment"
   assert_called "modprobe -r nvidia_drm"
-  assert_fuser_kill_before_unload
+  assert_kill_before_unload
   assert_called "systemctl disable nvidia-powerd nvidia-persistenced"
   assert_called "systemctl unset-environment GAMESCOPE_DISABLE_VK_KHR_PRESENT_WAIT"
   refute_called "steamos-readonly"
@@ -287,14 +287,16 @@ nvidia_configs_installed() {
 # Line number of the first shim-log line starting with the given text (empty if none).
 first_line() { grep -nF -- "$1" "$SHIM_LOG" | head -n 1 | cut -d: -f1; }
 
-# Every `fuser -k...` comes before the first `modprobe -r nvidia_drm`.
-assert_fuser_kill_before_unload() {
+# Every `kill -<signal>` comes before the first `modprobe -r nvidia_drm`, and the holders are
+# signalled by PID, never with fuser -k (which can't spare a stopped service's processes).
+assert_kill_before_unload() {
   local kill unload
-  kill=$(grep -n '^fuser -k' "$SHIM_LOG" | tail -n 1 | cut -d: -f1)
+  kill=$(grep -n '^kill -' "$SHIM_LOG" | tail -n 1 | cut -d: -f1)
   unload=$(grep -nx 'modprobe -r nvidia_drm' "$SHIM_LOG" | head -n 1 | cut -d: -f1)
-  [ -n "$kill" ] || fail "fuser -k was never called"
+  [ -n "$kill" ] || fail "kill was never called"
   [ -n "$unload" ] || fail "modprobe -r nvidia_drm was never called"
-  [ "$kill" -lt "$unload" ] || fail "fuser -k (line $kill) must come before modprobe -r nvidia_drm (line $unload)"
+  [ "$kill" -lt "$unload" ] || fail "kill (line $kill) must come before modprobe -r nvidia_drm (line $unload)"
+  refute_called "fuser -k"
 }
 
 # assert_fuser_only_egpu_nodes <eGPU card> <eGPU render> <iGPU card> <iGPU render> [<eGPU fb>
@@ -343,19 +345,20 @@ assert_cancelled() {
   assert_called_before "systemctl stop plasmalogin.service" "modprobe -r nvidia_drm"
   assert_called_before "systemctl stop nvidia-powerd nvidia-persistenced" "modprobe -r nvidia_drm"
   local term kill unload
-  term=$(first_line "fuser -k -TERM ")
-  kill=$(first_line "fuser -k -KILL ")
+  term=$(first_line "kill -TERM 4242")
+  kill=$(first_line "kill -KILL 4242")
   unload=$(first_line "modprobe -r nvidia_drm")
-  [ -n "$term" ] && [ -n "$kill" ] || fail "expected fuser -k -TERM and fuser -k -KILL"
+  [ -n "$term" ] && [ -n "$kill" ] || fail "expected kill -TERM 4242 and kill -KILL 4242"
   [ "$term" -lt "$kill" ] || fail "SIGTERM (line $term) must come before SIGKILL (line $kill)"
-  assert_fuser_kill_before_unload
+  assert_kill_before_unload
   # 10 s graceful wait, then 5 s after SIGTERM, before SIGKILL.
   assert_equal "$(head -n "$term" "$SHIM_LOG" | grep -c '^sleep 1$')" 10
   assert_equal "$(head -n "$kill" "$SHIM_LOG" | grep -c '^sleep 1$')" 15
   # The holder list is logged before each kill.
   [[ "$LOG" == *"Processes still using the eGPU:"*"gamescope-wl"*"Sending SIGTERM"*"Sending SIGKILL"* ]]
   assert_fuser_only_egpu_nodes card1 renderD129 card0 renderD128
-  assert_equal "$(calls_matching 'fuser -k -KILL' | grep -c 'nvidiactl')" 1
+  # /dev/nvidiactl once per fuser call, not once per matching glob.
+  assert_equal "$(calls_matching 'fuser ' | grep -o 'nvidiactl' | wc -l)" "$(calls_matching 'fuser ' | wc -l)"
   assert [ ! -e "$ROOT/sys/module/nvidia_drm" ]
 }
 
@@ -364,8 +367,9 @@ assert_cancelled() {
   gpu_holders 100
   run_plugin_script egpu-eject nvidia
   assert_success
-  assert_called_before "fuser -k -TERM $ROOT/dev/dri/card1 $ROOT/dev/dri/renderD129 $ROOT/dev/fb1 $ROOT/dev/nvidia-modeset $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl" "modprobe -r nvidia_drm"
-  refute_called "fuser -k -KILL"
+  assert_called_before "fuser $ROOT/dev/dri/card1 $ROOT/dev/dri/renderD129 $ROOT/dev/fb1 $ROOT/dev/nvidia-modeset $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl" "kill -TERM 4242"
+  assert_called_before "kill -TERM 4242" "modprobe -r nvidia_drm"
+  refute_called "kill -KILL"
   assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
 }
 
@@ -374,6 +378,7 @@ assert_cancelled() {
   run_plugin_script egpu-eject nvidia
   assert_success
   refute_called "fuser -k"
+  refute_called "kill"
   assert_called "modprobe -r nvidia_drm"
 }
 
@@ -433,7 +438,7 @@ assert_cancelled() {
   cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
   run_plugin_script egpu-eject nvidia
   assert_cancelled plasmalogin.service
-  assert_called "fuser -k -KILL $ROOT/dev/dri/card1 $ROOT/dev/dri/renderD129 $ROOT/dev/fb1 $ROOT/dev/nvidia-modeset $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl"
+  assert_called "kill -KILL 4242"
   [[ "$LOG" == *"Processes still using the eGPU:"*"gamescope-wl"* ]]
   assert [ -e "$ROOT/sys/class/drm/card1" ]
   [[ "$LOG" != *"Success!"* ]]
@@ -510,6 +515,206 @@ assert_cancelled() {
   refute_called "systemctl start supergfxd.service"
 }
 
+# --- system services holding the eGPU (Bazzite's cardwired.service, pass 4) ---
+
+# No `kill` call names the PID.
+refute_signalled() {
+  local hits
+  hits=$(grep -E "^kill -[A-Z]+ (.* )?$1( |$)" "$SHIM_LOG" || true)
+  [ -z "$hits" ] || fail "PID $1 was signalled: $hits"
+  refute_called "fuser -k"
+}
+
+# The eject log has these texts in this order.
+assert_log_order() {
+  local rest="$LOG" text
+  for text in "$@"; do
+    [[ "$rest" == *"$text"* ]] || fail "'$text' missing from the eject log, or out of order"
+    rest="${rest#*"$text"}"
+  done
+}
+
+@test "service holder (cardwired): stopped, not signalled, started again after the drop and before the DM" {
+  set_os bazzite-nvidia
+  no_steamos_readonly
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_signalled 1508
+  refute_called "kill"
+  assert_called_before "systemctl stop -- cardwired.service" "modprobe -r nvidia_drm"
+  assert_called_before "modprobe -r nvidia_drm" "systemctl start -- cardwired.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
+  assert_equal "$(calls_matching 'systemctl start -- cardwired.service' | wc -l)" 1
+  assert_log_order \
+    "cardwired.service (a system service) holds the eGPU; stopping it and starting it again after the eject" \
+    "dropped from the PCIe bus" \
+    "restarted cardwired.service" \
+    "Starting sddm.service..."
+  assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
+}
+
+@test "service holder in a sub-cgroup: the service is still found" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  holder_cgroup 1508 "0::/system.slice/cardwired.service/worker"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called "systemctl stop -- cardwired.service"
+  refute_signalled 1508
+}
+
+@test "user-session holder: signalled as before, no service stopped" {
+  egpu_present nvidia
+  gpu_holders 100
+  holder_cgroup 4242 "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-steam.scope"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "kill -TERM 4242" "modprobe -r nvidia_drm"
+  assert_equal "$(calls_matching 'systemctl stop ')" "$(printf '%s\n' 'systemctl stop sddm.service' 'systemctl stop nvidia-powerd nvidia-persistenced')"
+  [[ "$LOG" != *"(a system service)"* ]]
+  [[ "$LOG" != *"restarted"* ]]
+}
+
+@test "service and user-session holders: the service stopped and started again, the user process killed" {
+  set_os bazzite-nvidia
+  no_steamos_readonly
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  gpu_holders ignore-term
+  holder_cgroup 4242 "0::/user.slice/user-1000.slice/session-2.scope"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "systemctl stop -- cardwired.service" "kill -TERM 4242"
+  assert_called_before "kill -TERM 4242" "kill -KILL 4242"
+  assert_called_before "kill -KILL 4242" "modprobe -r nvidia_drm"
+  refute_signalled 1508
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
+  [[ "$LOG" == *"restarted cardwired.service"* ]]
+}
+
+@test "a stopped service that still holds the eGPU is never signalled; exit 7 starts it again" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  stop_ignored cardwired.service
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  refute_signalled 1508
+  [[ "$LOG" == *"Not signalling PID 1508: it belongs to cardwired.service"* ]]
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
+}
+
+@test "safety stop (exit 7): the stopped service is started again before the DM" {
+  set_os bazzite-nvidia
+  no_steamos_readonly
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  gpu_holders unkillable
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  assert_called "kill -KILL 4242"
+  refute_signalled 1508
+  assert_called_before "systemctl stop -- cardwired.service" "systemctl start -- cardwired.service"
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
+  assert_log_order "restarted cardwired.service" "Starting sddm.service..."
+}
+
+@test "the service can't be started again: logged, the eject still succeeds" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  start_fails cardwired.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  [[ "$LOG" == *"couldn't restart cardwired.service: Job for cardwired.service failed because the control process exited with error code."* ]]
+  assert_called_before "systemctl start -- cardwired.service" "systemctl start sddm.service"
+}
+
+@test "a holder whose cgroup is gone (it exited): no service stopped, no errors" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  rm -r "$ROOT/proc/1508"
+  gpu_holders 100
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_called "systemctl stop -- cardwired.service"
+  refute_called "systemctl start -- cardwired.service"
+  assert_called "kill -TERM 1508 4242"
+  [[ "$LOG" != *"No such file"* ]]
+  [[ "$LOG" != *"cgroup"* ]]
+  [[ "$LOG" != *"(a system service)"* ]]
+}
+
+@test "service holder: the stop runs under a 15 s timeout" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called "timeout 15 systemctl stop -- cardwired.service"
+}
+
+@test "the service can't be stopped: left running, never signalled or started, exit 7" {
+  egpu_present nvidia
+  gpu_service_holder 1508 cardwired.service
+  stop_fails cardwired.service
+  cp "$ROOT/etc/environment" "$BATS_TEST_TMPDIR/environment.before"
+  run_plugin_script egpu-eject nvidia
+  assert_cancelled sddm.service
+  refute_signalled 1508
+  refute_called "systemctl start -- cardwired.service"
+  [[ "$LOG" == *"couldn't stop cardwired.service; it's left running and isn't signalled"* ]]
+  [[ "$LOG" != *"restarted cardwired.service"* ]]
+  assert_log_order "cardwired.service was left running" "Starting sddm.service..."
+}
+
+@test "template instance holder: system-<name>.slice/<name>@<instance>.service is stopped and started again" {
+  egpu_present nvidia
+  gpu_service_holder 1600 "gpu-agent@card1.service"
+  holder_cgroup 1600 "0::/system.slice/system-gpu\x2dagent.slice/gpu-agent@card1.service"
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called "timeout 15 systemctl stop -- gpu-agent@card1.service"
+  assert_called_before "systemctl start -- gpu-agent@card1.service" "systemctl start sddm.service"
+  refute_signalled 1600
+}
+
+@test "a core service holder (systemd-logind): signalled, never stopped or started" {
+  egpu_present nvidia
+  gpu_service_holder 700 systemd-logind.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_called_before "kill -TERM 700" "modprobe -r nvidia_drm"
+  refute_called "timeout 15 systemctl stop -- systemd-logind.service"
+  refute_called "systemctl stop -- systemd-logind.service"
+  refute_called "systemctl start -- systemd-logind.service"
+  [[ "$LOG" != *"(a system service)"* ]]
+}
+
+@test "a holder in the service the eject runs in (Decky's): never stopped" {
+  egpu_present nvidia
+  holder_cgroup self "0::/system.slice/plugin_loader.service"
+  gpu_service_holder 800 plugin_loader.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  refute_called "timeout 15 systemctl stop -- plugin_loader.service"
+  refute_called "systemctl stop -- plugin_loader.service"
+  assert_called "kill -TERM 800"
+}
+
+@test "the display manager's own process still holding: signalled, not stopped again" {
+  egpu_present nvidia
+  # A greeter process that outlived the DM stop.
+  gpu_service_holder 900 sddm.service
+  stop_ignored sddm.service
+  run_plugin_script egpu-eject nvidia
+  assert_success
+  assert_equal "$(calls_matching 'systemctl stop sddm.service' | wc -l)" 1
+  assert_called "kill -TERM 900"
+  [[ "$LOG" != *"(a system service)"* ]]
+}
+
 @test "egpu_enable already 0: no release or wait, environment still sanitized, DM restarted" {
   echo "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0" >> "$ROOT/etc/environment"
   run_plugin_script egpu-eject nvidia
@@ -542,8 +747,8 @@ assert_cancelled() {
   run_plugin_script egpu-eject nvidia
   assert_success
   [[ "$LOG" == *"No eGPU PCI device found. Releasing the NVIDIA device nodes and modules anyway."* ]]
-  assert_called "fuser -k -TERM $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl"
-  assert_fuser_kill_before_unload
+  assert_called_before "fuser $ROOT/dev/nvidia0 $ROOT/dev/nvidiactl" "kill -TERM 4242"
+  assert_kill_before_unload
   assert_called "modprobe -r nvidia"
   assert_equal "$(cat "$ROOT/sys/devices/platform/asus-nb-wmi/egpu_enable")" 0
 }
