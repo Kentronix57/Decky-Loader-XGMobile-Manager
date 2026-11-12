@@ -9,7 +9,7 @@
 [![Bazzite](https://img.shields.io/badge/Bazzite-Compatible-8A2BE2)](https://bazzite.gg)
 [![CachyOS](https://img.shields.io/badge/CachyOS-Compatible-00AA88)](https://cachyos.org)
 [![Kernel Dynamic](https://img.shields.io/badge/kernel-Dynamic-orange)](https://gitlab.steamos.cloud/jupiter/linux-integration)
-[![NVIDIA on SteamOS](https://img.shields.io/badge/nvidia--open--dkms_(SteamOS)-610.43.02-76B900)](https://www.nvidia.com/Download/index.aspx)
+[![NVIDIA on SteamOS](https://img.shields.io/badge/nvidia--open--dkms_(SteamOS)-620.70.06-76B900)](https://www.nvidia.com/Download/index.aspx)
 [![AI-assisted](https://img.shields.io/badge/AI--assisted-since_v0.3.0-555555)](#ai-assisted-development)
 [![License GPLv3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 
@@ -219,6 +219,8 @@ When there is a SteamOS update available, follow this exact sequence for safety:
 2. Go to Steam Settings -> System and apply the SteamOS Update.
 3. Reboot.
 4. Open the plugin → **▸ Setup & Maintenance** and click **Install NVIDIA Drivers** to compile them for the new kernel.
+
+If the install says **"The NVIDIA driver didn't build for this kernel"**, the update moved SteamOS to a kernel that the plugin's driver version doesn't support yet (SteamOS 3.9.5's kernel 7.2 needs driver 620.70.06 or later, which XG Mobile Manager 0.3.0 installs). Your system was rolled back; update XG Mobile Manager, then run **Install NVIDIA Drivers** again.
 *(Note: Bazzite users do not need to do this, as the drivers update natively with the OS image. CachyOS users update with `sudo pacman -Syu`.)*
 
 ---
