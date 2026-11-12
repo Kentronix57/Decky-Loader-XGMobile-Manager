@@ -25,13 +25,15 @@ set -e
 echo "Drivers missing or mismatched. Starting repair..."
 
 # --- CONFIGURATION ---
-NV_VERSION="610.43.02-3"
-NVSETTINGS_VERSION="610.43.02-1"
-EGL_VERSION="1.0.1-1"
+# 620.70.06: 610.43.02 doesn't build on SteamOS 3.9.5's kernel 7.2 (it calls strncpy, which 7.2
+# removed). NV_VERSION covers nvidia-open-dkms and nvidia-utils, NVSETTINGS_VERSION covers
+# lib32-nvidia-utils and nvidia-settings; all four must be the same driver version.
+NV_VERSION="620.70.06-1"
+NVSETTINGS_VERSION="620.70.06-1"
+EGL_VERSION="1.0.2-1"
 REPO_ROOT=$(readlink -f "$(dirname "$(readlink -f "$0")")/..")
 BASE_URL="https://archive.archlinux.org/packages"
 
-# Package list for 595 setup
 DKMS_URL="$BASE_URL/n/nvidia-open-dkms/nvidia-open-dkms-$NV_VERSION-x86_64.pkg.tar.zst"
 UTILS_URL="$BASE_URL/n/nvidia-utils/nvidia-utils-$NV_VERSION-x86_64.pkg.tar.zst"
 LIB32_URL="$BASE_URL/l/lib32-nvidia-utils/lib32-nvidia-utils-$NVSETTINGS_VERSION-x86_64.pkg.tar.zst"
@@ -107,12 +109,26 @@ echo "Kernel check passed: $KVER_EXACT"
 
 echo "--- STARTING NVIDIA eGPU UPDATER/INSTALLER (Target: $NV_VERSION) ---"
 
+# Exit codes after this point: 5 and 6 (space), 11 (the module didn't build) are set on purpose
+# and recorded in EXPLICIT_EXIT. Anything else (pacman, curl, a signal, or a command that happens
+# to return 10, which means "already installed" to the plugin) is reported as 1, "rolled back".
+EXPLICIT_EXIT=""
+installer_exit_code() {
+  if [ "$1" -ne 0 ] && [ "$1" != "$2" ]; then
+    echo 1
+  else
+    echo "$1"
+  fi
+}
+
 # UNLOCK SYSTEM
 echo "[1/9] Unlocking SteamOS file system and setting a trap to re-enable on exit..."
 steamos-readonly disable || echo "Already unlocked."
 
 cleanup_on_exit() {
   EXIT_CODE=$?
+  # Run the whole rollback even if one step of it fails.
+  set +e
 
   # ALWAYS UNMOUNT FIRST (Critical to protect /home data during a crash)
   echo "Ensuring all target mounts are detached..."
@@ -175,8 +191,17 @@ cleanup_on_exit() {
   yes | pacman -Rdd base-devel gcc make autoconf automake bison flex m4 patch pkgconf 2>/dev/null || true
   
   steamos-readonly enable
+
+  FINAL_CODE=$(installer_exit_code "$EXIT_CODE" "$EXPLICIT_EXIT")
+  if [ "$FINAL_CODE" != "$EXIT_CODE" ]; then
+    echo "A step failed with exit code $EXIT_CODE; reporting it as 1 (install failed and rolled back)."
+  fi
+  exit "$FINAL_CODE"
 }
-trap cleanup_on_exit EXIT SIGINT SIGTERM
+trap cleanup_on_exit EXIT
+# A signal exits through the EXIT trap, so it rolls back once and reports 1.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # PRE-FLIGHT CHECKS
 echo "[2/9] Verifying system health..."
@@ -211,12 +236,12 @@ MIN_HOME_KIB=4194304 #4GB
 MIN_ROOT_KIB=512000 # 500 MiB #614400 # 600 MiB
 if [ "$ROOT_FREE_KIB" -lt "$MIN_ROOT_KIB" ]; then
   echo "ERROR: Rootfs (/) is too full. You have $(($ROOT_FREE_KIB / 1024)) MiB, but require at least 500 MiB."
-  exit 5
+  EXPLICIT_EXIT=5; exit 5
 fi
 if [ "$HOME_FREE_KIB" -lt "$MIN_HOME_KIB" ]; then
   echo "ERROR: Not enough space on /home partition."
   echo "You have $(($HOME_FREE_KIB / 1024)) MiB, but this install requires 4096 MiB."
-  exit 6
+  EXPLICIT_EXIT=6; exit 6
 fi
 
 echo "Initial space check: $(($HOME_FREE_KIB / 1024)) MiB available on /home."
@@ -226,7 +251,7 @@ echo "Initial space check: $(($ROOT_FREE_KIB / 1024)) MiB available on /."
 echo "[3/9] Signing pacman-keys and syncing system dependencies (Headers: $HEADER_PKG)..."
 pacman-key --init
 pacman-key --populate archlinux holo
-yes | pacman -Sy --needed --overwrite "/usr/src,/usr/src/*,/var/lib/dkms,/var/lib/dkms/*" "$HEADER_PKG" base-devel dkms curl
+yes | pacman -Sy --needed --overwrite "/usr/src,/usr/src/*,/var/lib/dkms,/var/lib/dkms/*" "$HEADER_PKG" base-devel dkms curl pahole
 
 # ACQUIRE SOURCES
 echo "[4/9] Downloading packages..."
@@ -283,7 +308,12 @@ fi
 echo "[7/9] Building DKMS modules for $KVER_FULL (This will take a moment)..."
 
 dkms remove nvidia/"${NV_VERSION%-*}" --all >/dev/null 2>&1 || true
-dkms install nvidia/"${NV_VERSION%-*}"
+if ! dkms install nvidia/"${NV_VERSION%-*}"; then
+  echo "ERROR: The NVIDIA ${NV_VERSION%-*} kernel module didn't build for kernel $KVER_FULL."
+  echo "SteamOS may have moved to a kernel this driver version doesn't support yet."
+  echo "The compiler log (make.log) is saved to $LOG_DIR/dkms/."
+  EXPLICIT_EXIT=11; exit 11
+fi
 
 # INJECT CONFIGURATIONS
 echo "[8/9] Applying modprobe and environment configs..."
