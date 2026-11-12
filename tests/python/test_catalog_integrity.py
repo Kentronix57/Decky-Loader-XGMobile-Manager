@@ -5,8 +5,9 @@ import pytest
 
 from xgm_helpers import ACTION_RESULT_KEYS, REPO, STATIC, catalog_cases
 
-# Exit codes that come from `set -e` rather than a literal `exit N`: a failing step under the
-# EXIT trap leaves with that step's status (1 for nearly every command the installer runs).
+# Exit codes that come from `set -e` rather than a literal `exit N`. install-nvidia.sh: a failing
+# step under the EXIT trap leaves through it, and the trap reports any code it didn't choose on
+# purpose as 1 (test_install_nvidia_exits.py).
 IMPLICIT_EXITS = {("install-nvidia.sh", 1)}
 
 # `exit N` in command position: line start, after ; & | ( {, or after then/else/do.

@@ -188,6 +188,8 @@ SCRIPT_ERROR_CATALOG = {
         "Free up space (for example, uninstall a game), then run Install NVIDIA Drivers again."),
     1: ("The driver build failed and was rolled back.",
         "A step in the install failed and your system was restored. Open the install log, look at the lines just before \"INSTALL FAILED\", and share the log in a GitHub issue."),
+    11: ("The NVIDIA driver didn't build for this kernel. Rolled back.",
+         "SteamOS has probably moved to a kernel this driver version doesn't support yet. Check for an XG Mobile Manager update. If you're already on the latest version, share the install log and the compiler log (activity/dkms/ in the plugin's log folder) in a GitHub issue."),
   },
   "install-nvidia-cachyos.sh": {
     10: ("NVIDIA drivers are already installed for your kernel. No reboot needed.", ""),
