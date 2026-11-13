@@ -58,9 +58,21 @@ Use for changes to **OS-specific** code paths: `bin/egpu-*`, `bin/install-*`, `b
 
 ### Tier 3: Full matrix
 Required **only** for:
-- Changes to display or compositor behavior: gamescope settings, `WLR_DRM_DEVICES` / `KWIN_DRM_DEVICES` / Vulkan / EGL environment variables, DRM device selection, display-manager handling, or the NVIDIA driver version
+- Changes to display or compositor behavior: gamescope settings, `WLR_DRM_DEVICES` / `KWIN_DRM_DEVICES` / Vulkan / EGL environment variables, DRM device selection, or display-manager handling
 
 Matrix: SteamOS, Bazzite, CachyOS × Game Mode, Desktop Mode × ultrawide, 4K TV.
+
+<a id="driver-version-changes"></a>
+### NVIDIA driver version changes
+A new driver version is tested only on the OS whose driver changed. The plugin pins and installs the driver only on SteamOS (`bin/install-nvidia.sh`); Bazzite and CachyOS get theirs from the OS, so a pin change can't reach them. On that OS, on one display:
+- [ ] Install NVIDIA Drivers → reboot → `modinfo nvidia` shows the new version
+- [ ] Reset Driver Environment → install again
+- [ ] Enable → Eject in Game Mode, and Enable with "DesktopMode on Enable" → Eject from the desktop
+- [ ] The power limits per profile, and `nvidia-powerd` / `nvidia-persistenced` active after Enable
+- [ ] Suspend/resume with the eGPU enabled and ejected
+- [ ] Reboot **and** cold boot with the eGPU enabled → Game Mode on the external display
+
+Before the hardware pass, build the new driver against that OS's exact kernel headers (for SteamOS, the `linux-neptune-*-headers` package from Valve's repo, in a container with the OS's `pahole`), and compare the new packages' dependencies with the OS. The full Tier 3 matrix isn't required.
 
 ---
 
@@ -75,7 +87,8 @@ The required tier is the **highest** one triggered by any changed file:
 | `package.json` `@decky/ui` / `@decky/api` bump | 0 + 1 on **Steam client Stable and Beta channels** |
 | OS-specific branches in `bin/*`, `main.py`, `assets/services/*` | 0 + 2 (affected OSes) + 1 on one other OS as a regression check |
 | `bin/install-nvidia*.sh`, `bin/uninstall.sh` | 0 + 2 on that OS, including install and reset |
-| Display, compositor, environment-variable, DRM, or driver-version changes | 0 + 3 |
+| Display, compositor, environment-variable, or DRM changes | 0 + 3 |
+| NVIDIA driver version (the SteamOS pin in `bin/install-nvidia.sh`) | 0 + the [driver checks](#driver-version-changes) on SteamOS |
 | Stable release | 0 + the [stable release gate](#stable-release-gate) |
 | AMD vendor branches, `bin/supergfx-*` (Flow laptops) | 0 + community testers (see below) |
 
