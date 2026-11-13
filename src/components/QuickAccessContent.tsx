@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   ButtonItem, 
   Spinner, 
@@ -14,7 +14,7 @@ import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
 import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
-import { Telemetry, mainButton, maintenanceRows, statusLine, telemetryCells } from "../lib/panelLayout";
+import { MainButton, Telemetry, clickAllowed, guardUntil, mainButton, maintenanceRows, statusLine, telemetryCells } from "../lib/panelLayout";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -97,6 +97,8 @@ export const QuickAccessContent = () => {
   const [statusLoaded, setStatusLoaded] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
+  // The click-through guard (panelLayout.ts): set when the panel mounts, and on every profile change.
+  const mainButtonGuard = useRef(guardUntil(Date.now()));
 
   // 1. Initial Load: Fetch Vendor Setting once
   useEffect(() => {
@@ -201,6 +203,29 @@ export const QuickAccessContent = () => {
       setIsLoading(false);
       setStatusText("");
     }
+  };
+
+  // The main button: ignores a press that arrives inside the guard window, and asks first when the
+  // action has a confirmation (Eject).
+  const onMainButton = (b: MainButton) => {
+    if (!clickAllowed(Date.now(), mainButtonGuard.current)) {
+      console.log(`XG Mobile: ignored a ${b.action} press inside the click-through guard`);
+      return;
+    }
+    const run = () => handleAction(b.action, b.statusLabel, b.actionPhrase);
+    if (!b.confirm) {
+      run();
+      return;
+    }
+    showModal(
+      <ConfirmModal
+        strTitle={b.confirm.title}
+        strDescription={b.confirm.description}
+        strOKButtonText={b.confirm.okText}
+        strCancelButtonText="Cancel"
+        onOK={run}
+      />
+    );
   };
 
   const handleInstall = async () => {
@@ -417,7 +442,7 @@ export const QuickAccessContent = () => {
               <ButtonItem
                 layout="below"
                 disabled={button.disabled}
-                onClick={() => handleAction(button.action, button.statusLabel, button.actionPhrase)}
+                onClick={() => onMainButton(button)}
               >
                 {button.label}
               </ButtonItem>
@@ -463,6 +488,7 @@ export const QuickAccessContent = () => {
                 { data: "Performance", label: "Performance" }
               ]}
               onChange={async (option: any) => {
+                mainButtonGuard.current = guardUntil(Date.now());
                 const prevProfile = powerProfile;
                 const newProfile = option.data;
                 setPowerProfile(newProfile);

@@ -7,12 +7,21 @@ export interface GpuStatus {
 
 export type MainAction = "enable_egpu" | "eject_egpu";
 
+export interface Confirmation {
+  title: string;
+  description: string;
+  okText: string;
+}
+
 export interface MainButton {
   action: MainAction;
   statusLabel: string;
   actionPhrase: string;
   label: string;
   disabled: boolean;
+  // Asked before the action runs. Eject stops the display manager, which closes any game running
+  // on the eGPU, so it's never one press away.
+  confirm?: Confirmation;
 }
 
 const ENABLE = { action: "enable_egpu", statusLabel: "Enabling", actionPhrase: "enable the XG Mobile" } as const;
@@ -33,15 +42,37 @@ export interface StatusLine {
 
 export type MaintenanceRow = "shortcuts" | "install" | "reset" | "flow";
 
+export const EJECT_CONFIRM: Confirmation = {
+  title: "Eject the XG Mobile?",
+  description: "Any game using the eGPU will close, and the display moves back to the Ally's screen.",
+  okText: "Eject",
+};
+
 // One main button: Eject while active, otherwise Enable (only once the XG Mobile is connected).
 export function mainButton(gpuStatus: GpuStatus, isLoading: boolean): MainButton {
   if (gpuStatus.active) {
-    return { ...EJECT, label: "Eject XG Mobile", disabled: isLoading };
+    return { ...EJECT, label: "Eject XG Mobile", disabled: isLoading, confirm: EJECT_CONFIRM };
   }
   if (!gpuStatus.connected) {
     return { ...ENABLE, label: "Connect the XG Mobile", disabled: true };
   }
   return { ...ENABLE, label: "Enable XG Mobile", disabled: isLoading };
+}
+
+// --- Click-through guard ---
+// Picking an option in the power profile dropdown closes its menu and re-opens the Quick Access
+// Menu; Decky re-mounts this panel and focus lands on its first button, the main Enable/Eject. The
+// same controller press then reached that button (pass 7, 2026-11-13: Balanced -> Performance
+// ejected the XG Mobile mid-game, 1 s after set_power_profile). The main button ignores presses for
+// CLICK_GUARD_MS after the panel mounts and after every profile change.
+export const CLICK_GUARD_MS = 1000;
+
+export function guardUntil(now: number): number {
+  return now + CLICK_GUARD_MS;
+}
+
+export function clickAllowed(now: number, until: number): boolean {
+  return now >= until;
 }
 
 // Until the first status poll returns, `loaded` is false and the state is unknown.
