@@ -421,3 +421,97 @@ nvidia_card_pending() {
   assert_equal "$(calls_matching "sleep 0.25" | wc -l)" 4
   [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 1s (or no iGPU card); sync aborted."* ]]
 }
+
+# SteamOS 3.9.5, booted with the eGPU on (pass 7, 2026-11-13): udev loaded nvidia at 3.25 s, before
+# /home (where install-nvidia.sh keeps the firmware) mounted at 5.09 s. GSP firmware ENOENT, the
+# GPU dead for the boot, no DRM card, Game Mode on the iGPU.
+nvidia_failed_at_boot() {
+  egpu_present nvidia
+  nvidia_init_failed "$@"
+  echo "WLR_DRM_DEVICES=/dev/dri/card2:/dev/dri/card0" >> "$ROOT/etc/environment"
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+  : > "$SHIM_LOG"
+}
+
+@test "nvidia init failed at boot (firmware under /home not mounted yet): modules reloaded once, then the sync runs" {
+  nvidia_failed_at_boot
+  run_sync
+  assert_success
+  assert_called "systemctl stop nvidia-powerd nvidia-persistenced"
+  assert_called_before "systemctl stop nvidia-powerd nvidia-persistenced" "modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia"
+  assert_called_before "modprobe -r nvidia_drm nvidia_modeset nvidia_uvm nvidia" "modprobe nvidia_drm modeset=1 fbdev=1"
+  assert_called_before "modprobe nvidia_drm modeset=1 fbdev=1" "modprobe -a nvidia nvidia_modeset nvidia_uvm"
+  assert_called_before "modprobe -a nvidia nvidia_modeset nvidia_uvm" "systemctl start --no-block nvidia-persistenced nvidia-powerd"
+  assert_equal "$(calls_matching "modprobe -r" | wc -l)" 1
+  # The failure was already in the log: reloaded straight away, without a 10 s wait first.
+  assert_equal "$(calls_matching "udevadm wait --timeout" | wc -l)" 1
+  assert_called_before "modprobe -a nvidia nvidia_modeset nvidia_uvm" "udevadm wait --timeout=10 $ROOT/dev/dri/by-path/pci-0000:01:00.0-card"
+  [[ "$LOG" == *"The NVIDIA driver couldn't start the eGPU at boot (its firmware wasn't readable yet). Reloading the NVIDIA modules..."* ]]
+  [[ "$LOG" == *"NVIDIA modules reloaded."* ]]
+  [[ "$LOG" =~ "eGPU DRM card appeared after "[0-9]+\.[0-9][0-9]"s" ]]
+  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+}
+
+@test "nvidia init failure logged during the wait: reloaded after the wait times out, then the sync runs" {
+  nvidia_failed_at_boot from-call 2
+  XGM_CARD_WAIT=3 run_sync
+  assert_success
+  assert_equal "$(calls_matching "udevadm wait --timeout=3" | wc -l)" 2
+  assert_equal "$(calls_matching "modprobe -r" | wc -l)" 1
+  [[ "$LOG" == *"NVIDIA modules reloaded."* ]]
+  run grep WLR_DRM_DEVICES "$ROOT/etc/environment"
+  assert_output "WLR_DRM_DEVICES=/dev/dri/card1:/dev/dri/card0"
+}
+
+@test "nvidia init failed, no udevadm wait: reload, then the polled card is found at once" {
+  nvidia_failed_at_boot
+  udevadm_wait missing
+  run_sync
+  assert_success
+  refute_called "sleep"
+  [[ "$LOG" == *"eGPU DRM card appeared after 0.00s"* ]]
+}
+
+@test "nvidia init failed and the reload doesn't help: one reload only, exit 1, environment untouched" {
+  nvidia_failed_at_boot persistent
+  local before
+  before="$(cat "$ROOT/etc/environment")"
+  XGM_CARD_WAIT=3 run_sync
+  assert_failure 1
+  assert_equal "$(calls_matching "modprobe -r" | wc -l)" 1
+  [[ "$LOG" == *"WARNING: the eGPU's DRM card didn't appear within 3s after the NVIDIA reload (or no iGPU card); sync aborted."* ]]
+  assert_equal "$(cat "$ROOT/etc/environment")" "$before"
+}
+
+@test "nvidia init failed and the modules won't unload: nothing loaded, exit 1, the user told to Eject and Enable" {
+  nvidia_failed_at_boot
+  module_stuck nvidia_drm
+  XGM_CARD_WAIT=3 run_sync
+  assert_failure 1
+  refute_called "modprobe nvidia_drm modeset=1 fbdev=1"
+  refute_called "systemctl start --no-block nvidia-persistenced nvidia-powerd"
+  [[ "$LOG" == *"WARNING: couldn't unload the NVIDIA modules; the eGPU stays off for this boot. Eject and Enable it from the plugin."* ]]
+}
+
+@test "slow but healthy nvidia (no failure in the kernel log): never reloaded" {
+  nvidia_card_pending
+  udevadm_wait timeout
+  XGM_CARD_WAIT=3 run_sync
+  assert_failure 1
+  # Checked before the wait and again after it timed out.
+  assert_equal "$(calls_matching "dmesg" | wc -l)" 2
+  refute_called "modprobe"
+  refute_called "systemctl stop nvidia-powerd nvidia-persistenced"
+}
+
+@test "a failure logged for another GPU address: the eGPU isn't reloaded" {
+  egpu_present nvidia
+  egpu_card_later
+  echo "[    3.4] NVRM: GPU 0000:02:00.0 init failed during probe (ret=-5)." > "$SHIM_STATE/dmesg"
+  udevadm_wait timeout
+  mkdir -p "$ROOT/home/xgmtest/.config/plasma-workspace/env"
+  XGM_CARD_WAIT=3 run_sync
+  assert_failure 1
+  refute_called "modprobe"
+}

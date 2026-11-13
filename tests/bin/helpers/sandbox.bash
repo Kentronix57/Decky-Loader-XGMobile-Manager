@@ -270,6 +270,25 @@ egpu_card_later() {
   return 0
 }
 
+# nvidia_init_failed [persistent] [from-call n]: booted with the eGPU on, nvidia loaded before
+# /home (and the GSP firmware) was mounted: the kernel log has NVRM's failure lines for the eGPU
+# (shims/dmesg, only from its n-th call), and no DRM card appears until nvidia is unloaded and
+# nvidia_drm loaded again (shims/modprobe, shims/udevadm). "persistent": the reload doesn't help.
+nvidia_init_failed() {
+  fake_gpu_drm_remove "$FAKE_EGPU_PCI_ADDR"
+  rm -f "$SHIM_STATE/egpu_card_at"
+  local mode=once
+  [ "${1:-}" = "persistent" ] && { mode=persistent; shift; }
+  [ "${1:-}" = "from-call" ] && echo "$2" > "$SHIM_STATE/dmesg_from_call"
+  echo "$mode" > "$SHIM_STATE/nvidia_init_failed"
+  cat > "$SHIM_STATE/dmesg" <<EOF
+[    3.456011] nvidia $FAKE_EGPU_PCI_ADDR: Direct firmware load for nvidia/620.70.06/gsp_ga10x.bin failed with error -2
+[    3.456247] NVRM: RmFetchGspRmImages: No firmware image found
+[    3.456254] NVRM: GPU $FAKE_EGPU_PCI_ADDR: RmInitAdapter failed! (0x61:0x56:2111)
+[    3.456266] NVRM: GPU $FAKE_EGPU_PCI_ADDR init failed during probe (ret=-5).
+EOF
+}
+
 # udevadm_wait appears|timeout|missing: what `udevadm wait` does (shims/udevadm).
 udevadm_wait() { echo "$1" > "$SHIM_STATE/udevadm_wait"; }
 
