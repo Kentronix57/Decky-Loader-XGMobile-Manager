@@ -65,3 +65,25 @@ teardown() {
   assert_output --partial "Remove them with pacman"
   refute_output --partial "supergfxctl"
 }
+
+# installer_exit_code is the EXIT trap's mapping: only the installer's own exits after the unlock
+# (EXPLICIT_EXIT) keep their code; anything else becomes 1. Only that pure function is loaded
+# here, so nothing after the unlock runs.
+load_installer_exit_code() {
+  eval "$(sed -n '/^installer_exit_code() {$/,/^}$/p' "$XGM_REPO/bin/install-nvidia.sh")"
+  declare -F installer_exit_code >/dev/null
+}
+
+@test "install: the rollback keeps only explicit exit codes, everything else is 1" {
+  load_installer_exit_code
+  assert_equal "$(installer_exit_code 0 "")" 0
+  assert_equal "$(installer_exit_code 5 5)" 5
+  assert_equal "$(installer_exit_code 6 6)" 6
+  assert_equal "$(installer_exit_code 11 11)" 11
+  # dkms returns 10 when a build fails; 10 is "already installed" to the plugin.
+  assert_equal "$(installer_exit_code 10 "")" 1
+  assert_equal "$(installer_exit_code 1 "")" 1
+  assert_equal "$(installer_exit_code 22 "")" 1
+  assert_equal "$(installer_exit_code 143 "")" 1
+  assert_equal "$(installer_exit_code 6 5)" 1
+}

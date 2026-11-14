@@ -2,6 +2,9 @@
 # Test shim. Loaded modules are dirs in the sandbox's sys/module. `modprobe <module> [params]`
 # creates its dir, `modprobe -a <module>...` creates one per module; `modprobe -r <module>...` removes them, but fails like a module in use for any
 # module listed in $SHIM_STATE/module_stuck (module_stuck in helpers/sandbox.bash).
+# After nvidia_init_failed (the eGPU's GSP firmware wasn't readable at boot), the eGPU has no DRM
+# card until nvidia is unloaded and nvidia_drm loaded again; that reload makes the card appear,
+# unless the failure is "persistent".
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 [ -n "${XGM_ROOT:-}" ] || exit 0
 if [ "$1" = "-r" ]; then
@@ -12,6 +15,7 @@ if [ "$1" = "-r" ]; then
       exit 1
     fi
     rm -rf "$XGM_ROOT/sys/module/$module"
+    [ "$module" = "nvidia" ] && touch "$SHIM_STATE/nvidia_unloaded"
   done
   exit 0
 fi
@@ -23,4 +27,12 @@ for arg in "$@"; do
     *) mkdir -p "$XGM_ROOT/sys/module/$arg"; [ "$all" -eq 1 ] || break ;;
   esac
 done
+if [ "$1" = "nvidia_drm" ] && [ -e "$SHIM_STATE/nvidia_unloaded" ] && [ -e "$SHIM_STATE/nvidia_init_failed" ] \
+    && [ "$(cat "$SHIM_STATE/nvidia_init_failed")" != "persistent" ]; then
+  rm -f "$SHIM_STATE/nvidia_init_failed" "$SHIM_STATE/nvidia_unloaded"
+  ROOT="$XGM_ROOT"
+  # shellcheck source=../helpers/fake_gpu.bash
+  . "$(dirname "$(readlink -f "$0")")/../helpers/fake_gpu.bash"
+  fake_egpu_card_appear
+fi
 exit 0
