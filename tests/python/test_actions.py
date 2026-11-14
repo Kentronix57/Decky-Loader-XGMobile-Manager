@@ -1,4 +1,6 @@
 """Guards and small actions in main.py that don't need hardware."""
+import builtins
+
 import pytest
 
 from xgm_helpers import ACTION_RESULT_KEYS
@@ -83,7 +85,7 @@ def test_install_nvidia_dispatches_by_os(xgm, os_type, script, other):
   ("balanced", "0", "Balanced"),
   ("Performance", "1", "Performance"),
   ("  QUIET ", "2", "Quiet"),
-  ("turbo", "0", "Balanced"),  # unrecognised input falls back to Balanced
+  ("performance mode", "1", "Performance"),
 ])
 def test_set_power_profile_writes_wmi_value(xgm, profile, value, label):
   res = xgm.run(xgm.plugin.set_power_profile(profile))
@@ -91,6 +93,77 @@ def test_set_power_profile_writes_wmi_value(xgm, profile, value, label):
   assert res["ok"] is True
   assert res["message"] == f"Power profile set to {label}."
   assert (xgm.wmi / "throttle_thermal_policy").read_text() == value
+
+
+def _policy_open(monkeypatch, policy, fail_mode):
+  """Makes open() of the policy file raise when its mode contains fail_mode ("w" or "r")."""
+  real_open = builtins.open
+  calls = []
+
+  def fake_open(file, mode="r", *args, **kwargs):
+    if str(file) == str(policy):
+      calls.append(mode)
+      if fail_mode in mode:
+        raise PermissionError(f"policy opened with mode {mode!r}")
+    return real_open(file, mode, *args, **kwargs)
+
+  monkeypatch.setattr(builtins, "open", fake_open)
+  return calls
+
+
+@pytest.mark.parametrize("profile,value,label", [
+  ("balanced", "0", "Balanced"),
+  ("Performance", "1", "Performance"),
+  ("quiet", "2", "Quiet"),
+])
+def test_set_power_profile_unchanged_is_not_rewritten(xgm, monkeypatch, profile, value, label):
+  # Each write makes the EC re-apply the profile (issue #25), so the same value isn't written again.
+  policy = xgm.wmi / "throttle_thermal_policy"
+  policy.write_text(value + "\n")
+  calls = _policy_open(monkeypatch, policy, "w")
+  res = xgm.run(xgm.plugin.set_power_profile(profile))
+  assert set(res) == ACTION_RESULT_KEYS
+  assert res["ok"] is True
+  assert res["status"] == "success"
+  assert res["message"] == f"Power profile is already {label}."
+  assert not any("w" in m for m in calls)
+  assert policy.read_text() == value + "\n"
+
+
+def test_set_power_profile_different_value_is_written(xgm):
+  policy = xgm.wmi / "throttle_thermal_policy"
+  policy.write_text("0\n")
+  res = xgm.run(xgm.plugin.set_power_profile("performance"))
+  assert res["ok"] is True
+  assert res["message"] == "Power profile set to Performance."
+  assert policy.read_text() == "1"
+
+
+@pytest.mark.parametrize("profile", ["turbo", ""])
+def test_set_power_profile_unknown_name_gives_failure(xgm, monkeypatch, profile):
+  policy = xgm.wmi / "throttle_thermal_policy"
+  policy.write_text("1\n")
+  calls = _policy_open(monkeypatch, policy, "w")
+  res = xgm.run(xgm.plugin.set_power_profile(profile))
+  assert set(res) == ACTION_RESULT_KEYS
+  assert res["ok"] is False
+  assert res["status"] == "error"
+  assert res["title"] == "ASUS Power Profile"
+  assert res["message"] == f'Unknown power profile "{profile}".'
+  assert res["hint"] == "Pick Quiet, Balanced or Performance."
+  assert not any("w" in m for m in calls)
+  assert policy.read_text() == "1\n"
+
+
+def test_set_power_profile_unreadable_is_still_written(xgm, monkeypatch):
+  policy = xgm.wmi / "throttle_thermal_policy"
+  policy.write_text("2\n")
+  calls = _policy_open(monkeypatch, policy, "r")
+  res = xgm.run(xgm.plugin.set_power_profile("quiet"))
+  assert res["ok"] is True
+  assert res["message"] == "Power profile set to Quiet."
+  assert "w" in calls
+  assert policy.read_text() == "2"
 
 
 def test_set_power_profile_unwritable_gives_failure(xgm, monkeypatch):

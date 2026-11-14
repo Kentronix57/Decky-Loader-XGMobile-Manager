@@ -1041,19 +1041,33 @@ class Plugin:
     clean_profile = str(profile).strip().lower()
     log(f"WMI PROFILE RECEIVED FROM UI: '{clean_profile}'")
     
-    val_to_write = "0"
-    label = "Balanced"
     if "balanced" in clean_profile:
       val_to_write = "0"
-    elif "performance" in  clean_profile:
+      label = "Balanced"
+    elif "performance" in clean_profile:
       val_to_write = "1"
       label = "Performance"
     elif "quiet" in clean_profile:
       val_to_write = "2"
       label = "Quiet"
+    else:
+      return _result(False, "error", "ASUS Power Profile", f"Unknown power profile \"{profile}\".",
+                     hint="Pick Quiet, Balanced or Performance.")
+
+    policy_path = os.path.join(ASUS_WMI_DIR, "throttle_thermal_policy")
+    # Every write makes the embedded controller re-apply the profile, even an unchanged one
+    # (issue #25: mid-game re-applies lined up with thermal-trip shutdowns), so skip a no-op.
+    # A file that can't be read is still written, as before.
+    try:
+      with open(policy_path, "r") as f:
+        current = f.read().strip()
+    except Exception:
+      current = None
+    if current == val_to_write:
+      log(f"Power profile is already {label}; not rewriting {policy_path}")
+      return _result(True, "success", "ASUS Power Profile", f"Power profile is already {label}.")
 
     try:
-      policy_path = os.path.join(ASUS_WMI_DIR, "throttle_thermal_policy")
       with open(policy_path, "w") as f:
         f.write(val_to_write)
       return _result(True, "success", "ASUS Power Profile", f"Power profile set to {label}.")
