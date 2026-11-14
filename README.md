@@ -13,7 +13,7 @@
 [![AI-assisted](https://img.shields.io/badge/AI--assisted-since_v0.3.0-555555)](#ai-assisted-development)
 [![License GPLv3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
 
-![XG Mobile Manager UI](assets/images/mainUI.png)
+<img src="assets/images/mainUI.png" alt="XG Mobile Manager panel in the Quick Access Menu: XG Mobile Active, 51 °C, 26.5 / 150 W, 0.8 / 16.0 GB VRAM, Eject button, Power profile, Options" width="320">
 
 A Decky Loader plugin that brings seamless, UI-driven support for the ASUS ROG XG Mobile eGPU ecosystem to Arch-based handhelds (like the ROG Ally running SteamOS, Bazzite or CachyOS).
 
@@ -359,7 +359,7 @@ If this tool saved you hours of troubleshooting or finally made your portable eG
 
 <a id="pictures"></a>
 ## Pictures
-![SteamOS version and NVIDIA driver version displayed in GameMode](assets/images/595-71-05-linux-6.18.25.png)
+![SteamOS 3.9.5 (kernel 7.2.7) with the RTX 4090 XG Mobile on NVIDIA driver 620.70.06, in Steam's Settings → System (serial number removed)](assets/images/steamos-3.9.5-nvidia-620.70.06.png)
 ![NVIDIA Settings and Readings in Wayland Desktop. BazziteOS](assets/images/wayland-nvidia-bazzite1.png)
 ![NVIDIA Settings and Readings in X11 Desktop. SteamOS](assets/images/x11-nvidia1.png)
 ![NVIDIA Settings and Readings in X11 Desktop. SteamOS](assets/images/x11-nvidia2.png)
