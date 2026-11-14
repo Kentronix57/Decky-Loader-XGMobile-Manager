@@ -42,7 +42,7 @@ This plugin manages the complex hardware handshakes, installs the NVIDIA drivers
 ## ⚠️ Important Disclaimers & Risks
 **Read this before installing. You are modifying core system behaviors.**
 
-* **Beta Software:** This is a community-driven project and is currently in Beta. You are using this at your own risk.
+* **Community Software:** This is a community-driven project, tested by one maintainer on one ROG Ally and XG Mobile. You are using it at your own risk. Pre-releases (betas) are less tested than stable releases.
 * **Data Corruption Risk:** This plugin modifies the read-only root filesystem of SteamOS when using NVIDIA only. It compiles kernel modules via DKMS, and manipulates `/etc/environment`. While it uses a highly protective "Bind Mount" architecture to prevent permanent system bricking, unexpected power loss during installation *could* result in a boot loop requiring a SteamOS reinstall.
 * **Sleep/Resume on BazziteOS with NVIDIA forces a Hard Reboot:** When putting the device to sleep with the NVIDIA eGPU active, the GPU cuts power to its Video RAM. Waking the device causes an internal fault on the XG Mobile and triggers the kernel panic. These are caused by upstream issues with the nvidia-open drivers that Bazzite team uses, and my plugin cannot do anything about this. The plugin shows a warning under the Eject button while this applies. It is recommended to disable sleep when on AC to avoid any complications. If you do find yourself in this scenario, to recover, hold down the power button until the device reboots.
 * **External Display Limitations:** Due to current upstream limitations in `gamescope`, **4K/8K and UltraWide resolutions may not function correctly in Game Mode**. 1080p and 1440p are generally stable with the width being 2560p or less. Desktop Mode provides wider resolution support (Wayland and X11).
@@ -72,6 +72,11 @@ If you have questions or concerns about this, please open an issue.
 | **XG Mobile 2025 (RTX 5070 Ti / 5090)** | 🔴 Not supported | 🔴 Not supported | 🔴 Not supported | Connects over Thunderbolt 5 instead of the XG Mobile connector; needs a new mode and USB4 testers (see [#16](https://github.com/Kentronix57/Decky-Loader-XGMobile-Manager/issues/16)). |
 | **ROG Flow laptops** | 🟡 Beta | 🟡 Beta | 🟡 Beta | Supergfxctl controls under Setup & Maintenance. Community testers wanted. |
 
+**Last tested for v0.3.0** (2026-11-13, ROG Ally RC71L + RTX 4090 XG Mobile, on a 4K TV):
+* **SteamOS 3.9.5** (kernel 7.2.7), NVIDIA 620.70.06 installed by the plugin
+* **Bazzite 45.20261112** (bazzite-deck-nvidia), NVIDIA 620.70.06 from the image
+* **CachyOS Handheld** (kernel 7.2.9 deckify), NVIDIA 615.78.08 from CachyOS's repository
+
 ---
 
 <a id="how-it-works"></a>
@@ -88,10 +93,10 @@ When you enable the eGPU, the plugin "Re-Fangs" the OS by injecting NVIDIA's EGL
 If a SteamOS update wipes out the background services, the plugin will automatically detect the missing files and self-repair the next time you enable the XG Mobile.
 
 **Clean Eject:**
-Ejecting releases the eGPU in a safe order: it waits for programs to let go of it, stops the NVIDIA services, unloads the driver, and only then powers the XG Mobile off. If something still holds the eGPU, the eject is cancelled and the XG Mobile stays on, instead of hanging your session. It also removes the eGPU environment (restarting your session's background services if they still carry it) and returns to Game Mode.
+Ejecting releases the eGPU in a safe order: it waits for programs to let go of it, stops the NVIDIA services, unloads the driver, and only then powers the XG Mobile off. A system service that holds the eGPU (like Bazzite's `cardwired`, which Bazzite's Game Mode needs) is stopped and started again after the eject, never killed. If something still holds the eGPU, the eject is cancelled and the XG Mobile stays on, instead of hanging your session. It also removes the eGPU environment (restarting your session's background services if they still carry it) and returns to Game Mode.
 
 **Boot Safety Net:**
-If you power off with the XG Mobile still enabled and boot without it, the plugin's boot service removes the eGPU environment before the login screen, so you don't boot into a black screen. When the XG Mobile is connected, it waits for the NVIDIA card and refreshes the display settings for that boot.
+If you power off with the XG Mobile still enabled and boot without it, the plugin's boot service removes the eGPU environment before the login screen, so you don't boot into a black screen. When the XG Mobile is connected, it waits for the NVIDIA card and refreshes the display settings for that boot. On SteamOS, the NVIDIA firmware lives on your `/home` drive, and booting with the XG Mobile enabled can load the driver before `/home` is ready; the boot service notices that failure and reloads the driver once, which adds about 3 seconds to those boots.
 
 **For CachyOS (Packaged Drivers):**
 CachyOS ships NVIDIA drivers in its own repositories, so the plugin installs those with pacman instead of compiling them. They then update with the rest of the system.
@@ -107,7 +112,7 @@ Bazzite completely strips out standard ASUS daemons (like asusd) to preserve nat
 
 **Prerequisites:**
 1. You must have [Decky Loader](https://github.com/SteamDeckHomebrew/decky-loader) installed.
-2. **SteamOS NVIDIA Users:** You must have at least **4GB of free space** on your `/home` drive and **600MB** on your root (`/`) drive.
+2. **SteamOS NVIDIA Users:** You must have at least **4 GB of free space** on your `/home` drive and **500 MB** on your root (`/`) drive.
 3. **Bazzite NVIDIA Users:** Ensure you are running an NVIDIA-specific image (e.g., bazzite-deck-nvidia).
 
 **Quick Install (latest stable release):**
@@ -140,9 +145,11 @@ sudo systemctl start plugin_loader
 > ### 🚀 New in v0.3.0
 > * **A compact panel:** a status line (**● XG Mobile: Active / Connected / Not connected**), one Enable/Eject button, short descriptions with **ⓘ** pop-ups for the details, and the rarely used buttons tucked into **▸ Setup & Maintenance**.
 > * **Live eGPU readout with colour:** temperature (green → yellow → red), power as `used / limit W` (amber when it's at the limit), VRAM as `used / total GB`, and GPU load.
+> * **SteamOS 3.9.5 support:** NVIDIA driver 620.70.06 for its new kernel 7.2, and booting with the XG Mobile enabled works again.
 > * **CachyOS support:** an automatic NVIDIA driver installer and fixes for its login manager.
 > * **More reliable Enable and Eject:** the NVIDIA power services start after the eGPU is up (full 150 W on the RTX 4090), ejects release the eGPU in a safe order and return to Game Mode reliably, and a boot safety net prevents black screens after powering off with the XG Mobile enabled.
-> * **Clearer errors:** pop-ups that say what went wrong and what to do.
+> * **Safer Eject:** Eject asks before closing your game, a power profile change can't land on the Eject button anymore, and Bazzite's `cardwired` service is restarted instead of killed (which left Game Mode stuck at login).
+> * **Clearer errors:** pop-ups that say what went wrong and what to do, including a separate message when the NVIDIA driver doesn't build for a new SteamOS kernel.
 > * **Logs in their own folder:** see [Where the logs are](#where-the-logs-are).
 
 ### The Panel
@@ -158,7 +165,7 @@ Open the Quick Access Menu → XG Mobile Manager. From top to bottom:
 1. Plug in the XG Mobile and lock the connector (ensure the LED is white).
 2. Open the Quick Access Menu → XG Mobile Manager.
 3. Set **NVIDIA Mode**: on for NVIDIA XG Mobiles, off for AMD. If AMD, skip to Daily Use.
-4. **SteamOS NVIDIA ONLY:** Make sure you are on the latest SteamOS update. Open **▸ Setup & Maintenance** and click **Install NVIDIA Drivers**. A live terminal will appear. Do not turn off your device. This downloads ~1.8GB of data and compiles the Linux kernel modules. Reboot when prompted.
+4. **SteamOS NVIDIA ONLY:** Make sure you are on the latest SteamOS update. Open **▸ Setup & Maintenance** and click **Install NVIDIA Drivers**. A live terminal will appear. Do not turn off your device. This downloads about 600 MB, compiles the Linux kernel modules (a few minutes) and stores about 2 GB on your `/home` drive. Reboot when prompted.
 5. **Bazzite ONLY:** No installation is required; the driver installer is hidden on Bazzite to protect your immutable OS.
 6. **CachyOS NVIDIA ONLY:** See [CachyOS](#cachyos) below.
 7. *(Optional)* In **▸ Setup & Maintenance**, click **Create Desktop Shortcuts** to add Desktop Mode icons for enabling and ejecting the XG Mobile.
@@ -174,14 +181,14 @@ If the installer reports pending updates, update the system (in Game Mode: Setti
 ### Daily Use
 * **To Play:** Plug in the XG Mobile, lock it, and click **Enable XG Mobile**. The light on the XG Mobile connector will turn red. The screen will then briefly go black as `gamescope` restarts on the external GPU, please be patient. Some external monitors alternate On/Off during this process.
 * **Power Profiles:** Once active, use the **ASUS Power Profile (Ally + XG Mobile)** dropdown to switch between Quiet, Balanced, and Performance (see [Power](#power)).
-* **To Disconnect:** Click **Eject XG Mobile**. Wait for the UI to restart and return to the handheld screen and the light on the XG Mobile connector is white before unlocking the cable.
+* **To Disconnect:** Click **Eject XG Mobile** and confirm (any game running on the eGPU closes). Wait for the UI to restart and return to the handheld screen and the light on the XG Mobile connector is white before unlocking the cable.
 * **Desktop Mode:**
   * **DesktopMode on Enable** switches to Desktop Mode automatically when you enable the XG Mobile. Recommended for 4K/8K and Ultrawide resolutions.
   * **Set Desktop to Default** keeps Desktop Mode as the default until you eject. Use the **Eject XG Mobile** desktop icon to eject and return to Game Mode.
 
 <a id="power"></a>
 ### Power
-The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit. Measured on the RTX 4090: Quiet 60 W, Balanced 120 W, Performance 150 W. The RTX 3080 showed 120 W on Balanced and 150 W on Performance; Quiet is expected to be 60 W there too (not measured yet). The panel's Power readout shows the current limit next to the draw. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that.
+The **ASUS Power Profile** dropdown sets the Ally's ASUS platform profile (`throttle_thermal_policy`). Steam's performance setting in the Quick Access Menu changes the same profile, so the two stay in sync. Through Dynamic Boost, the profile also sets the XG Mobile's power limit. Measured on the RTX 4090: Quiet 60 W, Balanced 120 W, Performance 150 W. The RTX 3080 showed 120 W on Balanced and 150 W on Performance; Quiet is expected to be 60 W there too (not measured yet). The panel's Power readout shows the current limit next to the draw. It doesn't cap the Ally's CPU power; use Steam's TDP slider (or HHD / SimpleDeckyTDP) for that. Picking the profile that's already set doesn't write it again ("Power profile is already …"), and the new limit can take a few seconds to show after a switch.
 
 **Recommended:** for full XG Mobile power with a cool CPU, pick **Performance** and cap the CPU with Steam's TDP slider or a TDP plugin. Measured on SteamOS with the RTX 4090: Performance plus SimpleDeckyTDP's slider at **15 W** kept the XG Mobile at ~149 W while the Ally's CPU drew 11–15 W.
 
@@ -207,6 +214,9 @@ Without a TDP tool, the ASUS profile also sets the Ally CPU's firmware power lim
 | Performance | 30 W | 43 W | 53 W |
 
 So Performance on its own lets the CPU boost briefly up to about 53 W, which makes it run hot. For full XG Mobile power with a cooler CPU, pair Performance with a TDP tool that caps the CPU (see above).
+
+#### XG Mobile temperatures and fans
+The RTX 4090 Laptop GPU in the XG Mobile targets **87 °C** and slows itself slightly to stay there, so the mid-80s °C on Performance under load are normal (the panel shows them in red). Balanced (120 W) runs a few degrees cooler for a small loss in frame rate. The XG Mobile's fans aren't exposed through the NVIDIA driver on Linux, so there's no fan curve to set from the plugin.
 
 #### CPU boost and temperatures
 The CPU's frequency boost is on by default. On the same tester's Ally, turning it off lowered the CPU temperature on the internal screen from about 86 °C to 68–70 °C, at the cost of some single-core speed. TDP tools often have a CPU boost toggle.
@@ -267,8 +277,9 @@ Every change should state its test tier; [TESTING.md](TESTING.md) explains the t
 * **Internal Display still on:** When leaving the eGPU active and rebooting/shutdown in GameMode, the internal display stays on and displays the boot logo. This doesn't affect performance, but is actively being investigated.
 * **Power Profile overwritten by other TDP controllers:** Other TDP controls (like SimpleDeckyTDP and HHD) can change the ASUS power profile too (see [Using SimpleDeckyTDP](#using-simpledeckytdp)). The plugin's dropdown always shows the current profile (it reads it every 3 seconds).
 * **Steam's performance overlay shows 0 °C / 0 MHz for the XG Mobile on SteamOS:** On SteamOS, Steam's performance overlay shows 0 °C and 0 MHz for the XG Mobile, and no XG Mobile wattage (its load is correct). The plugin's panel and `nvidia-smi` show the temperature and power correctly.
+* **Bluetooth controller pressing twice:** Some Bluetooth controllers occasionally connect as two devices, and Steam then registers each press twice (a menu skips an item, or a button is pressed again after a menu closes). Turn the controller off and on to reconnect it.
 * **Set Desktop to Default on BazziteOS:** Setting desktop mode to persistent is not currently possible on BazziteOS. With the deck image of bazzite, they have made it over-write the desktop persistence on a reboot. This is still under investigation.
-* **Shaders re-processed after Enable:** Steam may re-process Vulkan shaders for a game after you enable the XG Mobile. You can skip it, or turn off shader pre-caching in Steam's settings. Under investigation.
+* **Shaders processed after Enable:** Steam may process Vulkan shaders for a game after you enable the XG Mobile. While the XG Mobile is enabled, Steam's Vulkan only sees the NVIDIA GPU, so these are built for the eGPU (in our test, Steam got through about two-thirds of FF7 Remake's in 22 seconds before the game started). You can skip it; the game then compiles what it needs while you play. If it takes a long time after every Enable, please open an issue.
 
 ---
 
@@ -294,6 +305,9 @@ steamos-session-select gamescope
 ```
 
 On SteamOS, "Return to Gaming Mode" also goes back, but only once: it doesn't clear "Set Desktop to Default", so Desktop Mode stays the default.
+
+### Game Mode on the Ally's screen although the XG Mobile is enabled
+If you boot with the XG Mobile enabled and Game Mode still comes up on the Ally's own screen, open the plugin, press **Eject**, then **Enable**. `boot_sync.log` (see [Where the logs are](#where-the-logs-are)) says what happened at boot; please attach it to an issue.
 
 ### Black screen in Game Mode after an eject
 On builds before v0.3.0, an eject after booting with the XG Mobile active could leave Game Mode on a black screen. Over SSH (or a TTY), logged in as the handheld's user, run `sudo systemctl stop user@$(id -u).service`, or reboot.
