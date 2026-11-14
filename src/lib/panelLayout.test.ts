@@ -1,12 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   AMBER,
+  CLICK_GUARD_MS,
+  EJECT_CONFIRM,
   GREEN,
   RED,
+  clickAllowed,
   formatPower,
   formatTemp,
   formatUtil,
   formatVram,
+  guardUntil,
   mainButton,
   maintenanceRows,
   powerColor,
@@ -25,7 +29,7 @@ const eject = { action: "eject_egpu", statusLabel: "Ejecting", actionPhrase: "ej
 
 describe("mainButton", () => {
   it("ejects when the XG Mobile is active", () => {
-    expect(mainButton(active, false)).toEqual({ ...eject, label: "Eject XG Mobile", disabled: false });
+    expect(mainButton(active, false)).toEqual({ ...eject, label: "Eject XG Mobile", disabled: false, confirm: EJECT_CONFIRM });
   });
 
   it("enables when it is connected but not active", () => {
@@ -40,6 +44,41 @@ describe("mainButton", () => {
     expect(mainButton(active, true).disabled).toBe(true);
     expect(mainButton(connected, true).disabled).toBe(true);
     expect(mainButton(disconnected, true).disabled).toBe(true);
+  });
+});
+
+describe("Eject confirmation", () => {
+  it("asks before ejecting, and says a running game will close", () => {
+    expect(mainButton(active, false).confirm).toEqual({
+      title: "Eject the XG Mobile?",
+      description: "Any game using the eGPU will close, and the display moves back to the Ally's screen.",
+      okText: "Eject",
+    });
+  });
+
+  it("doesn't ask before Enable", () => {
+    expect(mainButton(connected, false).confirm).toBeUndefined();
+    expect(mainButton(disconnected, false).confirm).toBeUndefined();
+  });
+});
+
+describe("click-through guard", () => {
+  // Pass 7: the press that picked Performance reached Eject ~1 s after set_power_profile was sent.
+  it("blocks presses for 1 s after it's set", () => {
+    expect(CLICK_GUARD_MS).toBe(1000);
+    const until = guardUntil(10_000);
+    expect(until).toBe(11_000);
+    expect(clickAllowed(10_000, until)).toBe(false);
+    expect(clickAllowed(10_999, until)).toBe(false);
+    expect(clickAllowed(11_000, until)).toBe(true);
+    expect(clickAllowed(25_000, until)).toBe(true);
+  });
+
+  it("a later profile change starts a new window", () => {
+    let until = guardUntil(10_000);
+    expect(clickAllowed(12_000, until)).toBe(true);
+    until = guardUntil(12_000);
+    expect(clickAllowed(12_500, until)).toBe(false);
   });
 });
 

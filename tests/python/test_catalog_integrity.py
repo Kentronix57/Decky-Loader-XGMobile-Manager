@@ -218,3 +218,20 @@ def test_power_profile_label_is_honest_and_dropdown_unchanged():
   # Text only: the dropdown still writes the same three profiles through set_power_profile.
   assert re.findall(r'\{ data: "(\w+)", label: "\w+" \}', src) == ["Quiet", "Balanced", "Performance"]
   assert 'call("set_power_profile", { profile: newProfile })' in src
+
+
+def test_main_button_goes_through_the_click_guard_and_the_eject_confirmation():
+  # Pass 7: picking Performance re-mounted the panel and the same press hit Eject mid-game.
+  src = (REPO / "src" / "components" / "QuickAccessContent.tsx").read_text()
+  # The guard starts when the panel mounts...
+  assert "const mainButtonGuard = useRef(guardUntil(Date.now()));" in src
+  # ...and again on every profile change, before anything else in the handler.
+  assert re.search(r"onChange=\{async \(option: any\) => \{\s*mainButtonGuard\.current = guardUntil\(Date\.now\(\)\);", src)
+  # Enable/Eject only run through onMainButton: no click calls handleAction with them directly.
+  assert "onClick={() => onMainButton(button)}" in src
+  assert "handleAction(button." not in src
+  assert not re.search(r'handleAction\("(enable|eject)_egpu"', src)
+  body = re.search(r"const onMainButton = \(b: MainButton\) => \{(.*?)\n  \};", src, re.S).group(1)
+  # The guard is checked first, and a confirmation is shown before the action runs.
+  assert body.index("clickAllowed(Date.now(), mainButtonGuard.current)") < body.index("handleAction(")
+  assert "if (!b.confirm)" in body and "<ConfirmModal" in body and "onOK={run}" in body
