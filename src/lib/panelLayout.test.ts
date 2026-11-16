@@ -13,7 +13,9 @@ import {
   guardUntil,
   mainButton,
   maintenanceRows,
+  rememberMaintenanceOpen,
   rememberUsb4DiagLabel,
+  rememberedMaintenanceOpen,
   rememberedUsb4DiagLabel,
   USB4_DIAG_DESCRIPTION,
   USB4_DIAG_LABELS,
@@ -302,5 +304,15 @@ describe("USB4 diagnostics labels", () => {
     expect(rememberedUsb4DiagLabel()).toBe("plugged");
     expect(rememberUsb4DiagLabel("rm -rf")).toBe("plugged");
     rememberUsb4DiagLabel("unplugged");
+  });
+});
+
+describe("Setup & Maintenance open state", () => {
+  it("starts closed and survives a re-mount (module state, not component state)", () => {
+    expect(rememberedMaintenanceOpen()).toBe(false);
+    expect(rememberMaintenanceOpen(true)).toBe(true);
+    expect(rememberedMaintenanceOpen()).toBe(true);
+    expect(rememberMaintenanceOpen(false)).toBe(false);
+    expect(rememberedMaintenanceOpen()).toBe(false);
   });
 });

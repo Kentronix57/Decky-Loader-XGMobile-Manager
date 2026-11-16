@@ -192,7 +192,8 @@ check_read_only() {
   after=$(tree_state)
   assert_equal "$after" "$before"
   refute_mutating_calls
-  assert_equal "$(ls -A "$LOG_DIR")" "$DIAG_LOG_NAME"
+  assert_equal "$(ls -A "$LOG_DIR" | sort)" "$(printf '%s\n' "$DIAG_LOG_NAME" usb4_diagnostics.lock | sort)"
+  [[ "$output" == *"Saved snapshot 1 to "* ]] || fail "no closing line"
   grep -q '^===== Snapshot 1 ' "$LOG_DIR/$DIAG_LOG_NAME" || fail "no snapshot in the log"
 }
 
@@ -354,6 +355,42 @@ check_read_only() {
   assert_line "[    1.5] pcieport 0000:00:03.1: Device Serial Number <serial>"
 }
 
+@test "redaction: the hostname in any case and inside _-joined tokens" {
+  fixture_usb4
+  printf '%s\n' "[    1.0] thunderbolt: ALICES-LEGION_dock and nvidia_Alices-Legion_x, alices-legion alices-legion." \
+    "[    1.1] thunderbolt: not-alices-legionx stays" > "$SHIM_STATE/dmesg"
+  diag
+  assert_success
+  run diag_log
+  assert_line "[    1.0] thunderbolt: <host>_dock and nvidia_<host>_x, <host> <host>."
+  # Part of a longer alphanumeric word: not the hostname.
+  assert_line "[    1.1] thunderbolt: not-alices-legionx stays"
+}
+
+@test "redaction: PARTUUID=, short UUID= forms, /run/media/<user>, iSerial and serial values" {
+  fixture_ally
+  echo "BOOT_IMAGE=/vmlinuz root=PARTUUID=1a2b3c4d-02 resume=UUID=1234-ABCD rw" > "$ROOT/proc/cmdline"
+  printf '%s\n' "[    1.0] thunderbolt: mounted /run/media/$SECRET_USER/disk" \
+    "[    1.1] xhci_hcd: iSerial                 3 0123456789AB" \
+    "[    1.2] xhci_hcd: serial XYZ0001 attached" \
+    "[    1.3] typec: Serial: QQ77" \
+    "[    1.4] xhci_hcd: iSerial                 0 " \
+    "[    1.5] thunderbolt: Device Serial Number 12-34-56-78-9a-bc-de-f0" > "$SHIM_STATE/dmesg"
+  diag
+  assert_success
+  run diag_log
+  assert_line "cmdline: BOOT_IMAGE=/vmlinuz root=PARTUUID=<uuid> resume=UUID=<uuid> rw"
+  assert_line "[    1.0] thunderbolt: mounted /run/media/<user>/disk"
+  assert_line "[    1.1] xhci_hcd: iSerial                 3 <serial>"
+  assert_line "[    1.2] xhci_hcd: serial <serial> attached"
+  assert_line "[    1.3] typec: Serial: <serial>"
+  assert_line "[    1.4] xhci_hcd: iSerial                 0 "
+  assert_line "[    1.5] thunderbolt: Device Serial Number <serial>"
+  refute_output --partial "$SECRET_USER"
+  refute_output --partial "1a2b3c4d"
+  refute_output --partial "1234-ABCD"
+}
+
 @test "redaction: an OS default hostname (steamdeck) isn't redacted" {
   fixture_ally
   set_hostname steamdeck
@@ -430,22 +467,92 @@ check_read_only() {
   grep -q '^===== Snapshot 1  .*  label=boot-plugged  ' "$LOG_DIR/$DIAG_LOG_NAME" || fail "not in $LOG_DIR"
 }
 
-@test "log dir: can't be created, exit 3, nothing collected" {
+# The exit 3 hint: a CLI run with a writable folder.
+assert_cli_hint() {
+  assert_output --partial "The snapshot above was NOT saved. Run it again with a writable folder and attach the log from there: sudo "
+  assert_output --partial "/bin/xgm-usb4-diag --log-dir /tmp/xgm-usb4 plugged"
+}
+
+@test "log dir: can't be created, exit 3, the snapshot is still collected and printed" {
+  fixture_usb4
   : > "$BATS_TEST_TMPDIR/not-a-dir"
   run_script xgm-usb4-diag --log-dir "$BATS_TEST_TMPDIR/not-a-dir/activity" plugged
   assert_failure 3
-  assert_output --partial "ERROR: can't create the log folder"
-  refute_called "lspci"
+  assert_line --regexp '^===== Snapshot 1  .*  label=plugged  '
+  assert_line "===== End of snapshot 1 ====="
+  assert_line "0000:64:00.0 (target): class 0x030000 vendor 0x10de device 0x2c18 driver nvidia"
+  assert_output --partial "ERROR: can't create the log folder $BATS_TEST_TMPDIR/not-a-dir/activity."
+  assert_cli_hint
+  refute_output --partial "Saved snapshot"
+  # Still redacted.
+  refute_output --partial "$SECRET_MAC"
 }
 
-@test "log dir: log not writable, exit 3, nothing collected" {
+@test "log dir: log not writable, exit 3, the snapshot is printed but the log is untouched" {
   : > "$LOG_DIR/$DIAG_LOG_NAME"
   chmod 444 "$LOG_DIR/$DIAG_LOG_NAME"
   KEEP_LOG_DIR=1 diag plugged
   assert_failure 3
-  assert_output --partial "ERROR: can't write $LOG_DIR/$DIAG_LOG_NAME"
-  refute_called "lspci"
+  assert_line --regexp '^===== Snapshot 1  .*  label=plugged  '
+  assert_output --partial "ERROR: can't write $LOG_DIR/$DIAG_LOG_NAME. The snapshot above was NOT saved."
+  assert_cli_hint
   assert_equal "$(wc -c < "$LOG_DIR/$DIAG_LOG_NAME")" 0
+}
+
+@test "log dir: the hint's --log-dir /tmp/xgm-usb4 form works (a fresh folder is created)" {
+  run_script xgm-usb4-diag --log-dir "$BATS_TEST_TMPDIR/xgm-usb4" plugged
+  assert_success
+  grep -q '^===== Snapshot 1  .*  label=plugged  ' "$BATS_TEST_TMPDIR/xgm-usb4/$DIAG_LOG_NAME" || fail "no snapshot"
+}
+
+@test "log dir under /home/<user>: stdout and stderr name it as ~ and never the user name" {
+  fixture_usb4
+  local home="$BATS_TEST_TMPDIR/home/$SECRET_USER" dir
+  # The sandbox prefix comes before /home here, so tilde leaves the path alone and the redaction
+  # (/home/<user>) is what hides the name. (A leading /home/<user> becomes ~: see the tilde test.)
+  dir="$home/homebrew/logs/xgmobile-manager/activity"
+  run_script xgm-usb4-diag --log-dir "$dir" plugged
+  assert_success
+  refute_output --partial "$SECRET_USER"
+  assert_line --partial "Saved snapshot 1 to "
+  assert_line --partial "/home/<user>/homebrew/logs/xgmobile-manager/activity/usb4_diagnostics.log"
+  # And stderr, on the exit 3 path.
+  chmod 444 "$dir/$DIAG_LOG_NAME"
+  run_script xgm-usb4-diag --log-dir "$dir" plugged
+  assert_failure 3
+  refute_output --partial "$SECRET_USER"
+  assert_output --partial "ERROR: can't write "
+}
+
+@test "tilde: a leading /home/<user> or /var/home/<user> is shown as ~" {
+  run bash -c '. <(sed -n "/^tilde()/p" "$1"); tilde /home/deck/homebrew/logs/x.log; echo; tilde /var/home/bob/a; echo; tilde /tmp/x' _ "$XGM_REPO/bin/xgm-usb4-diag"
+  assert_output "$(printf '%s\n' '~/homebrew/logs/x.log' '~/a' '/tmp/x')"
+}
+
+# --- Concurrent runs ---
+
+@test "lock: two runs at once get Snapshot 1 and 2, not the same number" {
+  fixture_usb4
+  ( KEEP_LOG_DIR=1 diag one ) &
+  ( KEEP_LOG_DIR=1 diag two ) &
+  wait
+  run grep -oE '^===== Snapshot [0-9]+' "$LOG_DIR/$DIAG_LOG_NAME"
+  assert_output "$(printf '%s\n' '===== Snapshot 1' '===== Snapshot 2')"
+}
+
+@test "lock: held by another run for longer than the wait, exit 4 and nothing collected" {
+  touch "$LOG_DIR/usb4_diagnostics.lock"
+  flock "$LOG_DIR/usb4_diagnostics.lock" sleep 20 &
+  local holder=$!
+  local i
+  for i in $(seq 1 50); do flock -n "$LOG_DIR/usb4_diagnostics.lock" true || break; sleep 0.1; done
+  XGM_DIAG_LOCK_WAIT=1 KEEP_LOG_DIR=1 diag plugged
+  kill "$holder" 2>/dev/null || true
+  wait "$holder" 2>/dev/null || true
+  assert_failure 4
+  assert_output "ERROR: another USB4 diagnostics run is still going (waited 1 s for $LOG_DIR/usb4_diagnostics.lock). Nothing was collected; try again in a minute."
+  refute_called "lspci"
+  assert [ ! -s "$LOG_DIR/$DIAG_LOG_NAME" ]
 }
 
 # --- 5. ASUS section ---
@@ -551,6 +658,21 @@ check_read_only() {
   assert_output 3
   grep -q '^--- bolt journal ---$' "$LOG_DIR/$DIAG_LOG_NAME" || fail "the run didn't reach the last section"
   grep -q '^===== End of snapshot 1 =====$' "$LOG_DIR/$DIAG_LOG_NAME" || fail "no end marker"
+}
+
+@test "timeout: the message names the limit actually used, capped by the budget" {
+  fixture_usb4
+  with_command boltctl
+  hang_command boltctl
+  real_timeout 1
+  XGM_DIAG_BUDGET=5 diag plugged
+  assert_success
+  run grep -E '^\(timed out after [0-9]+ s\)$' "$LOG_DIR/$DIAG_LOG_NAME"
+  assert_equal "${#lines[@]}" 3
+  local l
+  for l in "${lines[@]}"; do
+    [[ "$l" =~ ^\(timed\ out\ after\ [1-5]\ s\)$ ]] || fail "not capped by the 5 s budget: $l"
+  done
 }
 
 @test "timeout: every external command runs under timeout" {

@@ -236,8 +236,10 @@ SCRIPT_ERROR_CATALOG = {
         "Bazzite's NVIDIA drivers are part of its image. On CachyOS, remove the NVIDIA packages with pacman if you no longer need them."),
   },
   "xgm-usb4-diag": {
-    3: ("Couldn't write the USB4 diagnostics log. Nothing was collected.",
-        "The plugin's log folder isn't writable. In Desktop Mode, open Konsole and run: sudo ~/homebrew/plugins/xgmobile-manager/bin/xgm-usb4-diag plugged (it prints the report too, so you can copy it from there)."),
+    3: ("Couldn't save the USB4 diagnostics log.",
+        "The plugin's log folder isn't writable. In Desktop Mode, open Konsole and run: sudo ~/homebrew/plugins/xgmobile-manager/bin/xgm-usb4-diag --log-dir /tmp/xgm-usb4 plugged (use your label), then attach /tmp/xgm-usb4/usb4_diagnostics.log to the GitHub issue."),
+    4: ("Another USB4 diagnostics run is still going.",
+        "Wait a minute for it to finish, then try again."),
     9: _MISSING_HELPER,
   },
   "supergfx-hybrid": _SUPERGFX_ERRORS,

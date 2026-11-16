@@ -8,15 +8,21 @@
 #   `sudo ~/homebrew/plugins/xgmobile-manager/bin/xgm-usb4-diag plugged` works standalone.
 #
 # Strictly read-only: it reads files and runs query commands, and writes nothing but its own log
-# (and moves it to usb4_diagnostics.prev.log once it's over 2 MB). No modprobe, no PCI rescan, no
+# (moved to usb4_diagnostics.prev.log once it's over 2 MB) and its lock file next to it (empty,
+# usb4_diagnostics.lock). No modprobe, no PCI rescan, no
 # bolt authorize/enroll, no service start/stop. bolt is only queried when bolt.service is already
 # active (boltctl would start it through D-Bus activation), and nvidia-smi only runs when the
 # nvidia module is already loaded (it would load it). Every external command runs under
 # `timeout`, and the whole run stays under a time budget. Identifiers (UUIDs, serial numbers,
-# MACs, the hostname, user names in /home paths) are redacted before anything is written.
+# MACs, the hostname, user names in /home and /run/media paths) are redacted before anything is
+# written or printed, stdout and stderr alike; its own messages show home dirs as ~.
 #
-# Exit codes: 0 snapshot written; 3 the log can't be written (nothing was collected); 9
-# xgm-common.sh missing.
+# Concurrent runs take turns: a lock (usb4_diagnostics.lock in the log folder) is held from
+# numbering the snapshot until it's appended; a run waits up to 20 s for it.
+#
+# Exit codes: 0 snapshot written; 3 the log can't be written (the snapshot is still collected and
+# printed to stdout, so it can be copied from there); 4 another run held the lock for 20 s
+# (nothing collected); 9 xgm-common.sh missing.
 ROOT="${XGM_ROOT:-}"
 # shellcheck source=bin/xgm-common.sh
 . "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
@@ -43,21 +49,30 @@ LABEL=$(printf '%s' "$LABEL" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-32)
 LABEL="${LABEL:-none}"
 
 CMD_TIMEOUT=10   # seconds per external command
-BUDGET=50        # seconds for the whole run; later commands are skipped once it's used up
+# Seconds for the whole run; later commands are skipped once it's used up. XGM_DIAG_BUDGET and
+# XGM_DIAG_LOCK_WAIT are for tests.
+BUDGET="${XGM_DIAG_BUDGET:-50}"
+LOCK_WAIT="${XGM_DIAG_LOCK_WAIT:-20}"   # seconds to wait for another run's lock
 
 have() { command -v "$1" >/dev/null 2>&1; }
 na() { echo "(not available: $*)"; }
 section() { printf '\n--- %s ---\n' "$1"; }
 
-# run <cmd> [args...]: the command under timeout (capped by what's left of the budget).
+# cmd_limit: the timeout for the next command, CMD_TIMEOUT capped by what's left of the budget.
+cmd_limit() {
+  local left=$((BUDGET - SECONDS))
+  if [ "$left" -lt "$CMD_TIMEOUT" ]; then echo "$left"; else echo "$CMD_TIMEOUT"; fi
+}
+
+# run <cmd> [args...]: the command under timeout (cmd_limit).
 # Returns 124 on a timeout (timeout's code), 125 when the budget is used up.
 run() {
-  local left=$((BUDGET - SECONDS)) t=$CMD_TIMEOUT
-  if [ "$left" -le 0 ]; then
+  local t
+  t=$(cmd_limit)
+  if [ "$t" -le 0 ]; then
     echo "(skipped: the ${BUDGET} s time budget is used up)"
     return 125
   fi
-  [ "$left" -lt "$t" ] && t=$left
   if have timeout; then
     timeout -k 2 "$t" "$@"
   else
@@ -67,18 +82,19 @@ run() {
 
 # show <cmd> [args...]: "$ <cmd>", then its output (stdout and stderr) and how it ended.
 show() {
-  local out rc
+  local out rc limit
   echo "\$ $*"
   if ! have "$1"; then
     na "$1 not installed"
     return 0
   fi
+  limit=$(cmd_limit)
   out=$(run "$@" 2>&1)
   rc=$?
   [ -n "$out" ] && printf '%s\n' "$out"
   case "$rc" in
     0|125) ;;
-    124|137) echo "(timed out after ${CMD_TIMEOUT} s)" ;;
+    124|137) echo "(timed out after ${limit} s)" ;;
     *) echo "(exit code $rc)" ;;
   esac
   return 0
@@ -111,31 +127,56 @@ host_names() {
     rd "$ROOT/proc/sys/kernel/hostname"
   } | while IFS= read -r h; do
     h="${h//[[:space:]]/}"
+    h="${h,,}"
     [ -n "$h" ] || continue
     echo "$h"
     echo "${h%%.*}"
   done | sort -u
 }
 
-# redact: stdin -> stdout with UUIDs, serial numbers, MACs, the hostname and /home/<name>
-# replaced by placeholders. Applied to everything this script writes.
-redact() {
+# redact: stdin -> stdout with UUIDs (also PARTUUID= and short UUID= forms), serial numbers,
+# MACs, the hostname and user names in /home and /run/media paths replaced by placeholders.
+# Applied to everything this script writes or prints.
+REDACT_ARGS=()
+build_redaction() {
   local h esc
-  local -a args=(-E
+  REDACT_ARGS=(-E
     -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g'
-    -e 's/(Device Serial Number:?)[[:space:]]+[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2})+/\1 <serial>/g'
-    -e 's/([Ss]erial ?[Nn]umber:)[[:space:]]*[^[:space:]].*$/\1 <serial>/'
+    -e 's/\b((PART)?UUID)=[^[:space:],"]+/\1=<uuid>/gI'
+    # "Serial Number" / "SerialNumber" get a \x01 marker first, so the generic "serial <value>"
+    # rule below can't take "Number" for the value. The marker is removed at the end.
+    -e 's/([Ss]erial)( ?[Nn]umber)/\1\x01\2/g'
+    -e 's/(Device Serial\x01 Number:?)[[:space:]]+[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2})+/\1 <serial>/g'
+    -e 's/([Ss]erial\x01 ?[Nn]umber:)[[:space:]]*[^[:space:]].*$/\1 <serial>/'
+    -e 's/\b(iSerial[[:space:]]+[0-9]+|[Ss]erial)(:?[[:space:]]+|:)[^[:space:]<][^[:space:]]*/\1\2<serial>/g'
+    -e 's/\x01//g'
     -e 's/\b([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2}[:-]){0,2}[0-9a-fA-F]{2}\b/<mac>/g'
     -e 's|/home/[^/[:space:]]+|/home/<user>|g'
+    -e 's|/run/media/[^/[:space:]]+|/run/media/<user>|g'
   )
+  # The hostname, in any case, also inside _-joined tokens: bounded by anything but a letter or
+  # digit. Applied twice, since a match uses up the boundary character after it.
   while IFS= read -r h; do
     [ "${#h}" -ge 3 ] || continue
     [[ "$GENERIC_HOSTS" == *" $h "* ]] && continue
     esc=$(printf '%s' "$h" | sed 's/[][\.*^$|/+?(){}]/\\&/g')
-    args+=(-e "s/\\b${esc}\\b/<host>/g")
+    REDACT_ARGS+=(-e "s/(^|[^[:alnum:]])${esc}([^[:alnum:]]|\$)/\\1<host>\\2/gI")
+    REDACT_ARGS+=(-e "s/(^|[^[:alnum:]])${esc}([^[:alnum:]]|\$)/\\1<host>\\2/gI")
   done < <(host_names)
-  sed "${args[@]}"
 }
+
+redact() {
+  [ "${#REDACT_ARGS[@]}" -gt 0 ] || build_redaction
+  sed "${REDACT_ARGS[@]}"
+}
+
+# tilde <path>: the path with a home dir shown as ~, so a message names it without the user name
+# and can still be pasted into Konsole.
+tilde() { printf '%s' "$1" | sed -E 's#^(/var)?/home/[^/]+#~#'; }
+
+# say / err: a line of the script's own, redacted, to stdout / stderr.
+say() { printf '%s\n' "$*" | redact; }
+err() { printf '%s\n' "$*" | redact >&2; }
 
 # --- Collection ---
 PCI_ADDR_RE='^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$'
@@ -445,31 +486,53 @@ last_snapshot() { grep -oE '^===== Snapshot [0-9]+' "$1" 2>/dev/null | tail -n 1
 PLUGIN_VERSION=$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$PLUGIN_DIR/package.json" 2>/dev/null | head -n 1)
 PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
 
+build_redaction
+# Everything on stderr, bash's own errors included, goes through the redaction too.
+exec 2> >(redact >&2)
+SHOWN_LOG=$(tilde "$LOG")
+CLI_HINT="Run it again with a writable folder and attach the log from there: sudo $(tilde "$(readlink -f "$0")") --log-dir /tmp/xgm-usb4 $LABEL"
+
+# The log: WRITE_ERROR says why it can't be written. The snapshot is still collected and printed.
+WRITE_ERROR=""
 if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
-  echo "ERROR: can't create the log folder $LOG_DIR. Nothing was collected." >&2
-  exit 3
+  WRITE_ERROR="can't create the log folder $(tilde "$LOG_DIR")"
 fi
-if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt "$ROTATE_BYTES" ]; then
-  mv -f "$LOG" "$PREV_LOG" 2>/dev/null || { echo "ERROR: can't rotate $LOG. Nothing was collected." >&2; exit 3; }
+
+# One run at a time from numbering to appending. Without flock (util-linux), or without a
+# writable log folder, there's no lock.
+# (The braces keep 2>/dev/null to the exec: on a bare exec it would stay on for the whole script.)
+if [ -z "$WRITE_ERROR" ] && have flock && { exec 8>> "$LOG_DIR/usb4_diagnostics.lock"; } 2>/dev/null; then
+  if ! flock -w "$LOCK_WAIT" 8; then
+    err "ERROR: another USB4 diagnostics run is still going (waited ${LOCK_WAIT} s for $(tilde "$LOG_DIR")/usb4_diagnostics.lock). Nothing was collected; try again in a minute."
+    exit 4
+  fi
 fi
-if ! : >> "$LOG" 2>/dev/null; then
-  echo "ERROR: can't write $LOG. Nothing was collected." >&2
-  exit 3
+
+if [ -z "$WRITE_ERROR" ] && [ -f "$LOG" ] && [ "$( { wc -c < "$LOG"; } 2>/dev/null || echo 0)" -gt "$ROTATE_BYTES" ]; then
+  mv -f "$LOG" "$PREV_LOG" 2>/dev/null || WRITE_ERROR="can't move $SHOWN_LOG to $(tilde "$PREV_LOG")"
+fi
+# A failed >> is reported by bash before a 2>/dev/null on the same command takes effect, so the
+# redirections that can fail are wrapped in braces.
+if [ -z "$WRITE_ERROR" ] && ! { : >> "$LOG"; } 2>/dev/null; then
+  WRITE_ERROR="can't write $SHOWN_LOG"
 fi
 
 LAST=$(last_snapshot "$LOG")
 [ -n "$LAST" ] || LAST=$(last_snapshot "$PREV_LOG")
 SNAPSHOT_N=$(( ${LAST:-0} + 1 ))
 
-# Nothing unredacted is ever written: if redaction fails, nothing is.
+# Nothing unredacted is ever written or printed: if redaction fails, nothing is.
 if ! REPORT=$(collect 2>&1 | redact) || [ -z "$REPORT" ]; then
-  echo "ERROR: redaction failed, so nothing was written to $LOG." >&2
+  err "ERROR: redaction failed, so nothing was written to $SHOWN_LOG."
   exit 3
 fi
-if ! printf '%s\n' "$REPORT" >> "$LOG" 2>/dev/null; then
-  echo "ERROR: can't write $LOG." >&2
-  exit 3
+if [ -z "$WRITE_ERROR" ] && ! { printf '%s\n' "$REPORT" >> "$LOG"; } 2>/dev/null; then
+  WRITE_ERROR="can't write $SHOWN_LOG"
 fi
 printf '%s\n' "$REPORT"
-echo "Saved snapshot $SNAPSHOT_N to $LOG"
+if [ -n "$WRITE_ERROR" ]; then
+  err "ERROR: $WRITE_ERROR. The snapshot above was NOT saved. $CLI_HINT"
+  exit 3
+fi
+say "Saved snapshot $SNAPSHOT_N to $SHOWN_LOG"
 exit 0

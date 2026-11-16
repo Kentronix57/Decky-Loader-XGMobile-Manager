@@ -29,3 +29,7 @@ bin/install-nvidia.sh @allow VAR_TARGETS=("/var/lib/dkms" "/var/cache/pacman/pkg
 bin/install-nvidia.sh @allow BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")
 # xgm-usb4-diag's redaction pattern: /home/<name> in what it collects becomes /home/<user>.
 bin/xgm-usb4-diag @allow s|/home/[^/[:space:]]+|/home/<user>|g
+bin/xgm-usb4-diag @allow s|/run/media/[^/[:space:]]+|/run/media/<user>|g
+# Its messages show home dirs as ~, and the exit 3 hint names a writable folder for the CLI.
+bin/xgm-usb4-diag @allow s#^(/var)?/home/[^/]+#~#
+bin/xgm-usb4-diag @allow --log-dir /tmp/xgm-usb4

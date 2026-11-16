@@ -21,7 +21,7 @@ source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
 source "$XGM_REPO/tests/bin/helpers/timeline.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
-SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install gzip)
+SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install gzip flock)
 
 refuse_root() {
   if [ "$EUID" -eq 0 ]; then
@@ -465,7 +465,7 @@ run_script() {
   [ "${KEEP_LOG_DIR:-0}" = "1" ] || find "$LOG_DIR" -mindepth 1 -delete
   # The wait tunables (bin/xgm-common.sh, bin/egpu-sync) pass through when a test sets them.
   local var tunables=()
-  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER XGM_RESTART_CAP XGM_CARD_WAIT; do
+  for var in XGM_WAIT_POLL XGM_WAIT_CAP XGM_HUNG_AFTER XGM_RESTART_CAP XGM_CARD_WAIT XGM_DIAG_BUDGET XGM_DIAG_LOCK_WAIT; do
     [ -n "${!var:-}" ] && tunables+=("$var=${!var}")
   done
   run env -i \

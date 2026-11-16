@@ -69,7 +69,15 @@ def test_the_script_output_doesnt_truncate_the_snapshot_log(xgm):
     assert "stdout copy" in f.read()
 
 
-@pytest.mark.parametrize("code", [3, 9])
+def test_the_exit_3_hint_is_a_cli_run_with_a_writable_folder(xgm):
+  # The panel already runs as root, so "run it with sudo" alone wouldn't help: the hint names
+  # another folder and the file to attach.
+  _message, hint = xgm.mod.SCRIPT_ERROR_CATALOG["xgm-usb4-diag"][3]
+  assert "sudo ~/homebrew/plugins/xgmobile-manager/bin/xgm-usb4-diag --log-dir /tmp/xgm-usb4 plugged" in hint
+  assert "attach /tmp/xgm-usb4/usb4_diagnostics.log" in hint
+
+
+@pytest.mark.parametrize("code", [3, 4, 9])
 def test_a_failure_maps_to_the_catalog_entry(xgm, code):
   args_stub(xgm, f"exit {code}")
   res = xgm.run(xgm.plugin.collect_usb4_diagnostics("plugged"))
@@ -124,3 +132,10 @@ def test_the_label_dropdown_resets_the_click_guard_and_the_call_passes_the_label
   usb4 = _maintenance_block()
   assert re.search(r"onChange=\{\(option: any\) => \{\s*mainButtonGuard\.current = guardUntil\(Date\.now\(\)\);", usb4)
   assert 'call("collect_usb4_diagnostics", usb4DiagLabel)' in PANEL
+
+
+def test_setup_and_maintenance_stays_open_across_a_re_mount():
+  # A pick in the label dropdown re-mounts the panel; the open state comes from module state.
+  assert "const [showMaintenance, setShowMaintenance] = useState(rememberedMaintenanceOpen());" in PANEL
+  assert "onClick={() => setShowMaintenance(rememberMaintenanceOpen(!showMaintenance))}" in PANEL
+  assert "useState(false)" not in PANEL.split("const [showMaintenance")[1].split("\n")[0]

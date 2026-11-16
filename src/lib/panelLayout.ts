@@ -123,6 +123,19 @@ export function rememberUsb4DiagLabel(data: string): string {
   return usb4DiagLabel;
 }
 
+// Whether Setup & Maintenance is open, kept the same way: the label dropdown lives inside it, so
+// a re-mount after a pick must not collapse it. Closed until first opened, until the plugin reloads.
+let maintenanceOpen = false;
+
+export function rememberedMaintenanceOpen(): boolean {
+  return maintenanceOpen;
+}
+
+export function rememberMaintenanceOpen(open: boolean): boolean {
+  maintenanceOpen = open;
+  return maintenanceOpen;
+}
+
 // --- Telemetry (bin/get-gpu-stats) ---
 
 // get-gpu-stats' output. The numeric keys are null when unreadable, and missing from an older backend.

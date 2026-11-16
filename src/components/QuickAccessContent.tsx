@@ -14,7 +14,7 @@ import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
 import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
-import { MainButton, Telemetry, USB4_DIAG_DESCRIPTION, USB4_DIAG_LABELS, clickAllowed, guardUntil, mainButton, maintenanceRows, rememberUsb4DiagLabel, rememberedUsb4DiagLabel, statusLine, telemetryCells } from "../lib/panelLayout";
+import { MainButton, Telemetry, USB4_DIAG_DESCRIPTION, USB4_DIAG_LABELS, clickAllowed, guardUntil, mainButton, maintenanceRows, rememberMaintenanceOpen, rememberUsb4DiagLabel, rememberedMaintenanceOpen, rememberedUsb4DiagLabel, statusLine, telemetryCells } from "../lib/panelLayout";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -95,7 +95,7 @@ export const QuickAccessContent = () => {
   const [powerProfile, setPowerProfile] = useState("Unknown");
   const [statusError, setStatusError] = useState("");
   const [statusLoaded, setStatusLoaded] = useState(false);
-  const [showMaintenance, setShowMaintenance] = useState(false);
+  const [showMaintenance, setShowMaintenance] = useState(rememberedMaintenanceOpen());
   const [usb4DiagLabel, setUsb4DiagLabel] = useState(rememberedUsb4DiagLabel());
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
   // The click-through guard (panelLayout.ts): set when the panel mounts, and on every profile change.
@@ -570,7 +570,7 @@ export const QuickAccessContent = () => {
 
         {/* SETUP & MAINTENANCE (collapsed by default; same section, so no untitled section break) */}
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={() => setShowMaintenance(!showMaintenance)}>
+          <ButtonItem layout="below" onClick={() => setShowMaintenance(rememberMaintenanceOpen(!showMaintenance))}>
             {showMaintenance ? "▾" : "▸"} Setup & Maintenance
           </ButtonItem>
         </PanelSectionRow>
