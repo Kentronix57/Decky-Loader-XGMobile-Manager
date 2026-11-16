@@ -37,6 +37,11 @@ UNINSTALL_LOG = os.path.join(LOG_DIR, "uninstall.log")
 SHORTCUTS_LOG = os.path.join(LOG_DIR, "create_shortcuts.log")
 SYNC_LOG = os.path.join(LOG_DIR, "boot_sync.log")
 PYTHONERROR_LOG = os.path.join(LOG_DIR, "python_crash.log")
+# bin/xgm-usb4-diag appends one snapshot per run to USB4DIAG_LOG itself (testers compare
+# "unplugged" with "plugged"), so its stdout goes to a separate run log that _run_script may
+# truncate.
+USB4DIAG_LOG = os.path.join(LOG_DIR, "usb4_diagnostics.log")
+USB4DIAG_RUN_LOG = os.path.join(LOG_DIR, "usb4_diagnostics_run.log")
 
 OS_RELEASE_PATH = "/etc/os-release"
 DMI_PRODUCT_PATH = "/sys/class/dmi/id/product_name"
@@ -71,7 +76,15 @@ LOG_MAP = {
   "sync":          (SYNC_LOG,          "Boot NVIDIA DRM sync Log"),
   "python":        (PYTHONERROR_LOG,   "Python Critical Error Log"),
   "debug":         (DEBUG_LOG,         "Debug Log"),
+  "usb4diag":      (USB4DIAG_LOG,      "USB4 Diagnostics Log"),
 }
+
+def _home_path(path):
+  """path with the home dir that holds homebrew/ shown as ~ (what testers see in Konsole)."""
+  home = os.path.dirname(HOMEBREW_DIR)
+  if path.startswith(home + os.sep):
+    return "~" + path[len(home):]
+  return path
 
 # Per-script copy: log key, success title/message, failure title, action label (for the generic fallback)
 SCRIPT_META = {
@@ -130,6 +143,13 @@ SCRIPT_META = {
     "message": "eGPU variables cleared from the session.",
     "fail_title": "Session Cleanup Failed",
     "action": "Clearing the eGPU session variables",
+  },
+  "xgm-usb4-diag": {
+    "log_key": "usb4diag",
+    "title": "USB4 Diagnostics",
+    "message": f"Saved to {_home_path(USB4DIAG_LOG)}. Attach it to GitHub issue #15 or #16.",
+    "fail_title": "USB4 Diagnostics Failed",
+    "action": "Collecting the USB4 diagnostics",
   },
   "uninstall.sh": {
     "log_key": "uninstall",
@@ -214,6 +234,11 @@ SCRIPT_ERROR_CATALOG = {
   "uninstall.sh": {
     1: ("Reset isn't available on Bazzite or CachyOS.",
         "Bazzite's NVIDIA drivers are part of its image. On CachyOS, remove the NVIDIA packages with pacman if you no longer need them."),
+  },
+  "xgm-usb4-diag": {
+    3: ("Couldn't write the USB4 diagnostics log. Nothing was collected.",
+        "The plugin's log folder isn't writable. In Desktop Mode, open Konsole and run: sudo ~/homebrew/plugins/xgmobile-manager/bin/xgm-usb4-diag plugged (it prints the report too, so you can copy it from there)."),
+    9: _MISSING_HELPER,
   },
   "supergfx-hybrid": _SUPERGFX_ERRORS,
   "supergfx-integrated": _SUPERGFX_ERRORS,
@@ -860,6 +885,16 @@ class Plugin:
     return _result(False, "error", "NVIDIA Install Unavailable",
                    "The plugin's driver installer supports SteamOS and CachyOS only.",
                    hint="Bazzite's deck-nvidia image includes the drivers.")
+
+  async def collect_usb4_diagnostics(self, label="unplugged"):
+    """
+    Runs bin/xgm-usb4-diag: one read-only USB4 / Thunderbolt snapshot appended to
+    usb4_diagnostics.log (issues #15, #16). label: unplugged | plugged | boot-plugged; the script
+    sanitizes anything else.
+    """
+    if isinstance(label, dict):
+      label = label.get("label", "")
+    return await self._execute_script("xgm-usb4-diag", USB4DIAG_RUN_LOG, "--log-dir", LOG_DIR, "--", str(label or ""))
 
   async def uninstall_nvidia(self):
     return await self._execute_script("uninstall.sh", UNINSTALL_LOG, LOG_DIR, DATA_DIR)

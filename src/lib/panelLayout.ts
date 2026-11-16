@@ -95,6 +95,34 @@ export function maintenanceRows(osType: string, deviceType: string): Maintenance
   return rows;
 }
 
+// --- USB4 / Thunderbolt diagnostics (bin/xgm-usb4-diag, issues #15/#16) ---
+// The snapshot labels, in the order a tester runs them. The data values go into the log header.
+export interface Usb4DiagLabel {
+  data: string;
+  label: string;
+}
+
+export const USB4_DIAG_LABELS: Usb4DiagLabel[] = [
+  { data: "unplugged", label: "Dock unplugged" },
+  { data: "plugged", label: "Dock plugged in" },
+  { data: "boot-plugged", label: "After boot with dock plugged in" },
+];
+
+export const USB4_DIAG_DESCRIPTION = "Read-only. Saves a report for GitHub issues #15/#16. Run it unplugged, then plugged in.";
+
+// The label picked last. Picking a dropdown option re-mounts the panel (see the click-through
+// guard), which would reset component state; this keeps the pick until the plugin reloads.
+let usb4DiagLabel = USB4_DIAG_LABELS[0].data;
+
+export function rememberedUsb4DiagLabel(): string {
+  return usb4DiagLabel;
+}
+
+export function rememberUsb4DiagLabel(data: string): string {
+  if (USB4_DIAG_LABELS.some((l) => l.data === data)) usb4DiagLabel = data;
+  return usb4DiagLabel;
+}
+
 // --- Telemetry (bin/get-gpu-stats) ---
 
 // get-gpu-stats' output. The numeric keys are null when unreadable, and missing from an older backend.

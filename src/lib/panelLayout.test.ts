@@ -13,6 +13,10 @@ import {
   guardUntil,
   mainButton,
   maintenanceRows,
+  rememberUsb4DiagLabel,
+  rememberedUsb4DiagLabel,
+  USB4_DIAG_DESCRIPTION,
+  USB4_DIAG_LABELS,
   powerColor,
   statusLine,
   telemetryCells,
@@ -272,5 +276,31 @@ describe("telemetryCells", () => {
       { label: "GPU Load", text: "38%", color: undefined },
     ]);
     expect(telemetryCells({}).map((c) => c.text)).toEqual(["--", "--", "--", "--"]);
+  });
+});
+
+describe("USB4 diagnostics labels", () => {
+  it("offers the three snapshot labels, in the order a tester runs them", () => {
+    expect(USB4_DIAG_LABELS).toEqual([
+      { data: "unplugged", label: "Dock unplugged" },
+      { data: "plugged", label: "Dock plugged in" },
+      { data: "boot-plugged", label: "After boot with dock plugged in" },
+    ]);
+  });
+
+  it("only uses values the script keeps as they are ([A-Za-z0-9_-], 32 characters)", () => {
+    for (const l of USB4_DIAG_LABELS) expect(l.data).toMatch(/^[A-Za-z0-9_-]{1,32}$/);
+  });
+
+  it("says it's read-only and which issues it's for", () => {
+    expect(USB4_DIAG_DESCRIPTION).toBe("Read-only. Saves a report for GitHub issues #15/#16. Run it unplugged, then plugged in.");
+  });
+
+  it("starts at unplugged, remembers a pick, and ignores unknown values", () => {
+    expect(rememberedUsb4DiagLabel()).toBe("unplugged");
+    expect(rememberUsb4DiagLabel("plugged")).toBe("plugged");
+    expect(rememberedUsb4DiagLabel()).toBe("plugged");
+    expect(rememberUsb4DiagLabel("rm -rf")).toBe("plugged");
+    rememberUsb4DiagLabel("unplugged");
   });
 });

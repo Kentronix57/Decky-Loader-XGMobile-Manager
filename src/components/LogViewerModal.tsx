@@ -16,7 +16,8 @@ const LOG_OPTIONS: DropdownOption[] = [
   { data: 'shortcuts', label: 'Install Desktop Shortcuts Log' },
   { data: 'sync', label: 'Boot NVIDIA DRM sync Log' },
   { data: 'python', label: 'Python Critical Error Log' },
-  { data: 'debug', label: 'Debug Log' }
+  { data: 'debug', label: 'Debug Log' },
+  { data: 'usb4diag', label: 'USB4 Diagnostics Log' }
 ];
 
 interface LogViewerModalProps {

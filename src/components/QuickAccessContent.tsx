@@ -14,7 +14,7 @@ import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
 import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
-import { MainButton, Telemetry, clickAllowed, guardUntil, mainButton, maintenanceRows, statusLine, telemetryCells } from "../lib/panelLayout";
+import { MainButton, Telemetry, USB4_DIAG_DESCRIPTION, USB4_DIAG_LABELS, clickAllowed, guardUntil, mainButton, maintenanceRows, rememberUsb4DiagLabel, rememberedUsb4DiagLabel, statusLine, telemetryCells } from "../lib/panelLayout";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -96,6 +96,7 @@ export const QuickAccessContent = () => {
   const [statusError, setStatusError] = useState("");
   const [statusLoaded, setStatusLoaded] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(false);
+  const [usb4DiagLabel, setUsb4DiagLabel] = useState(rememberedUsb4DiagLabel());
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
   // The click-through guard (panelLayout.ts): set when the panel mounts, and on every profile change.
   const mainButtonGuard = useRef(guardUntil(Date.now()));
@@ -253,6 +254,21 @@ export const QuickAccessContent = () => {
       }
     } catch (e) {
       notifyError("NVIDIA Install", e, "install the NVIDIA drivers");
+    } finally {
+      setIsLoading(false);
+      setStatusText("");
+    }
+  };
+
+  // Read-only USB4 / Thunderbolt snapshot (bin/xgm-usb4-diag). Works without asus-nb-wmi.
+  const collectUsb4Diagnostics = async () => {
+    if (isLoading) return;
+    setIsLoading(true);
+    setStatusText("Collecting USB4 diagnostics");
+    try {
+      notifyResult(toActionResult(await call("collect_usb4_diagnostics", usb4DiagLabel), "USB4 Diagnostics"));
+    } catch (e) {
+      notifyError("USB4 Diagnostics", e, "collect the USB4 diagnostics");
     } finally {
       setIsLoading(false);
       setStatusText("");
@@ -629,6 +645,31 @@ export const QuickAccessContent = () => {
                 </PanelSectionRow>
               </>
             )}
+
+            {/* USB4 / Thunderbolt diagnostics: every OS and device, also without asus-nb-wmi */}
+            <PanelSectionRow>
+              <div style={{ fontSize: "14px", opacity: 0.8, padding: "4px 0" }}>
+                USB4 / Thunderbolt Diagnostics
+              </div>
+              <Dropdown
+                selectedOption={usb4DiagLabel}
+                rgOptions={USB4_DIAG_LABELS}
+                onChange={(option: any) => {
+                  mainButtonGuard.current = guardUntil(Date.now());
+                  setUsb4DiagLabel(rememberUsb4DiagLabel(option.data));
+                }}
+              />
+            </PanelSectionRow>
+            <PanelSectionRow>
+              <ButtonItem
+                layout="below"
+                description={USB4_DIAG_DESCRIPTION}
+                disabled={isLoading}
+                onClick={collectUsb4Diagnostics}
+              >
+                Collect USB4 / Thunderbolt Diagnostics
+              </ButtonItem>
+            </PanelSectionRow>
           </>
         )}
 
