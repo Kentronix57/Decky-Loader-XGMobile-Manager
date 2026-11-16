@@ -391,6 +391,67 @@ check_read_only() {
   refute_output --partial "1234-ABCD"
 }
 
+@test "redaction: lspci class names with Serial survive, real serial forms don't" {
+  fixture_usb4
+  printf '%s\n' "00:14.3 Serial bus controller [0c80]: Intel Corporation Device [8086:51e8]" \
+    "00:15.0 Serial bus controller: Intel Corporation Serial IO I2C Host Controller" \
+    "01:00.0 Serial Attached SCSI controller [0107]: Broadcom / LSI SAS3008" > "$SHIM_STATE/lspci_nnk"
+  printf '%s\n' "[    1.0] xhci_hcd: serial XYZ0001 attached" "[    1.1] xhci_hcd: serial=ABC" \
+    "[    1.2] typec: Serial: QQ77" "[    1.3] xhci_hcd: iSerial                 3 0123456789AB" \
+    "[    1.4] thunderbolt 0-1: SerialNumber: ABC123456" "[    1.5] xhci_hcd: Serial Number: XYZ987" \
+    "[    1.6] pcieport 0000:00:03.1: Device Serial Number $SECRET_DSN" \
+    "[    1.7] xhci_hcd: Serial bus controller ready" > "$SHIM_STATE/dmesg"
+  diag
+  assert_success
+  run diag_log
+  assert_line "00:14.3 Serial bus controller [0c80]: Intel Corporation Device [8086:51e8]"
+  assert_line "00:15.0 Serial bus controller: Intel Corporation Serial IO I2C Host Controller"
+  assert_line "01:00.0 Serial Attached SCSI controller [0107]: Broadcom / LSI SAS3008"
+  assert_line "[    1.0] xhci_hcd: serial <serial> attached"
+  assert_line "[    1.1] xhci_hcd: serial=<serial>"
+  assert_line "[    1.2] typec: Serial: <serial>"
+  assert_line "[    1.3] xhci_hcd: iSerial                 3 <serial>"
+  assert_line "[    1.4] thunderbolt 0-1: SerialNumber: <serial>"
+  assert_line "[    1.5] xhci_hcd: Serial Number: <serial>"
+  assert_line "[    1.6] pcieport 0000:00:03.1: Device Serial Number <serial>"
+  assert_line "[    1.7] xhci_hcd: Serial bus controller ready"
+}
+
+@test "redaction: a model-word hostname (legion) keeps \"Legion Go 2\"; kenny-legion is still redacted" {
+  fixture_usb4
+  echo "legion" > "$ROOT/etc/hostname"
+  set_hostname legion
+  printf '%s\n' "[    1.0] thunderbolt: Legion Go 2 dock on legion" > "$SHIM_STATE/dmesg"
+  diag
+  assert_success
+  run diag_log
+  assert_line "dmi product_family: Legion Go 2 8ASP2"
+  assert_line "[    1.0] thunderbolt: Legion Go 2 dock on legion"
+
+  echo "kenny-legion" > "$ROOT/etc/hostname"
+  set_hostname kenny-legion
+  printf '%s\n' "[    1.0] thunderbolt: Legion Go 2 dock on kenny-legion and Kenny-Legion_x" > "$SHIM_STATE/dmesg"
+  diag
+  assert_success
+  run diag_log
+  assert_line "dmi product_family: Legion Go 2 8ASP2"
+  assert_line "[    1.0] thunderbolt: Legion Go 2 dock on <host> and <host>_x"
+  refute_output --partial "kenny-legion"
+}
+
+@test "redaction: the DMI lines are never hostname-redacted, the rest still is" {
+  fixture_usb4
+  # A hostname equal to the board name (not in the skip list): DMI keeps it, other lines don't.
+  echo "LNVNB161216" > "$ROOT/etc/hostname"
+  set_hostname LNVNB161216
+  printf '%s\n' "[    1.0] thunderbolt: host lnvnb161216 ready" > "$SHIM_STATE/dmesg"
+  diag
+  assert_success
+  run diag_log
+  assert_line "dmi board_name: LNVNB161216"
+  assert_line "[    1.0] thunderbolt: host <host> ready"
+}
+
 @test "redaction: an OS default hostname (steamdeck) isn't redacted" {
   fixture_ally
   set_hostname steamdeck

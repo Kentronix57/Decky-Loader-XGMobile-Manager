@@ -115,9 +115,12 @@ attrs() {
 }
 
 # --- Redaction ---
-# Hostnames that identify nobody (OS defaults). Redacting them would also blank out words like
-# VARIANT_ID=steamdeck.
-GENERIC_HOSTS=" localhost steamdeck bazzite cachyos archlinux fedora linux "
+# Hostnames that identify nobody: OS defaults and handheld model or brand words. Redacting them
+# would also blank out words like VARIANT_ID=steamdeck or "Legion Go 2".
+GENERIC_HOSTS=" localhost steamdeck bazzite cachyos archlinux fedora linux legion ally rogally go claw deck xbox rog asus lenovo msi gpd ayaneo onexplayer "
+# The DMI lines of the System section: fixed vendor strings, never hostname-redacted.
+DMI_LINE_RE='^dmi (sys_vendor|product_name|product_family|board_name|bios_version|bios_date): '
+
 
 host_names() {
   local h
@@ -148,7 +151,11 @@ build_redaction() {
     -e 's/([Ss]erial)( ?[Nn]umber)/\1\x01\2/g'
     -e 's/(Device Serial\x01 Number:?)[[:space:]]+[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2})+/\1 <serial>/g'
     -e 's/([Ss]erial\x01 ?[Nn]umber:)[[:space:]]*[^[:space:]].*$/\1 <serial>/'
-    -e 's/\b(iSerial[[:space:]]+[0-9]+|[Ss]erial)(:?[[:space:]]+|:)[^[:space:]<][^[:space:]]*/\1\2<serial>/g'
+    # "serial" only before : or =, or before a value with a digit in it, so class names like
+    # "Serial bus controller", "Serial IO I2C" or "Serial Attached SCSI" stay as they are.
+    -e 's/\b(iSerial[[:space:]]+[0-9]+[[:space:]]+)[^[:space:]<][^[:space:]]*/\1<serial>/g'
+    -e 's/\b([Ss]erial[[:space:]]*[:=][[:space:]]*)[^[:space:]<][^[:space:]]*/\1<serial>/g'
+    -e 's/\b([Ss]erial[[:space:]]+)[^[:space:]<0-9]*[0-9][^[:space:]]*/\1<serial>/g'
     -e 's/\x01//g'
     -e 's/\b([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2}[:-]){0,2}[0-9a-fA-F]{2}\b/<mac>/g'
     -e 's|/home/[^/[:space:]]+|/home/<user>|g'
@@ -160,8 +167,8 @@ build_redaction() {
     [ "${#h}" -ge 3 ] || continue
     [[ "$GENERIC_HOSTS" == *" $h "* ]] && continue
     esc=$(printf '%s' "$h" | sed 's/[][\.*^$|/+?(){}]/\\&/g')
-    REDACT_ARGS+=(-e "s/(^|[^[:alnum:]])${esc}([^[:alnum:]]|\$)/\\1<host>\\2/gI")
-    REDACT_ARGS+=(-e "s/(^|[^[:alnum:]])${esc}([^[:alnum:]]|\$)/\\1<host>\\2/gI")
+    REDACT_ARGS+=(-e "/${DMI_LINE_RE}/!s/(^|[^[:alnum:]])${esc}([^[:alnum:]]|\$)/\\1<host>\\2/gI")
+    REDACT_ARGS+=(-e "/${DMI_LINE_RE}/!s/(^|[^[:alnum:]])${esc}([^[:alnum:]]|\$)/\\1<host>\\2/gI")
   done < <(host_names)
 }
 
