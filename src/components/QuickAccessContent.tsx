@@ -14,7 +14,7 @@ import { call } from "@decky/api";
 import { LiveLogViewerModal } from "./LiveLogViewerModal";
 import { LogViewerModal } from "./LogViewerModal";
 import { isActionResult, notifyError, notifyResult, toActionResult } from "../lib/notify";
-import { MainButton, Telemetry, USB4_DIAG_DESCRIPTION, USB4_DIAG_LABELS, clickAllowed, guardUntil, mainButton, maintenanceRows, rememberMaintenanceOpen, rememberUsb4DiagLabel, rememberedMaintenanceOpen, rememberedUsb4DiagLabel, statusLine, telemetryCells } from "../lib/panelLayout";
+import { MainButton, Telemetry, USB4_DIAG_BUTTONS, USB4_DIAG_DESCRIPTION, Usb4DiagLabel, clickAllowed, guardUntil, mainButton, maintenanceRows, rememberMaintenanceOpen, rememberedMaintenanceOpen, statusLine, telemetryCells } from "../lib/panelLayout";
 
 // Helper for UI styling
 const statsStyle: React.CSSProperties = {
@@ -96,7 +96,6 @@ export const QuickAccessContent = () => {
   const [statusError, setStatusError] = useState("");
   const [statusLoaded, setStatusLoaded] = useState(false);
   const [showMaintenance, setShowMaintenance] = useState(rememberedMaintenanceOpen());
-  const [usb4DiagLabel, setUsb4DiagLabel] = useState(rememberedUsb4DiagLabel());
   const showSleepWarning = gpuStatus.active && selectedVendor === 'nvidia' && osType.includes('bazzite');
   // The click-through guard (panelLayout.ts): set when the panel mounts, and on every profile change.
   const mainButtonGuard = useRef(guardUntil(Date.now()));
@@ -260,13 +259,18 @@ export const QuickAccessContent = () => {
     }
   };
 
-  // Read-only USB4 / Thunderbolt snapshot (bin/xgm-usb4-diag). Works without asus-nb-wmi.
-  const collectUsb4Diagnostics = async () => {
+  // Read-only USB4 / Thunderbolt snapshot (bin/xgm-usb4-diag) with a fixed label. Works without
+  // asus-nb-wmi. Like the main button, it ignores a press inside the click-through guard.
+  const collectUsb4Diagnostics = async (label: Usb4DiagLabel) => {
     if (isLoading) return;
+    if (!clickAllowed(Date.now(), mainButtonGuard.current)) {
+      console.log(`XG Mobile: ignored a USB4 diagnostics (${label}) press inside the click-through guard`);
+      return;
+    }
     setIsLoading(true);
     setStatusText("Collecting USB4 diagnostics");
     try {
-      notifyResult(toActionResult(await call("collect_usb4_diagnostics", usb4DiagLabel), "USB4 Diagnostics"));
+      notifyResult(toActionResult(await call("collect_usb4_diagnostics", label), "USB4 Diagnostics"));
     } catch (e) {
       notifyError("USB4 Diagnostics", e, "collect the USB4 diagnostics");
     } finally {
@@ -647,29 +651,27 @@ export const QuickAccessContent = () => {
             )}
 
             {/* USB4 / Thunderbolt diagnostics: every OS and device, also without asus-nb-wmi */}
+            {/* Three plain buttons, one per label: a dropdown would re-mount the panel and move
+                focus to the main Enable/Eject button. */}
             <PanelSectionRow>
               <div style={{ fontSize: "14px", opacity: 0.8, padding: "4px 0" }}>
                 USB4 / Thunderbolt Diagnostics
               </div>
-              <Dropdown
-                selectedOption={usb4DiagLabel}
-                rgOptions={USB4_DIAG_LABELS}
-                onChange={(option: any) => {
-                  mainButtonGuard.current = guardUntil(Date.now());
-                  setUsb4DiagLabel(rememberUsb4DiagLabel(option.data));
-                }}
-              />
+              <div style={{ fontSize: "12px", opacity: 0.7, paddingBottom: "4px" }}>
+                {USB4_DIAG_DESCRIPTION}
+              </div>
             </PanelSectionRow>
-            <PanelSectionRow>
-              <ButtonItem
-                layout="below"
-                description={USB4_DIAG_DESCRIPTION}
-                disabled={isLoading}
-                onClick={collectUsb4Diagnostics}
-              >
-                Collect USB4 / Thunderbolt Diagnostics
-              </ButtonItem>
-            </PanelSectionRow>
+            {USB4_DIAG_BUTTONS.map((b) => (
+              <PanelSectionRow key={b.label}>
+                <ButtonItem
+                  layout="below"
+                  disabled={isLoading}
+                  onClick={() => collectUsb4Diagnostics(b.label)}
+                >
+                  {b.text}
+                </ButtonItem>
+              </PanelSectionRow>
+            ))}
           </>
         )}
 

@@ -14,11 +14,9 @@ import {
   mainButton,
   maintenanceRows,
   rememberMaintenanceOpen,
-  rememberUsb4DiagLabel,
   rememberedMaintenanceOpen,
-  rememberedUsb4DiagLabel,
+  USB4_DIAG_BUTTONS,
   USB4_DIAG_DESCRIPTION,
-  USB4_DIAG_LABELS,
   powerColor,
   statusLine,
   telemetryCells,
@@ -281,29 +279,21 @@ describe("telemetryCells", () => {
   });
 });
 
-describe("USB4 diagnostics labels", () => {
-  it("offers the three snapshot labels, in the order a tester runs them", () => {
-    expect(USB4_DIAG_LABELS).toEqual([
-      { data: "unplugged", label: "Dock unplugged" },
-      { data: "plugged", label: "Dock plugged in" },
-      { data: "boot-plugged", label: "After boot with dock plugged in" },
+describe("USB4 diagnostics buttons", () => {
+  it("one button per snapshot label, in the order a tester runs them", () => {
+    expect(USB4_DIAG_BUTTONS).toEqual([
+      { label: "unplugged", text: "Collect: Dock unplugged" },
+      { label: "plugged", text: "Collect: Dock plugged in" },
+      { label: "boot-plugged", text: "Collect: After boot with dock plugged in" },
     ]);
   });
 
-  it("only uses values the script keeps as they are ([A-Za-z0-9_-], 32 characters)", () => {
-    for (const l of USB4_DIAG_LABELS) expect(l.data).toMatch(/^[A-Za-z0-9_-]{1,32}$/);
+  it("only uses labels the script keeps as they are ([A-Za-z0-9_-], 32 characters)", () => {
+    for (const b of USB4_DIAG_BUTTONS) expect(b.label).toMatch(/^[A-Za-z0-9_-]{1,32}$/);
   });
 
   it("says it's read-only and which issues it's for", () => {
-    expect(USB4_DIAG_DESCRIPTION).toBe("Read-only. Saves a report for GitHub issues #15/#16. Run it unplugged, then plugged in.");
-  });
-
-  it("starts at unplugged, remembers a pick, and ignores unknown values", () => {
-    expect(rememberedUsb4DiagLabel()).toBe("unplugged");
-    expect(rememberUsb4DiagLabel("plugged")).toBe("plugged");
-    expect(rememberedUsb4DiagLabel()).toBe("plugged");
-    expect(rememberUsb4DiagLabel("rm -rf")).toBe("plugged");
-    rememberUsb4DiagLabel("unplugged");
+    expect(USB4_DIAG_DESCRIPTION).toBe("Read-only. Saves a report for GitHub issues #15/#16.");
   });
 });
 

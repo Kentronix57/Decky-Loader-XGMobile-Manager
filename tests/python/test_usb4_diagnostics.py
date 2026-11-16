@@ -115,8 +115,9 @@ def test_the_button_is_in_setup_and_maintenance_and_not_gated_on_the_asus_interf
   # Hosts without asus-nb-wmi (Ally X, Legion Go 2) get get_gpu_status errors, connected/active
   # false and no power profile. The row must not depend on any of them, or on the OS/device rows.
   block = _maintenance_block()
-  assert "Collect USB4 / Thunderbolt Diagnostics" in block
   usb4 = block[block.index("{/* USB4 / Thunderbolt diagnostics"):]
+  assert "USB4_DIAG_BUTTONS.map((b) => (" in usb4
+  assert "{USB4_DIAG_DESCRIPTION}" in usb4
   assert "rows.includes" not in usb4
   for gate in ("gpuStatus", "statusError", "powerProfile", "osType", "deviceType"):
     assert gate not in usb4, gate
@@ -128,14 +129,43 @@ def test_the_button_is_in_setup_and_maintenance_and_not_gated_on_the_asus_interf
   assert "&&" not in PANEL[options:PANEL.index("{showMaintenance && (")].split("About Desktop Mode")[1]
 
 
-def test_the_label_dropdown_resets_the_click_guard_and_the_call_passes_the_label():
+LAYOUT = (REPO / "src" / "lib" / "panelLayout.ts").read_text()
+
+
+def test_three_buttons_one_per_label_and_no_dropdown():
+  # SteamOS Tier 1: a dropdown pick re-mounted the panel and put focus on Enable/Eject.
+  buttons = re.findall(r'\{ label: "([^"]+)", text: "([^"]+)" \}',
+                       LAYOUT.split("export const USB4_DIAG_BUTTONS")[1].split("];")[0])
+  assert buttons == [("unplugged", "Collect: Dock unplugged"),
+                     ("plugged", "Collect: Dock plugged in"),
+                     ("boot-plugged", "Collect: After boot with dock plugged in")]
   usb4 = _maintenance_block()
-  assert re.search(r"onChange=\{\(option: any\) => \{\s*mainButtonGuard\.current = guardUntil\(Date\.now\(\)\);", usb4)
-  assert 'call("collect_usb4_diagnostics", usb4DiagLabel)' in PANEL
+  usb4 = usb4[usb4.index("{/* USB4 / Thunderbolt diagnostics"):]
+  assert "<Dropdown" not in usb4 and "showModal" not in usb4
+  # Each button passes its own label, and that label reaches the script (see the backend test).
+  assert "onClick={() => collectUsb4Diagnostics(b.label)}" in usb4
+  assert 'call("collect_usb4_diagnostics", label)' in PANEL
+  # No label state left over from the dropdown.
+  assert "usb4DiagLabel" not in PANEL and "Usb4DiagLabel(" not in LAYOUT
+
+
+def test_the_buttons_check_is_loading_and_the_click_guard_first():
+  body = re.search(r"const collectUsb4Diagnostics = async \(label: Usb4DiagLabel\) => \{(.*?)\n  \};", PANEL, re.S).group(1)
+  assert body.index("if (isLoading) return;") < body.index("call(")
+  assert body.index("clickAllowed(Date.now(), mainButtonGuard.current)") < body.index("setIsLoading(true)")
+
+
+@pytest.mark.parametrize("label", ["unplugged", "plugged", "boot-plugged"])
+def test_each_button_label_reaches_the_script_unchanged(xgm, label):
+  assert f'label: "{label}"' in LAYOUT
+  args_file = args_stub(xgm)
+  xgm.run(xgm.plugin.collect_usb4_diagnostics(label))
+  assert args_file.read_text().splitlines()[-1] == label
 
 
 def test_setup_and_maintenance_stays_open_across_a_re_mount():
-  # A pick in the label dropdown re-mounts the panel; the open state comes from module state.
+  # Decky re-mounts the panel after a dropdown pick (the power profile); the open state comes from
+  # module state.
   assert "const [showMaintenance, setShowMaintenance] = useState(rememberedMaintenanceOpen());" in PANEL
   assert "onClick={() => setShowMaintenance(rememberMaintenanceOpen(!showMaintenance))}" in PANEL
   assert "useState(false)" not in PANEL.split("const [showMaintenance")[1].split("\n")[0]

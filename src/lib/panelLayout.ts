@@ -96,35 +96,27 @@ export function maintenanceRows(osType: string, deviceType: string): Maintenance
 }
 
 // --- USB4 / Thunderbolt diagnostics (bin/xgm-usb4-diag, issues #15/#16) ---
-// The snapshot labels, in the order a tester runs them. The data values go into the log header.
-export interface Usb4DiagLabel {
-  data: string;
-  label: string;
+// One plain button per snapshot label, in the order a tester runs them; the label goes into the
+// log header. Buttons, not a dropdown: picking a dropdown option re-mounts the panel, which
+// scrolls to the top and puts focus on the main Enable/Eject button (SteamOS Tier 1, 2026-11-16).
+export type Usb4DiagLabel = "unplugged" | "plugged" | "boot-plugged";
+
+export interface Usb4DiagButton {
+  label: Usb4DiagLabel;
+  text: string;
 }
 
-export const USB4_DIAG_LABELS: Usb4DiagLabel[] = [
-  { data: "unplugged", label: "Dock unplugged" },
-  { data: "plugged", label: "Dock plugged in" },
-  { data: "boot-plugged", label: "After boot with dock plugged in" },
+export const USB4_DIAG_BUTTONS: Usb4DiagButton[] = [
+  { label: "unplugged", text: "Collect: Dock unplugged" },
+  { label: "plugged", text: "Collect: Dock plugged in" },
+  { label: "boot-plugged", text: "Collect: After boot with dock plugged in" },
 ];
 
-export const USB4_DIAG_DESCRIPTION = "Read-only. Saves a report for GitHub issues #15/#16. Run it unplugged, then plugged in.";
+export const USB4_DIAG_DESCRIPTION = "Read-only. Saves a report for GitHub issues #15/#16.";
 
-// The label picked last. Picking a dropdown option re-mounts the panel (see the click-through
-// guard), which would reset component state; this keeps the pick until the plugin reloads.
-let usb4DiagLabel = USB4_DIAG_LABELS[0].data;
-
-export function rememberedUsb4DiagLabel(): string {
-  return usb4DiagLabel;
-}
-
-export function rememberUsb4DiagLabel(data: string): string {
-  if (USB4_DIAG_LABELS.some((l) => l.data === data)) usb4DiagLabel = data;
-  return usb4DiagLabel;
-}
-
-// Whether Setup & Maintenance is open, kept the same way: the label dropdown lives inside it, so
-// a re-mount after a pick must not collapse it. Closed until first opened, until the plugin reloads.
+// Whether Setup & Maintenance is open. Kept outside the component: if the panel re-mounts (Decky
+// does after a dropdown pick, e.g. the power profile), it must not collapse. Closed until first
+// opened, until the plugin reloads.
 let maintenanceOpen = false;
 
 export function rememberedMaintenanceOpen(): boolean {
