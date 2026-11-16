@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # Test shim: prints the kernel log lines in $SHIM_STATE/dmesg (nvidia_init_failed in
 # helpers/sandbox.bash). With $SHIM_STATE/dmesg_from_call = n, they only show from the n-th call
-# on (the failure is logged while egpu-sync waits).
+# on (the failure is logged while egpu-sync waits). With $SHIM_STATE/dmesg_restricted it fails
+# like dmesg under kernel.dmesg_restrict=1.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ -e "$SHIM_STATE/dmesg_restricted" ]; then
+  echo "dmesg: read kernel buffer failed: Operation not permitted" >&2
+  exit 1
+fi
 calls=$(( $(cat "$SHIM_STATE/dmesg_calls" 2>/dev/null || echo 0) + 1 ))
 echo "$calls" > "$SHIM_STATE/dmesg_calls"
 [ "$calls" -ge "$(cat "$SHIM_STATE/dmesg_from_call" 2>/dev/null || echo 1)" ] || exit 0

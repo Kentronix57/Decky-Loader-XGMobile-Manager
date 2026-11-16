@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Test shim: prints $SHIM_STATE/hostname (set_hostname), or a name that can't be a real host's.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+cat "$SHIM_STATE/hostname" 2>/dev/null || echo "xgm-sandbox-host"

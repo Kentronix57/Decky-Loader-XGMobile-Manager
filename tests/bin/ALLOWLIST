@@ -27,3 +27,5 @@ bin/create-shortcuts @allow Exec=bash -c "touch /tmp/xgmobile_eject_request"
 bin/install-nvidia.sh @allow ROOT_TARGETS=("/usr/lib/nvidia" "/usr/lib32/nvidia" "/usr/src" "/usr/lib/firmware/nvidia" "/usr/share/nvidia")
 bin/install-nvidia.sh @allow VAR_TARGETS=("/var/lib/dkms" "/var/cache/pacman/pkg")
 bin/install-nvidia.sh @allow BIND_TARGETS=("/usr/include" "/usr/lib/gcc" "/var/tmp")
+# xgm-usb4-diag's redaction pattern: /home/<name> in what it collects becomes /home/<user>.
+bin/xgm-usb4-diag @allow s|/home/[^/[:space:]]+|/home/<user>|g

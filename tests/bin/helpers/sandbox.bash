@@ -21,7 +21,7 @@ source "$XGM_REPO/tests/bin/helpers/fake_gpu.bash"
 source "$XGM_REPO/tests/bin/helpers/timeline.bash"
 
 # Real tools the scripts (and the shims) are allowed to use.
-SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install)
+SANDBOX_TOOLS=(bash env cat grep sed awk ls mkdir mv rm ln chmod cp head tail wc xargs cut tr echo date readlink dirname basename touch sort true false printf tee install gzip)
 
 refuse_root() {
   if [ "$EUID" -eq 0 ]; then
@@ -69,6 +69,8 @@ make_root() {
   SHIM_STATE="$BATS_TEST_TMPDIR/shim-state"
   SYSBIN="$BATS_TEST_TMPDIR/sysbin"
   OPTBIN="$BATS_TEST_TMPDIR/optbin"
+  # The shim dir on PATH: hide_command swaps in a copy without some shims.
+  SANDBOX_SHIMS="$XGM_SHIMS"
 
   mkdir -p "$LOG_DIR" "$DATA_DIR" "$SHIM_STATE/active" "$SYSBIN" "$OPTBIN" "$BATS_TEST_TMPDIR/home" \
     "$ROOT/sys/devices/platform/asus-nb-wmi" "$ROOT/sys/bus/pci" "$ROOT/sys/class/dmi/id" \
@@ -417,6 +419,39 @@ no_steamos_readonly() { rm -f "$OPTBIN/steamos-readonly"; }
 # Puts the supergfxctl shim on PATH; without this, `command -v supergfxctl` fails.
 enable_supergfxctl() { ln -sf "$XGM_OPTIONAL_SHIMS/supergfxctl" "$OPTBIN/supergfxctl"; }
 
+# with_command <name>...: puts optional shims on PATH (boltctl, mokutil, dkms, nvidia-smi).
+with_command() {
+  local c
+  for c in "$@"; do
+    [ -x "$XGM_OPTIONAL_SHIMS/$c" ] || fail "with_command: no optional shim '$c'"
+    ln -sf "$XGM_OPTIONAL_SHIMS/$c" "$OPTBIN/$c"
+  done
+}
+
+# hide_command <name>...: takes commands off PATH, shims and optional shims alike (a system
+# without lspci, say). The scripts then get "command not found".
+hide_command() {
+  local c s dir="$BATS_TEST_TMPDIR/shims-visible"
+  if [ "$SANDBOX_SHIMS" = "$XGM_SHIMS" ]; then
+    mkdir -p "$dir"
+    for s in "$XGM_SHIMS"/*; do ln -s "$s" "$dir/${s##*/}"; done
+    SANDBOX_SHIMS="$dir"
+  fi
+  for c in "$@"; do rm -f "$SANDBOX_SHIMS/$c" "$OPTBIN/$c"; done
+}
+
+# real_timeout <seconds>: the timeout shim runs commands under the real timeout, with this limit.
+real_timeout() { echo "$(type -P timeout) $1" > "$SHIM_STATE/timeout_real"; }
+
+# hang_command boltctl: every call to it hangs until it's killed.
+hang_command() { touch "$SHIM_STATE/$1_hang"; }
+
+# set_hostname <name>: what the hostname shim prints.
+set_hostname() { echo "$1" > "$SHIM_STATE/hostname"; }
+
+# dmesg_restricted: dmesg fails with "Operation not permitted" (kernel.dmesg_restrict=1).
+dmesg_restricted() { touch "$SHIM_STATE/dmesg_restricted"; }
+
 # run_script <bin name> [args...]
 # Runs bin/<name> (or $XGM_BIN_DIR/<name>) in a clean environment on the sandbox PATH, with
 # LANG=C unless $SANDBOX_LANG is set, the fake clock (XGM_FAKE_CLOCK), and XGM_WAIT_POLL,
@@ -437,7 +472,7 @@ run_script() {
     "${tunables[@]}" \
     HOME="$BATS_TEST_TMPDIR/home" \
     LANG="${SANDBOX_LANG:-C}" \
-    PATH="$XGM_SHIMS:$OPTBIN:$SYSBIN" \
+    PATH="${SANDBOX_SHIMS:-$XGM_SHIMS}:$OPTBIN:$SYSBIN" \
     XGM_ROOT="$ROOT" \
     SHIM_LOG="$SHIM_LOG" \
     SHIM_STATE="$SHIM_STATE" \

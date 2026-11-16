@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # Test shim: prints one NVIDIA device line when $SHIM_STATE/lspci is "nvidia", otherwise nothing.
+# `-tv`, `-nnk` and `-vv -s <address>` print $SHIM_STATE/lspci_tv, lspci_nnk and
+# lspci_vv/<address> when those are set (the xgm-usb4-diag fixtures).
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+case "$*" in
+  -tv) [ -e "$SHIM_STATE/lspci_tv" ] && { cat "$SHIM_STATE/lspci_tv"; exit 0; } ;;
+  -nnk) [ -e "$SHIM_STATE/lspci_nnk" ] && { cat "$SHIM_STATE/lspci_nnk"; exit 0; } ;;
+  "-vv -s "*) [ -d "$SHIM_STATE/lspci_vv" ] && { cat "$SHIM_STATE/lspci_vv/$3" 2>/dev/null; exit 0; } ;;
+esac
 if [ "$(cat "$SHIM_STATE/lspci" 2>/dev/null)" = "nvidia" ]; then
   echo "03:00.0 0300: 10de:2717 (rev a1)"
 fi

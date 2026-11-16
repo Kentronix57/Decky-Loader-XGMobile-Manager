@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Test shim: records the call, drops the options (-s SIGNAL, -k DURATION, --...) and the
-# duration, then runs the command without a time limit.
+# duration, then runs the command without a time limit. With $SHIM_STATE/timeout_real
+# (real_timeout in helpers/sandbox.bash: "<real timeout path> <seconds>") it runs the command
+# under the real timeout with that many seconds instead, so a hanging command is cut off.
 printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -10,4 +12,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 shift
+if [ -e "$SHIM_STATE/timeout_real" ]; then
+  read -r real secs < "$SHIM_STATE/timeout_real"
+  exec "$real" -k 1 "$secs" "$@"
+fi
 exec "$@"

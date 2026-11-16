@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Test shim: only on PATH after `with_command boltctl`. Records the call. `--version` prints a bolt
+# version; `domains` and `list` print $SHIM_STATE/boltctl_domains and boltctl_list. With
+# $SHIM_STATE/boltctl_hang (hang_command boltctl) every call hangs until it's killed, like a
+# boltctl stuck on an unresponsive daemon. The hang ends by itself after 30 s (with the real
+# timeout that real_timeout set up), so a script that doesn't cut it off fails its test instead of
+# hanging it.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+if [ -e "$SHIM_STATE/boltctl_hang" ]; then
+  read -r real _ < "$SHIM_STATE/timeout_real" 2>/dev/null
+  [ -x "${real:-}" ] || { echo "boltctl shim: hang_command needs real_timeout" >&2; exit 1; }
+  exec "$real" 30 tail -f /dev/null
+fi
+case "$1" in
+  --version) echo "bolt 0.9.8" ;;
+  domains) cat "$SHIM_STATE/boltctl_domains" 2>/dev/null ;;
+  list) cat "$SHIM_STATE/boltctl_list" 2>/dev/null ;;
+  *) echo "boltctl shim: unsupported call: $*" >&2; exit 1 ;;
+esac
+exit 0

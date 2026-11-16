@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Test shim: records the call. `-k` (the kernel journal) prints $SHIM_STATE/journal_kernel, and
+# `-u <unit>` prints $SHIM_STATE/journal_<unit>; nothing if they're not set.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+prev=""
+for arg in "$@"; do
+  if [ "$arg" = "-k" ]; then
+    cat "$SHIM_STATE/journal_kernel" 2>/dev/null
+    exit 0
+  fi
+  if [ "$prev" = "-u" ]; then
+    cat "$SHIM_STATE/journal_${arg%.service}" 2>/dev/null
+    exit 0
+  fi
+  prev="$arg"
+done
+exit 0

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test shim: only on PATH after `with_command nvidia-smi`. `-L` lists $SHIM_STATE/nvidia_smi_L (one
+# RTX 5070 Ti by default, with a GPU UUID); a --query-gpu call prints the driver version and bus id.
+printf '%s\n' "$(basename "$0") $*" >> "$SHIM_LOG"
+case "$1" in
+  -L) cat "$SHIM_STATE/nvidia_smi_L" 2>/dev/null \
+        || echo "GPU 0: NVIDIA GeForce RTX 5070 Ti Laptop GPU (UUID: GPU-3f1c2a7e-9b4d-4e21-8c3a-5d6e7f809a1b)" ;;
+  --query-gpu=*) echo "620.70.06, 00000000:03:00.0" ;;
+  *) echo "nvidia-smi shim: unsupported call: $*" >&2; exit 1 ;;
+esac

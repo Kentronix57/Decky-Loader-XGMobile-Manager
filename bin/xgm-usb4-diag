@@ -1,0 +1,475 @@
+#!/bin/bash
+# USB4 / Thunderbolt diagnostics (issues #15, #16): one read-only snapshot of how a dock, the
+# PCIe link and the GPUs enumerate, appended to <log dir>/usb4_diagnostics.log and printed to
+# stdout. Run it with the dock unplugged, then plugged in, and attach the log to the issue.
+#   xgm-usb4-diag [--log-dir DIR] [--] [label]
+# label: unplugged | plugged | boot-plugged | any text (kept to [A-Za-z0-9_-], 32 characters).
+# DIR: default <homebrew>/logs/xgmobile-manager/activity, found from this script's location, so
+#   `sudo ~/homebrew/plugins/xgmobile-manager/bin/xgm-usb4-diag plugged` works standalone.
+#
+# Strictly read-only: it reads files and runs query commands, and writes nothing but its own log
+# (and moves it to usb4_diagnostics.prev.log once it's over 2 MB). No modprobe, no PCI rescan, no
+# bolt authorize/enroll, no service start/stop. bolt is only queried when bolt.service is already
+# active (boltctl would start it through D-Bus activation), and nvidia-smi only runs when the
+# nvidia module is already loaded (it would load it). Every external command runs under
+# `timeout`, and the whole run stays under a time budget. Identifiers (UUIDs, serial numbers,
+# MACs, the hostname, user names in /home paths) are redacted before anything is written.
+#
+# Exit codes: 0 snapshot written; 3 the log can't be written (nothing was collected); 9
+# xgm-common.sh missing.
+ROOT="${XGM_ROOT:-}"
+# shellcheck source=bin/xgm-common.sh
+. "$(dirname "$(readlink -f "$0")")/xgm-common.sh" || { echo "ERROR: xgm-common.sh is missing. Reinstall XG Mobile Manager."; exit 9; }
+
+PLUGIN_DIR=$(readlink -m "$(dirname "$(readlink -f "$0")")/..")
+LOG_DIR=""
+LABEL=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --log-dir) LOG_DIR="${2:-}"; [ $# -ge 2 ] && shift; shift ;;
+    --log-dir=*) LOG_DIR="${1#--log-dir=}"; shift ;;
+    --) shift; [ -z "$LABEL" ] && LABEL="${1:-}"; break ;;
+    *) [ -z "$LABEL" ] && LABEL="$1"; shift ;;
+  esac
+done
+LOG_DIR="${LOG_DIR:-$(xgm_log_dir)}"
+LOG_DIR="${LOG_DIR%/}"
+LOG="$LOG_DIR/usb4_diagnostics.log"
+PREV_LOG="$LOG_DIR/usb4_diagnostics.prev.log"
+ROTATE_BYTES=$((2 * 1024 * 1024))
+
+# The label goes into the header: only [A-Za-z0-9_-], at most 32 characters.
+LABEL=$(printf '%s' "$LABEL" | tr -c 'A-Za-z0-9_-' '_' | cut -c1-32)
+LABEL="${LABEL:-none}"
+
+CMD_TIMEOUT=10   # seconds per external command
+BUDGET=50        # seconds for the whole run; later commands are skipped once it's used up
+
+have() { command -v "$1" >/dev/null 2>&1; }
+na() { echo "(not available: $*)"; }
+section() { printf '\n--- %s ---\n' "$1"; }
+
+# run <cmd> [args...]: the command under timeout (capped by what's left of the budget).
+# Returns 124 on a timeout (timeout's code), 125 when the budget is used up.
+run() {
+  local left=$((BUDGET - SECONDS)) t=$CMD_TIMEOUT
+  if [ "$left" -le 0 ]; then
+    echo "(skipped: the ${BUDGET} s time budget is used up)"
+    return 125
+  fi
+  [ "$left" -lt "$t" ] && t=$left
+  if have timeout; then
+    timeout -k 2 "$t" "$@"
+  else
+    "$@"
+  fi
+}
+
+# show <cmd> [args...]: "$ <cmd>", then its output (stdout and stderr) and how it ended.
+show() {
+  local out rc
+  echo "\$ $*"
+  if ! have "$1"; then
+    na "$1 not installed"
+    return 0
+  fi
+  out=$(run "$@" 2>&1)
+  rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out"
+  case "$rc" in
+    0|125) ;;
+    124|137) echo "(timed out after ${CMD_TIMEOUT} s)" ;;
+    *) echo "(exit code $rc)" ;;
+  esac
+  return 0
+}
+
+# rd <file>: the file's contents (a sysfs attribute), nothing if it can't be read.
+rd() { run cat -- "$1" 2>/dev/null; }
+
+# attrs <dir> <name>...: "  name: value" for each attribute that exists in <dir>.
+attrs() {
+  local dir="$1" a v
+  shift
+  for a in "$@"; do
+    [ -e "$dir/$a" ] || continue
+    v=$(rd "$dir/$a" | tr '\n' ' ')
+    printf '  %s: %s\n' "$a" "${v% }"
+  done
+}
+
+# --- Redaction ---
+# Hostnames that identify nobody (OS defaults). Redacting them would also blank out words like
+# VARIANT_ID=steamdeck.
+GENERIC_HOSTS=" localhost steamdeck bazzite cachyos archlinux fedora linux "
+
+host_names() {
+  local h
+  {
+    have hostname && run hostname 2>/dev/null
+    rd "$ROOT/etc/hostname"
+    rd "$ROOT/proc/sys/kernel/hostname"
+  } | while IFS= read -r h; do
+    h="${h//[[:space:]]/}"
+    [ -n "$h" ] || continue
+    echo "$h"
+    echo "${h%%.*}"
+  done | sort -u
+}
+
+# redact: stdin -> stdout with UUIDs, serial numbers, MACs, the hostname and /home/<name>
+# replaced by placeholders. Applied to everything this script writes.
+redact() {
+  local h esc
+  local -a args=(-E
+    -e 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g'
+    -e 's/(Device Serial Number:?)[[:space:]]+[0-9a-fA-F]{2}([-:][0-9a-fA-F]{2})+/\1 <serial>/g'
+    -e 's/([Ss]erial ?[Nn]umber:)[[:space:]]*[^[:space:]].*$/\1 <serial>/'
+    -e 's/\b([0-9a-fA-F]{2}[:-]){5}([0-9a-fA-F]{2}[:-]){0,2}[0-9a-fA-F]{2}\b/<mac>/g'
+    -e 's|/home/[^/[:space:]]+|/home/<user>|g'
+  )
+  while IFS= read -r h; do
+    [ "${#h}" -ge 3 ] || continue
+    [[ "$GENERIC_HOSTS" == *" $h "* ]] && continue
+    esc=$(printf '%s' "$h" | sed 's/[][\.*^$|/+?(){}]/\\&/g')
+    args+=(-e "s/\\b${esc}\\b/<host>/g")
+  done < <(host_names)
+  sed "${args[@]}"
+}
+
+# --- Collection ---
+PCI_ADDR_RE='^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$'
+KLOG_PATTERN="thunderbolt|usb4|tbt|bolt|pcieport|pciehp|hotplug|BAR |no space|can't assign|failed to assign|resource|nvidia|NVRM|nouveau|amdgpu|xhci|typec|ucsi|DPC|AER"
+KLOG=""
+KLOG_SOURCE=""
+
+# The kernel log, once: dmesg, or the kernel journal of this boot if dmesg is restricted.
+read_kernel_log() {
+  local out
+  if have dmesg && out=$(run dmesg 2>/dev/null) && [ -n "$out" ]; then
+    KLOG="$out"
+    KLOG_SOURCE="dmesg"
+  elif have journalctl && out=$(run journalctl -k -b -o short-monotonic --no-pager 2>/dev/null) && [ -n "$out" ]; then
+    KLOG="$out"
+    KLOG_SOURCE="journalctl -k -b (dmesg not available or restricted)"
+  fi
+}
+
+bolt_active() { have systemctl && run systemctl is-active --quiet bolt >/dev/null 2>&1; }
+
+module_state() {
+  local m="$1"
+  if grep -q "^$m " "$ROOT/proc/modules" 2>/dev/null; then
+    echo "  $m: loaded ($(awk -v m="$m" '$1 == m { print "refcount " $3 ", " $5 }' "$ROOT/proc/modules"))"
+  elif [ -d "$ROOT/sys/module/$m" ]; then
+    echo "  $m: built in"
+  else
+    echo "  $m: not loaded"
+  fi
+}
+
+sec_system() {
+  local f
+  section "System"
+  if [ -r "$ROOT/etc/os-release" ]; then
+    grep -E '^(NAME|VERSION_ID|BUILD_ID|VARIANT_ID)=' "$ROOT/etc/os-release"
+  else
+    na "$ROOT/etc/os-release missing"
+  fi
+  if have uname; then echo "kernel: $(run uname -r 2>&1)"; else na "uname not installed"; fi
+  if [ -r "$ROOT/proc/cmdline" ]; then echo "cmdline: $(rd "$ROOT/proc/cmdline")"; else na "$ROOT/proc/cmdline unreadable"; fi
+  # Never the serial numbers or the product UUID.
+  for f in sys_vendor product_name product_family board_name bios_version bios_date; do
+    if [ -r "$ROOT/sys/class/dmi/id/$f" ]; then
+      echo "dmi $f: $(rd "$ROOT/sys/class/dmi/id/$f")"
+    else
+      echo "dmi $f: (not available)"
+    fi
+  done
+  if have mokutil; then
+    echo "secure boot: $(run mokutil --sb-state 2>&1 | tr '\n' ' ')"
+  else
+    echo "secure boot: $(na "mokutil not installed")"
+  fi
+  echo "plugin version: $PLUGIN_VERSION"
+  echo "plugin OS type: $(xgm_os_type)"
+  if have id; then echo "running as uid: $(id -u)"; fi
+}
+
+sec_kernel() {
+  local m f kver cfg="" src="" pat='^(# )?CONFIG_(USB4|HOTPLUG_PCI_PCIE|HOTPLUG_PCI|THUNDERBOLT_NET)[= ]'
+  section "Kernel support"
+  if [ -r "$ROOT/proc/modules" ]; then
+    for m in thunderbolt typec ucsi_acpi amdgpu asus_wmi asus_nb_wmi asus_armoury; do
+      module_state "$m"
+    done
+    for m in $(awk '$1 ~ /^nvidia/ { print $1 }' "$ROOT/proc/modules"); do
+      module_state "$m"
+    done
+    grep -q '^nvidia' "$ROOT/proc/modules" || echo "  nvidia*: not loaded"
+  else
+    na "$ROOT/proc/modules unreadable"
+  fi
+  kver=$(run uname -r 2>/dev/null)
+  if [ -r "$ROOT/proc/config.gz" ] && have gzip; then
+    cfg=$(run gzip -dc "$ROOT/proc/config.gz" 2>/dev/null | grep -E "$pat")
+    src="$ROOT/proc/config.gz"
+  fi
+  if [ -z "$src" ] && [ -n "$kver" ]; then
+    for f in "$ROOT/boot/config-$kver" "$ROOT/lib/modules/$kver/config" "$ROOT/usr/lib/modules/$kver/config"; do
+      if [ -r "$f" ]; then
+        cfg=$(grep -E "$pat" "$f")
+        src="$f"
+        break
+      fi
+    done
+  fi
+  if [ -n "$src" ]; then
+    echo "kernel config ($src):"
+    if [ -n "$cfg" ]; then printf '%s\n' "$cfg" | sed 's/^/  /'; else echo "  (none of the options are listed)"; fi
+  else
+    na "no kernel config found (config.gz, boot config, modules config)"
+  fi
+}
+
+sec_thunderbolt() {
+  local d name
+  section "Thunderbolt / USB4"
+  if ! have systemctl; then
+    na "systemctl not installed"
+  else
+    show systemctl is-active bolt
+  fi
+  if ! have boltctl; then
+    na "boltctl not installed (bolt missing)"
+  elif ! bolt_active; then
+    echo "(skipped: bolt.service isn't active, and boltctl would start it)"
+  else
+    show boltctl --version
+    show boltctl domains
+    show boltctl list
+  fi
+  if [ ! -d "$ROOT/sys/bus/thunderbolt/devices" ]; then
+    na "$ROOT/sys/bus/thunderbolt missing (no thunderbolt driver or no USB4 controller)"
+    return 0
+  fi
+  local found=0
+  for d in $ROOT/sys/bus/thunderbolt/devices/*; do
+    [ -e "$d" ] || continue
+    found=1
+    name=$(basename "$d")
+    echo "$name:"
+    attrs "$d" authorized security vendor_name device_name vendor device generation \
+      rx_speed rx_lanes tx_speed tx_lanes boot iommu_dma_protection deauthorization
+    # An identifier: only say it's there.
+    [ -e "$d/unique_id" ] && echo "  unique_id: <uuid>"
+  done
+  [ "$found" = 1 ] || echo "(no thunderbolt devices)"
+}
+
+# The PCI devices worth a closer look: display controllers (0300/0302/0380), USB4/Thunderbolt
+# controllers, and every bridge upstream of them. "<address> <role>", one per line.
+pci_targets() {
+  local d addr class drv real comp
+  for d in $ROOT/sys/bus/pci/devices/*; do
+    [ -e "$d" ] || continue
+    addr=$(basename "$d")
+    class=$(rd "$d/class")
+    drv=""
+    [ -L "$d/driver" ] && drv=$(basename "$(readlink -f "$d/driver")")
+    case "$class" in
+      0x0300*|0x0302*|0x0380*) ;;
+      0x0c0340*) ;;
+      *) [ "$drv" = "thunderbolt" ] || continue ;;
+    esac
+    echo "$addr target"
+    real=$(readlink -f "$d")
+    for comp in ${real//\// }; do
+      [[ "$comp" =~ $PCI_ADDR_RE ]] || continue
+      [ "$comp" = "$addr" ] && continue
+      echo "$comp bridge"
+    done
+  done
+}
+
+sec_pci() {
+  local addr role d drv vv seen=" " targets
+  section "PCI"
+  show lspci -tv
+  show lspci -nnk
+  if [ ! -d "$ROOT/sys/bus/pci/devices" ]; then
+    na "$ROOT/sys/bus/pci/devices missing"
+    return 0
+  fi
+  [ "$(id -u 2>/dev/null)" = "0" ] || echo "(not root: lspci -vv may hide the capabilities)"
+  targets=$(pci_targets | sort -k1,1 -k2,2r)
+  if [ -z "$targets" ]; then
+    echo "(no display or USB4/Thunderbolt controllers on the PCI bus)"
+  fi
+  while read -r addr role; do
+    [ -n "$addr" ] || continue
+    [[ "$seen" == *" $addr "* ]] && continue
+    seen+="$addr "
+    d="$ROOT/sys/bus/pci/devices/$addr"
+    drv="none"
+    [ -L "$d/driver" ] && drv=$(basename "$(readlink -f "$d/driver")")
+    echo "$addr ($role): class $(rd "$d/class") vendor $(rd "$d/vendor") device $(rd "$d/device") driver $drv"
+    if have lspci; then
+      vv=$(run lspci -vv -s "$addr" 2>&1 | grep -E 'LnkCap:|LnkSta:|SltCap:|SltSta:|Region [0-9]|[Mm]emory behind bridge|Kernel driver in use|Capabilities: \[[0-9a-f]+\].*Express')
+      [ -n "$vv" ] && printf '%s\n' "$vv"
+    fi
+  done <<< "$targets"
+  have lspci || na "lspci not installed (only the sysfs view above)"
+  echo "PCI slots:"
+  local s found=0
+  for s in $ROOT/sys/bus/pci/slots/*; do
+    [ -d "$s" ] || continue
+    found=1
+    echo "  $(basename "$s"): address $(rd "$s/address") power $(rd "$s/power")"
+  done
+  [ "$found" = 1 ] || echo "  (none)"
+}
+
+sec_gpus() {
+  local n name dev pci f
+  section "GPUs / DRM"
+  local found=0
+  for n in $ROOT/dev/dri/card* $ROOT/dev/dri/renderD*; do
+    [ -e "$n" ] || continue
+    found=1
+    name=$(basename "$n")
+    dev="$ROOT/sys/class/drm/$name/device"
+    if [ -e "$dev" ]; then
+      pci=$(basename "$(readlink -f "$dev")")
+      echo "$name: $pci vendor $(rd "$dev/vendor") device $(rd "$dev/device") boot_vga $(rd "$dev/boot_vga")"
+    else
+      echo "$name: (no device link)"
+    fi
+  done
+  [ "$found" = 1 ] || na "no DRM nodes"
+  if [ -d "$ROOT/sys/module/nvidia" ]; then
+    echo "nvidia module version: $(rd "$ROOT/sys/module/nvidia/version")"
+    if have nvidia-smi; then
+      show nvidia-smi -L
+      show nvidia-smi --query-gpu=driver_version,pci.bus_id --format=csv,noheader
+    else
+      na "nvidia-smi not installed"
+    fi
+  else
+    na "nvidia module not loaded (nvidia-smi not run, it would load it)"
+  fi
+  found=0
+  for f in $ROOT/proc/driver/nvidia/gpus/*/information; do
+    [ -r "$f" ] || continue
+    found=1
+    echo "$f:"
+    rd "$f" | sed 's/^/  /'
+  done
+  [ "$found" = 1 ] || na "no NVIDIA GPU information in $ROOT/proc/driver/nvidia"
+  if have dkms; then show dkms status; else na "dkms not installed"; fi
+}
+
+sec_asus() {
+  local wmi="$ROOT/sys/devices/platform/asus-nb-wmi" fa="$ROOT/sys/class/firmware-attributes/asus-armoury/attributes" n
+  section "ASUS interfaces"
+  if [ -d "$wmi" ]; then
+    echo "asus-nb-wmi: present"
+  else
+    echo "asus-nb-wmi: absent"
+  fi
+  for n in egpu_enable egpu_connected throttle_thermal_policy dgpu_disable; do
+    if [ -e "$wmi/$n" ]; then
+      echo "  $n: present, $(rd "$wmi/$n")"
+    else
+      echo "  $n: absent"
+    fi
+  done
+  if [ -d "$fa" ]; then
+    echo "asus-armoury firmware attributes: present"
+    local names=""
+    for n in "$fa"/*; do
+      [ -e "$n" ] && names+="$(basename "$n") "
+    done
+    echo "  ${names:-(none)}"
+  else
+    echo "asus-armoury firmware attributes: absent"
+  fi
+}
+
+sec_kernel_log() {
+  section "Kernel log"
+  if [ -z "$KLOG_SOURCE" ]; then
+    na "dmesg restricted or missing, and no kernel journal"
+    return 0
+  fi
+  echo "source: $KLOG_SOURCE (the last 400 matching lines)"
+  printf '%s\n' "$KLOG" | grep -iE "$KLOG_PATTERN" | tail -n 400
+}
+
+sec_bolt_journal() {
+  section "bolt journal"
+  if ! have boltctl; then
+    na "bolt not installed"
+  elif ! have journalctl; then
+    na "journalctl not installed"
+  else
+    echo "\$ journalctl -b -u bolt --no-pager | tail -100"
+    run journalctl -b -u bolt --no-pager 2>&1 | tail -n 100
+  fi
+}
+
+collect() {
+  local boot ts
+  boot=$(rd "$ROOT/proc/sys/kernel/random/boot_id" | cut -c1-8)
+  read_kernel_log
+  ts=$(printf '%s\n' "$KLOG" | sed -nE 's/^\[ *([0-9]+\.[0-9]+)\].*/\1/p' | tail -n 1)
+  echo "===== Snapshot $SNAPSHOT_N  $(date -Iseconds)  label=$LABEL  plugin=$PLUGIN_VERSION  boot=${boot:-unknown} ====="
+  echo "dmesg_last_ts=${ts:-unknown}"
+  echo "Identifiers (UUIDs, serials, MACs, hostname) are redacted. Please still skim this before posting it publicly."
+  sec_system
+  sec_kernel
+  sec_thunderbolt
+  sec_pci
+  sec_gpus
+  sec_asus
+  sec_kernel_log
+  sec_bolt_journal
+  echo
+  echo "===== End of snapshot $SNAPSHOT_N ====="
+  echo
+}
+
+last_snapshot() { grep -oE '^===== Snapshot [0-9]+' "$1" 2>/dev/null | tail -n 1 | awk '{ print $3 }'; }
+
+# --- Main ---
+PLUGIN_VERSION=$(sed -nE 's/^[[:space:]]*"version":[[:space:]]*"([^"]*)".*/\1/p' "$PLUGIN_DIR/package.json" 2>/dev/null | head -n 1)
+PLUGIN_VERSION="${PLUGIN_VERSION:-unknown}"
+
+if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
+  echo "ERROR: can't create the log folder $LOG_DIR. Nothing was collected." >&2
+  exit 3
+fi
+if [ -f "$LOG" ] && [ "$(wc -c < "$LOG")" -gt "$ROTATE_BYTES" ]; then
+  mv -f "$LOG" "$PREV_LOG" 2>/dev/null || { echo "ERROR: can't rotate $LOG. Nothing was collected." >&2; exit 3; }
+fi
+if ! : >> "$LOG" 2>/dev/null; then
+  echo "ERROR: can't write $LOG. Nothing was collected." >&2
+  exit 3
+fi
+
+LAST=$(last_snapshot "$LOG")
+[ -n "$LAST" ] || LAST=$(last_snapshot "$PREV_LOG")
+SNAPSHOT_N=$(( ${LAST:-0} + 1 ))
+
+# Nothing unredacted is ever written: if redaction fails, nothing is.
+if ! REPORT=$(collect 2>&1 | redact) || [ -z "$REPORT" ]; then
+  echo "ERROR: redaction failed, so nothing was written to $LOG." >&2
+  exit 3
+fi
+if ! printf '%s\n' "$REPORT" >> "$LOG" 2>/dev/null; then
+  echo "ERROR: can't write $LOG." >&2
+  exit 3
+fi
+printf '%s\n' "$REPORT"
+echo "Saved snapshot $SNAPSHOT_N to $LOG"
+exit 0
